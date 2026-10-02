@@ -1,0 +1,18 @@
+# Copy to .dev.vars for local development. In production use `wrangler secret put NAME`.
+SESSION_SECRET=change-me-to-a-long-random-string
+# Cloudflare Turnstile (leave empty to skip bot checks locally)
+TURNSTILE_SECRET=
+# Razorpay (leave empty to use the built-in test-payment simulator outside production)
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=
+# WhatsApp Cloud API (leave empty to log messages instead of sending)
+WHATSAPP_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_VERIFY_TOKEN=
+WHATSAPP_APP_SECRET=
+# Email via Resend (leave empty to log emails)
+RESEND_API_KEY=
+# Google login
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=

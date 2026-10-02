@@ -1,0 +1,30 @@
+{
+  "name": "gosanchari",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Go Sanchari travel portal on Cloudflare Workers (D1, R2, KV, Vectorize, Queues, Durable Objects, Workers AI)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply gosanchari --local",
+    "db:migrate:remote": "wrangler d1 migrations apply gosanchari --remote",
+    "db:seed:local": "wrangler d1 execute gosanchari --local --file=seed/seed.sql",
+    "db:seed:remote": "wrangler d1 execute gosanchari --remote --file=seed/seed.sql",
+    "cf-typegen": "wrangler types",
+    "dev:offline": "wrangler dev -c wrangler.offline.toml",
+    "db:migrate:offline": "wrangler d1 migrations apply gosanchari --local -c wrangler.offline.toml",
+    "db:seed:offline": "wrangler d1 execute gosanchari --local -c wrangler.offline.toml --file=seed/seed.sql"
+  },
+  "dependencies": {
+    "hono": "^4.13.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261002.1",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "wrangler": "^4.146.0"
+  }
+}
