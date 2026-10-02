@@ -10,7 +10,7 @@ import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
 import { calculatePrice, discountPercent } from '../lib/pricing'
 import { quoteFillFromEnquiry, quoteMessageDraft } from '../lib/assist'
-import { cancelBooking, createBooking, priceStay, storeInvoice } from '../lib/bookings'
+import { cancelBooking, confirmBooking, createBooking, PAYMENT_METHODS, priceStay, recordPayment, storeInvoice } from '../lib/bookings'
 import { fillTemplate, mediaUrl, sendEmail, sendWhatsApp } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
 import { MEAL_PLANS, PROPERTY_TYPES } from '../lib/search'
@@ -176,7 +176,7 @@ async function createQuote(c: Context<AppEnv>) {
     `INSERT INTO quotations (code, token, enquiry_id, user_id, staff_id, guest_name, phone, email, valid_till, inclusions, payment_terms)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     refCode('QT'), randomToken(18), e?.id ?? null, e?.user_id ?? null, u.id, e?.guest_name ?? 'Guest', e?.phone ?? null, e?.email ?? null,
-    addDays(todayIST(), s.booking.quote_validity_days), 'Accommodation as per room type\nGST', s.booking.advance_pct >= 100 ? 'Full payment to confirm the booking.' : `${s.booking.advance_pct}% advance to confirm, balance before check-in.`,
+    addDays(todayIST(), s.booking.quote_validity_days), 'Accommodation as per room type\nGST', 'Payment by UPI or bank transfer to confirm. Our team will share the details.',
   )
   const pid = int(c.req.query('property'))
   if (pid) await addOption(c, id, pid, int(c.req.query('room')) || null, c.req.query('checkIn') ?? e?.check_in ?? null, c.req.query('checkOut') ?? e?.check_out ?? null, e?.adults ?? Math.max(1, int(c.req.query('guests'), 2)), e?.children ?? 0)
@@ -501,10 +501,10 @@ opsRoutes.post('/staff/quotes/:id/convert', requirePerm('manage_quotes', 'manage
     fixedPrice: { subtotal: o.subtotal, discount: o.discount, extraCharges: o.extra_charges, taxes: o.taxes, total: o.total },
   })
   if ('error' in r) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: r.error })
-  // Staff-created bookings get a longer hold while the guest pays from the link.
-  await run(c.env, 'UPDATE bookings SET hold_expires_at = ? WHERE id = ?', new Date(Date.now() + 24 * 3600_000).toISOString(), r.id)
+  // The guest has agreed: confirm now (rooms are blocked); payment is collected offline and recorded on the booking.
+  await confirmBooking(c.env, r.id, u.id)
   await logActivity(c.env, u.id, 'quote.converted', 'quotation', q.id, { booking: r.code })
-  return redirectMsg(c, `/staff/bookings/${r.id}`, { ok: 'Booking created (pending payment). Use “Request payment” to send the link.' })
+  return redirectMsg(c, `/staff/bookings/${r.id}`, { ok: 'Booking confirmed and the guest notified. Record payments here when received.' })
 })
 
 opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (c) => {
@@ -668,7 +668,7 @@ export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
               <a class="btn btn-sm" href={`/staff/bookings/${b.id}`}>View</a>
               {b.status === 'confirmed' && b.check_in <= today && <form method="post" action={`/staff/bookings/${b.id}/checkin`} class="inline"><button class="btn btn-sm btn-outline">Checked in</button></form>}
               {b.status === 'confirmed' && b.check_in > today && <form method="post" action={`/staff/bookings/${b.id}/whatsapp?kind=reminder`} class="inline"><button class="btn btn-sm btn-outline">Reminder</button></form>}
-              {b.amount_paid < b.total && b.status !== 'cancelled' && <form method="post" action={`/staff/bookings/${b.id}/request-payment`} class="inline"><button class="btn btn-sm btn-outline">Request payment</button></form>}
+              {b.amount_paid < b.total && b.status !== 'cancelled' && <a class="btn btn-sm btn-outline" href={`/staff/bookings/${b.id}#payment`}>Record payment</a>}
             </td>
           </tr>
         ))}
@@ -733,10 +733,21 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
           </table>
           <div class="row wrap-row mt-sm">
             <a class="btn btn-sm btn-outline" href={`/invoice/${b.code}`} target="_blank">Invoice</a>
-            {b.amount_paid < b.total && b.status !== 'cancelled' && <form method="post" action={`/staff/bookings/${b.id}/request-payment`} class="inline"><button class="btn btn-sm">Request payment</button></form>}
+            {b.status === 'pending' && <form method="post" action={`/staff/bookings/${b.id}/confirm`} class="inline"><button class="btn btn-sm">Confirm booking</button></form>}
             {b.status === 'confirmed' && <form method="post" action={`/staff/bookings/${b.id}/checkin`} class="inline"><button class="btn btn-sm btn-outline">Mark checked-in</button></form>}
             {b.status === 'checked_in' && <form method="post" action={`/staff/bookings/${b.id}/checkout`} class="inline"><button class="btn btn-sm btn-outline">Mark completed</button></form>}
           </div>
+          {b.amount_paid < b.total && b.status !== 'cancelled' && (
+            <form method="post" action={`/staff/bookings/${b.id}/payment`} class="stack mt-sm" id="payment">
+              <h3>Record a payment</h3>
+              <div class="row wrap-row">
+                <Field label="Amount ₹"><input type="number" name="amount" min="1" max={b.total - b.amount_paid} value={b.total - b.amount_paid} required /></Field>
+                <Field label="Method"><Select name="method" options={PAYMENT_METHODS.map((m) => [m, m.replace('_', ' ')])} /></Field>
+                <Field label="Reference (UTR / receipt no.)"><input name="reference" maxlength={80} /></Field>
+              </div>
+              <button class="btn btn-sm">Save payment</button>
+            </form>
+          )}
           <h3 class="mt">Payments</h3>
           <ul class="plain small">
             {payments.map((p) => <li>{money(p.amount)} · <Pill s={p.status} /> · {p.gateway} {p.gateway_payment_id ?? ''} · {fmtDateTime(p.created_at)} {p.failure_reason && <span class="error">{p.failure_reason}</span>}</li>)}
@@ -808,20 +819,19 @@ opsRoutes.post('/staff/bookings/:id/whatsapp', requirePerm('manage_bookings'), a
   return redirectMsg(c, c.req.header('referer') ? new URL(c.req.header('referer')!).pathname : `/staff/bookings/${b.id}`, r.ok ? { ok: 'Sent on WhatsApp.' } : { err: `WhatsApp failed: ${r.error}` })
 })
 
-opsRoutes.post('/staff/bookings/:id/request-payment', requirePerm('manage_bookings'), async (c) => {
+opsRoutes.post('/staff/bookings/:id/payment', requirePerm('manage_bookings'), async (c) => {
   const b = await loadBooking(c)
   if (!b) return c.notFound()
-  let link = `${c.env.SITE_URL}/pay/${b.code}`
-  if (b.quotation_id) {
-    const q = await first<{ token: string }>(c.env, 'SELECT token FROM quotations WHERE id = ?', b.quotation_id)
-    if (q) link += `?t=${q.token}`
-  }
-  if (b.status === 'pending') await run(c.env, 'UPDATE bookings SET hold_expires_at = ? WHERE id = ?', new Date(Date.now() + 24 * 3600_000).toISOString(), b.id)
-  const text = `Hi ${b.guest_name}, please complete the payment of ${money(b.total - b.amount_paid)} for your stay at ${b.property_name} (${b.code}): ${link}`
-  const r = await sendWhatsApp(c.env, b.guest_phone, text)
-  await run(c.env, "INSERT INTO messages (booking_id, sender, user_id, channel, body) VALUES (?, 'staff', ?, 'whatsapp', ?)", b.id, c.get('user')!.id, text)
-  await logActivity(c.env, c.get('user')!.id, 'booking.payment_requested', 'booking', b.id)
-  return redirectMsg(c, `/staff/bookings/${b.id}`, r.ok ? { ok: 'Payment link sent.' } : { err: `WhatsApp failed: ${r.error}` })
+  const f = await form(c)
+  const r = await recordPayment(c.env, b.id, int(f.amount), f.method, str(f.reference, 80), c.get('user')!.id)
+  return redirectMsg(c, `/staff/bookings/${b.id}`, 'error' in r ? { err: r.error } : { ok: 'Payment recorded.' })
+})
+
+opsRoutes.post('/staff/bookings/:id/confirm', requirePerm('manage_bookings'), async (c) => {
+  const b = await loadBooking(c)
+  if (!b) return c.notFound()
+  await confirmBooking(c.env, b.id, c.get('user')!.id)
+  return redirectMsg(c, `/staff/bookings/${b.id}`, { ok: 'Booking confirmed and the guest notified.' })
 })
 
 opsRoutes.post('/staff/bookings/:id/checkin', requirePerm('manage_bookings'), async (c) => {
@@ -879,7 +889,7 @@ export async function applyDateChange(c: Context<AppEnv>, b: BookingRow, roomId:
   await storeInvoice(c.env, b.id)
   await logActivity(c.env, u.id, 'booking.dates_changed', 'booking', b.id, { from: [b.check_in, b.check_out, b.total], to: [checkIn, checkOut, total] })
   const diff = total - b.amount_paid
-  return redirectMsg(c, `/staff/bookings/${b.id}`, { ok: `Dates changed. New total ${money(total)}${diff > 0 ? ` — ${money(diff)} due (use Request payment)` : diff < 0 ? ` — ${money(-diff)} to refund` : ''}.` })
+  return redirectMsg(c, `/staff/bookings/${b.id}`, { ok: `Dates changed. New total ${money(total)}${diff > 0 ? ` — ${money(diff)} due (record it when paid)` : diff < 0 ? ` — ${money(-diff)} to refund` : ''}.` })
 }
 
 opsRoutes.post('/staff/bookings/:id/cancel', requirePerm('manage_bookings'), async (c) => {

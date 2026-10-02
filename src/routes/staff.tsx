@@ -764,7 +764,7 @@ staffRoutes.get('/staff/profile', async (c) => {
     u.id, since, u.id, since, u.id, since, u.id, since,
   )
   const notify = parseJson<Record<string, boolean>>(me?.notify_settings, {})
-  const events: [string, string][] = [['new_enquiry', 'New enquiries'], ['booking', 'New bookings'], ['failed_payment', 'Failed payments'], ['refund_request', 'Refund requests'], ['low_review', 'Low-rated reviews'], ['daily_summary', 'Daily summary']]
+  const events: [string, string][] = [['new_enquiry', 'New enquiries'], ['booking', 'New bookings'], ['quote_accepted', 'Quotes accepted'], ['refund_request', 'Refund requests'], ['low_review', 'Low-rated reviews'], ['daily_summary', 'Daily summary']]
   return page(c, { title: 'My profile', area: 'staff', active: 'profile' }, (
     <div class="stack-lg">
       <h1>My profile</h1>
@@ -807,7 +807,7 @@ staffRoutes.post('/staff/profile', async (c) => {
     await c.env.MEDIA.put(key, await photo.arrayBuffer(), { httpMetadata: { contentType: photo.type } })
   }
   const notify: Record<string, boolean> = {}
-  for (const k of ['new_enquiry', 'booking', 'failed_payment', 'refund_request', 'low_review', 'daily_summary']) notify[k] = body[`n_${k}`] === '1'
+  for (const k of ['new_enquiry', 'booking', 'quote_accepted', 'refund_request', 'low_review', 'daily_summary']) notify[k] = body[`n_${k}`] === '1'
   await run(c.env, 'UPDATE users SET name = ?, notify_settings = ?, photo_key = COALESCE(?, photo_key) WHERE id = ?', str(body.name as string, 80) || u.name, JSON.stringify(notify), key, u.id)
   return redirectMsg(c, '/staff/profile', { ok: 'Profile saved.' })
 })

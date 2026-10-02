@@ -34,9 +34,6 @@ export interface Env {
 
   SESSION_SECRET?: string
   TURNSTILE_SECRET?: string
-  RAZORPAY_KEY_ID?: string
-  RAZORPAY_KEY_SECRET?: string
-  RAZORPAY_WEBHOOK_SECRET?: string
   WHATSAPP_TOKEN?: string
   WHATSAPP_PHONE_NUMBER_ID?: string
   WHATSAPP_VERIFY_TOKEN?: string

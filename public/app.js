@@ -130,17 +130,17 @@
           u.searchParams.set('adults', fd.get('adults') || 2)
           enq.href = u.pathname + u.search
         }
-        if (!fd.get('checkIn') || !fd.get('checkOut')) return
-        post(bf.dataset.priceUrl, { room: fd.get('room'), checkIn: fd.get('checkIn'), checkOut: fd.get('checkOut'), rooms: fd.get('rooms') }).then(function (p) {
+        if (!fd.get('check_in') || !fd.get('check_out')) return
+        post(bf.dataset.priceUrl, { room: fd.get('room'), checkIn: fd.get('check_in'), checkOut: fd.get('check_out'), rooms: fd.get('rooms') }).then(function (p) {
           if (p.errors && p.errors.length) { box2.innerHTML = '<span class="error small">' + esc(p.errors[0]) + '</span>'; return }
-          box2.innerHTML = '<table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + money(p.subtotal) + '</td></tr>' +
+          box2.innerHTML = '<div class="muted small">Estimated price (confirmed in your quote)</div><table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + money(p.subtotal) + '</td></tr>' +
             (p.discount ? '<tr><td>Discount</td><td>− ' + money(p.discount) + '</td></tr>' : '') +
             '<tr><td>GST (' + p.taxRate + '%)</td><td>' + money(p.taxes) + '</td></tr><tr class="total"><td>Total</td><td>' + money(p.total) + '</td></tr></table>'
         }).catch(function () { box2.textContent = '' })
       }, 250)
     }
     $$('input,select', bf).forEach(function (i) { i.addEventListener('change', refresh) })
-    var ci = $('input[name=checkIn]', bf), co = $('input[name=checkOut]', bf)
+    var ci = $('input[name=check_in]', bf), co = $('input[name=check_out]', bf)
     ci.addEventListener('change', function () {
       if (ci.value && (!co.value || co.value <= ci.value)) { var d = new Date(ci.value + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); co.value = d.toISOString().slice(0, 10) }
       co.min = ci.value
@@ -265,18 +265,4 @@
     if (a) new Chart($('#ch-ask'), { type: 'bar', data: { labels: a.labels, datasets: [{ label: a.label, data: a.values, backgroundColor: green }] }, options: { plugins: { legend: { display: false } } } })
   }
 
-  // ---------- Razorpay checkout ----------
-  var pay = $('#rzp-pay')
-  if (pay) pay.addEventListener('click', function () {
-    if (!window.Razorpay) return alert('Payment is still loading, please try again.')
-    var f = $('#rzp-form')
-    var rzp = new Razorpay({
-      key: pay.dataset.key, order_id: pay.dataset.order, amount: pay.dataset.amount, currency: 'INR', name: pay.dataset.name, description: pay.dataset.desc,
-      prefill: { name: pay.dataset.prefillName, contact: pay.dataset.prefillPhone, email: pay.dataset.prefillEmail },
-      theme: { color: '#0f5e57' },
-      handler: function (res) { f.razorpay_order_id.value = res.razorpay_order_id; f.razorpay_payment_id.value = res.razorpay_payment_id; f.razorpay_signature.value = res.razorpay_signature; f.submit() },
-    })
-    rzp.on('payment.failed', function (r) { alert('Payment failed: ' + (r.error && r.error.description || 'please try again')) })
-    rzp.open()
-  })
 })()

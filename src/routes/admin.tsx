@@ -38,7 +38,7 @@ adminRoutes.get('/admin', async (c) => {
   const period = ['today', 'week', 'month'].includes(c.req.query('p') ?? '') ? c.req.query('p')! : 'today'
   const since = periodStart(period)
   const since30 = periodStart('month')
-  const [k, series, byProp, bySource, unanswered, failed, lowReviews, noAvail, activity, summary] = await Promise.all([
+  const [k, series, byProp, bySource, unanswered, accepted, lowReviews, noAvail, activity, summary] = await Promise.all([
     first<{ enquiries: number; bookings: number; revenue: number; booked_enq: number }>(
       c.env,
       `SELECT (SELECT COUNT(*) FROM enquiries WHERE created_at >= ?) AS enquiries,
@@ -51,7 +51,7 @@ adminRoutes.get('/admin', async (c) => {
     all<{ name: string; rev: number }>(c.env, `SELECT p.name, SUM(b.total) AS rev FROM bookings b JOIN properties p ON p.id = b.property_id WHERE b.${CONFIRMED.replace('status', 'status')} AND b.created_at >= ? GROUP BY p.id ORDER BY rev DESC LIMIT 10`, since30),
     all<{ source: string; n: number }>(c.env, 'SELECT source, COUNT(*) AS n FROM enquiries WHERE created_at >= ? GROUP BY source', since30),
     all<{ id: number; guest_name: string; code: string; last: string }>(c.env, "SELECT id, guest_name, code, COALESCE(last_guest_msg_at, created_at) AS last FROM enquiries WHERE waiting_on = 'us' AND status IN ('new','in_progress','quoted') AND COALESCE(last_guest_msg_at, created_at) < ? ORDER BY last LIMIT 10", new Date(Date.now() - 3 * 3600_000).toISOString()),
-    all<{ booking_id: number; code: string; amount: number; failure_reason: string | null }>(c.env, "SELECT p.booking_id, b.code, p.amount, p.failure_reason FROM payments p JOIN bookings b ON b.id = p.booking_id WHERE p.status = 'failed' AND p.created_at >= ? ORDER BY p.id DESC LIMIT 10", new Date(Date.now() - 7 * 86400_000).toISOString()),
+    all<{ id: number; code: string; guest_name: string }>(c.env, "SELECT q.id, q.code, q.guest_name FROM quotations q WHERE q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.quotation_id = q.id AND b.status != 'cancelled') ORDER BY q.updated_at LIMIT 10"),
     all<{ id: number; rating: number; property_name: string; body: string }>(c.env, "SELECT r.id, r.rating, p.name AS property_name, r.body FROM reviews r JOIN properties p ON p.id = r.property_id WHERE r.rating <= 2 AND r.created_at >= ? ORDER BY r.id DESC LIMIT 10", new Date(Date.now() - 14 * 86400_000).toISOString()),
     all<{ id: number; name: string }>(c.env, "SELECT id, name FROM properties p WHERE status = 'live' AND NOT EXISTS (SELECT 1 FROM rooms r WHERE r.property_id = p.id AND r.active = 1 AND r.base_rate > 0)"),
     all<{ name: string; n: number; last: string }>(c.env, 'SELECT u.name, COUNT(*) AS n, MAX(a.created_at) AS last FROM activity_log a JOIN users u ON u.id = a.user_id WHERE a.created_at >= ? AND u.role != \'guest\' GROUP BY u.id ORDER BY n DESC LIMIT 10', new Date(Date.now() - 86400_000).toISOString()),
@@ -86,10 +86,10 @@ adminRoutes.get('/admin', async (c) => {
           <h3>Alerts</h3>
           <ul class="alerts">
             {unanswered.map((e) => <li class="alert-red"><a href={`/staff/enquiries/${e.id}`}>{e.guest_name} ({e.code})</a> waiting since {fmtDateTime(e.last)}</li>)}
-            {failed.map((p) => <li class="alert-amber"><a href={`/staff/bookings/${p.booking_id}`}>Payment failed {p.code}</a> {money(p.amount)} {p.failure_reason ?? ''}</li>)}
+            {accepted.map((q) => <li class="alert-red"><a href={`/staff/quotes/${q.id}`}>{q.guest_name} accepted {q.code}</a> — confirm the booking</li>)}
             {lowReviews.map((r) => <li class="alert-amber"><a href="/admin/reviews">{r.rating}★ review</a> for {r.property_name}: “{r.body.slice(0, 60)}…”</li>)}
             {noAvail.map((p) => <li class="alert-amber"><a href={`/admin/properties/${p.id}`}>{p.name}</a> has no rooms or rates set</li>)}
-            {!unanswered.length && !failed.length && !lowReviews.length && !noAvail.length && <li class="muted">All clear.</li>}
+            {!unanswered.length && !accepted.length && !lowReviews.length && !noAvail.length && <li class="muted">All clear.</li>}
           </ul>
         </div>
       </div>
@@ -747,15 +747,17 @@ adminRoutes.post('/admin/bookings/:id/approve-cancel', requirePerm('approve_canc
 adminRoutes.get('/admin/payments', requirePerm('manage_payments'), async (c) => {
   const tab = c.req.query('tab') ?? 'refunds'
   const pg = pageNum(c)
-  const statusMap: Record<string, string> = { received: 'paid', pending: 'created', failed: 'failed', refunded: 'refunded' }
+  const statusMap: Record<string, string> = { received: 'paid', refunded: 'refunded' }
+  const due = tab === 'due'
+    ? await all<{ id: number; code: string; guest_name: string; guest_phone: string; check_in: string; total: number; amount_paid: number }>(c.env, "SELECT id, code, guest_name, guest_phone, check_in, total, amount_paid FROM bookings WHERE status IN ('confirmed','checked_in','completed') AND amount_paid < total ORDER BY check_in LIMIT 200")
+    : []
   const [totals, refunds, payments, payouts, mismatched] = await Promise.all([
-    first<{ received: number; pending: number; failed: number; refunded: number }>(
+    first<{ received: number; pending: number; unpaid: number; refunded: number }>(
       c.env,
       `SELECT (SELECT COALESCE(SUM(amount),0) FROM payments WHERE status = 'paid') AS received,
               (SELECT COALESCE(SUM(total - amount_paid),0) FROM bookings WHERE status IN ('confirmed','checked_in') AND amount_paid < total) AS pending,
-              (SELECT COUNT(*) FROM payments WHERE status = 'failed' AND created_at >= ?) AS failed,
+              (SELECT COUNT(*) FROM bookings WHERE status IN ('confirmed','checked_in','completed') AND amount_paid < total) AS unpaid,
               (SELECT COALESCE(SUM(amount),0) FROM refunds WHERE status = 'processed') AS refunded`,
-      new Date(Date.now() - 30 * 86400_000).toISOString(),
     ),
     all<{ id: number; booking_id: number; code: string; guest_name: string; amount: number; reason: string; status: string; created_at: string; requested_by_name: string | null; paid: number }>(
       c.env,
@@ -780,10 +782,10 @@ adminRoutes.get('/admin/payments', requirePerm('manage_payments'), async (c) => 
       <div class="stats">
         <Stat label="Received (all time)" value={moneyShort(totals?.received ?? 0)} />
         <Stat label="Balance pending" value={moneyShort(totals?.pending ?? 0)} />
-        <Stat label="Failed (30 days)" value={totals?.failed ?? 0} tone={(totals?.failed ?? 0) > 0 ? 'warn' : ''} />
+        <Stat label="Bookings with balance due" value={totals?.unpaid ?? 0} tone={(totals?.unpaid ?? 0) > 0 ? 'warn' : ''} href="/admin/payments?tab=due" />
         <Stat label="Refunded" value={moneyShort(totals?.refunded ?? 0)} />
       </div>
-      <Tabs base="/admin/payments" active={tab} items={[['refunds', 'Refund requests'], ['received', 'Received'], ['pending', 'Pending'], ['failed', 'Failed'], ['refunded', 'Refunded'], ['payouts', 'Owner payouts'], ['match', 'Match check']]} />
+      <Tabs base="/admin/payments" active={tab} items={[['refunds', 'Refund requests'], ['received', 'Received'], ['due', 'Balance due'], ['refunded', 'Refunded'], ['payouts', 'Owner payouts'], ['match', 'Match check']]} />
       {tab === 'refunds' && (
         <Table head={['Booking', 'Guest', 'Amount', 'Paid', 'Reason', 'Requested by', 'Status', '']}>
           {refunds.map((r) => (
@@ -791,7 +793,7 @@ adminRoutes.get('/admin/payments', requirePerm('manage_payments'), async (c) => 
               <td><a href={`/staff/bookings/${r.booking_id}`}>{r.code}</a></td><td>{r.guest_name}</td><td>{money(r.amount)}</td><td>{money(r.paid)}</td><td class="small">{r.reason}</td><td>{r.requested_by_name}</td><td><Pill s={r.status} /></td>
               <td class="nowrap">{r.status === 'requested' && (
                 <>
-                  <form method="post" action={`/admin/refunds/${r.id}`} class="inline"><input type="hidden" name="approve" value="1" /><button class="btn btn-sm">Approve</button></form>
+                  <form method="post" action={`/admin/refunds/${r.id}`} class="inline"><input type="hidden" name="approve" value="1" /><input name="reference" placeholder="UTR / reference" class="w-md" /><button class="btn btn-sm">Mark refunded</button></form>
                   <form method="post" action={`/admin/refunds/${r.id}`} class="inline"><button class="btn btn-sm btn-outline">Reject</button></form>
                 </>
               )}</td>
@@ -817,6 +819,13 @@ adminRoutes.get('/admin/payments', requirePerm('manage_payments'), async (c) => 
           ))}
         </Table>
       )}
+      {tab === 'due' && (
+        due.length === 0 ? <Empty>No balances due.</Empty> : (
+          <Table head={['Booking', 'Guest', 'Check-in', 'Total', 'Paid', 'Due', '']}>
+            {due.map((b) => <tr><td><a href={`/staff/bookings/${b.id}`}>{b.code}</a></td><td>{b.guest_name}<div class="muted small">{b.guest_phone}</div></td><td>{fmtDate(b.check_in)}</td><td>{money(b.total)}</td><td>{money(b.amount_paid)}</td><td><strong>{money(b.total - b.amount_paid)}</strong></td><td><a class="btn btn-sm" href={`/staff/bookings/${b.id}#payment`}>Record payment</a></td></tr>)}
+          </Table>
+        )
+      )}
       {tab === 'match' && (
         <>
           <p class="muted">Bookings where the amount paid does not match gateway payments.</p>
@@ -831,7 +840,7 @@ adminRoutes.get('/admin/payments', requirePerm('manage_payments'), async (c) => 
 
 adminRoutes.post('/admin/refunds/:id', requirePerm('approve_refunds'), async (c) => {
   const f = await form(c)
-  const r = await processRefund(c.env, int(c.req.param('id')), c.get('user')!.id, f.approve === '1')
+  const r = await processRefund(c.env, int(c.req.param('id')), c.get('user')!.id, f.approve === '1', f.reference)
   return redirectMsg(c, '/admin/payments?tab=refunds', 'error' in r ? { err: r.error } : { ok: f.approve === '1' ? 'Refund processed.' : 'Refund rejected.' })
 })
 

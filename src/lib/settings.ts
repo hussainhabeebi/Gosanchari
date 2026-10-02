@@ -48,14 +48,13 @@ export interface Settings {
   }
   tax_slabs: TaxSlab[]
   booking: {
-    hold_minutes: number
+    hold_minutes: number // how long an unconfirmed (pending) booking keeps its rooms
     quote_validity_days: number
-    advance_pct: number // 100 = full payment
   }
   whatsapp_templates: Record<'confirmation' | 'reminder' | 'quote' | 'followup' | 'otp' | 'checkin', string>
   owner_whatsapp: string
   email: { from: string; reply_to: string }
-  notifications: Record<'new_enquiry' | 'booking' | 'failed_payment' | 'refund_request' | 'low_review' | 'daily_summary', Role[]>
+  notifications: Record<'new_enquiry' | 'booking' | 'quote_accepted' | 'refund_request' | 'low_review' | 'daily_summary', Role[]>
   ai: {
     features: Record<AiFeature, boolean>
     assistant_welcome: string
@@ -83,9 +82,9 @@ export const DEFAULT_SETTINGS: Settings = {
     social: { instagram: 'https://instagram.com/gosanchari' },
   },
   tax_slabs: DEFAULT_TAX_SLABS,
-  booking: { hold_minutes: 20, quote_validity_days: 3, advance_pct: 100 },
+  booking: { hold_minutes: 1440, quote_validity_days: 3 },
   whatsapp_templates: {
-    confirmation: 'Hi {name}, your booking {code} at {property} for {dates} is confirmed. Total paid: {amount}. – Go Sanchari',
+    confirmation: 'Hi {name}, your booking {code} at {property} for {dates} is confirmed. Total: {amount}. Our team will share payment details. – Go Sanchari',
     reminder: 'Hi {name}, a reminder that your stay at {property} starts on {date}. Check-in from {time}. Directions: {map}',
     checkin: 'Hi {name}, check-in details for {property}: {address}. Contact: {contact}. Directions: {map}',
     quote: 'Hi {name}, here is your quote from Go Sanchari: {link} (valid till {valid}).',
@@ -97,7 +96,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifications: {
     new_enquiry: ['manager', 'sales'],
     booking: ['admin', 'manager'],
-    failed_payment: ['accounts', 'admin'],
+    quote_accepted: ['manager', 'sales'],
     refund_request: ['accounts', 'admin'],
     low_review: ['admin', 'manager'],
     daily_summary: ['admin'],
@@ -169,7 +168,7 @@ export interface Content {
 export const DEFAULT_CONTENT: Content = {
   hero: {
     title: 'Find your stay in Kerala',
-    subtitle: 'Homestays, villas, resorts and houseboats — checked by our team, booked directly.',
+    subtitle: 'Homestays, villas, resorts and houseboats — checked by our team. Tell us what you need and we will send you a quote.',
     image: '/demo/backwater.svg',
   },
   banners: [],
@@ -177,7 +176,7 @@ export const DEFAULT_CONTENT: Content = {
     { icon: '✔', title: 'Personally checked stays', text: 'Our team visits every property before it goes live.' },
     { icon: '₹', title: 'Best direct prices', text: 'No hidden fees. GST shown upfront.' },
     { icon: '💬', title: 'Real people on WhatsApp', text: 'Talk to us before, during and after your trip.' },
-    { icon: '🛡', title: 'Secure payments', text: 'Pay safely with UPI, cards or net banking.' },
+    { icon: '📝', title: 'Free, no-obligation quotes', text: 'Send an enquiry — no payment needed until you confirm.' },
   ],
   faqs: [],
   about: '',

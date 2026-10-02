@@ -317,7 +317,7 @@ CREATE TABLE payments (
   booking_id INTEGER NOT NULL REFERENCES bookings(id),
   amount INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','paid','failed','refunded')),
-  gateway TEXT NOT NULL DEFAULT 'razorpay',
+  gateway TEXT NOT NULL DEFAULT 'manual', -- payment method: upi, bank_transfer, cash, card, other
   gateway_order_id TEXT UNIQUE,
   gateway_payment_id TEXT,
   failure_reason TEXT,

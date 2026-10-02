@@ -5,8 +5,10 @@ One Cloudflare Worker serves every page, the API, the queue consumer and the cro
 
 - **Stack:** Cloudflare Workers + [Hono](https://hono.dev) (server-rendered JSX), D1, KV, R2, Durable Objects, Queues, Cron Triggers,
   Workers AI, Vectorize, AI Search (AutoRAG), AI Gateway, Turnstile.
-- **Payments:** Razorpay (UPI, cards, net banking). **Messaging:** WhatsApp Cloud API. **Email:** Resend.
-- **Rule:** AI suggests, people decide. Prices, payments, bookings, refunds and lead scores are plain code. Every AI feature
+- **Enquiry-only site:** guests browse stays and send enquiries — there is no online booking or payment.
+  Staff send quotes; when a guest accepts, staff confirm the booking and record payments collected offline (UPI, bank transfer, cash).
+- **Messaging:** WhatsApp Cloud API. **Email:** Resend.
+- **Rule:** AI suggests, people decide. Prices, quotes, bookings, payments, refunds and lead scores are plain code. Every AI feature
   can be switched off in *Admin → Settings*, and the portal keeps working without it.
 
 ## Run it locally (no Cloudflare account needed)
@@ -34,7 +36,6 @@ Without keys, the following integrations run in dry-run mode:
 | WhatsApp | Messages are logged |
 | Email | Messages are logged |
 | Turnstile | The bot check is skipped |
-| Razorpay | The checkout shows a payment simulator. **The simulator is disabled when `ENVIRONMENT=production`.** |
 
 Phone-OTP login shows the code on screen when WhatsApp isn't configured (development only).
 
@@ -48,6 +49,9 @@ Phone-OTP login shows the code on screen when WhatsApp isn't configured (develop
 | Accounts | accounts@gosanchari.com |
 
 Guests log in with any phone number (OTP). Demo quote link: `/q/demo-quote-token-1234567890`.
+
+**Booking flow:** enquiry → staff quote (WhatsApp link) → guest clicks *Accept* → staff get an alert and a task →
+*Convert to booking* (confirms it, blocks the rooms and sends the guest a WhatsApp confirmation) → staff *Record payment* on the booking.
 
 ```bash
 npm test          # unit tests: pricing, coupons, GST, SQL guard, search parsing, lead score
@@ -77,14 +81,12 @@ In the Cloudflare dashboard:
 4. **Images (optional):** enable Image Transformations on the zone, then tick the option in *Admin → Settings*.
 
 Secrets (`wrangler secret put NAME`):
-`SESSION_SECRET`, `TURNSTILE_SECRET`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`,
-`WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `RESEND_API_KEY`,
+`SESSION_SECRET`, `TURNSTILE_SECRET`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `RESEND_API_KEY`,
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
 
 Set `ENVIRONMENT = "production"` and `SITE_URL` in `[vars]`, then `npm run deploy`.
 
 Webhooks:
-- **Razorpay:** `https://<site>/webhooks/razorpay` (events `payment.captured`, `payment.failed`, `order.paid`).
 - **WhatsApp:** `https://<site>/webhooks/whatsapp`.
 - In Meta, create approved templates `otp` (authentication) plus confirmation, reminder and follow-up templates for messages sent outside the 24-hour window.
 
@@ -96,15 +98,14 @@ Seed demo data in production only if you want it: `npm run db:seed:remote`.
 |---|---|---|---|
 | 1 | Home | `/` | `src/routes/public.tsx` |
 | 2 | Search results | `/search` (`?ai=` for the AI line, `?view=map`) | public.tsx |
-| 3 | Property details (+ Q&A chat, availability, similar) | `/stay/:slug` | public.tsx |
-| 4 | Enquiry form | `/enquiry` | public.tsx |
-| 5 | Checkout | `/book` → `/pay/:code` | public.tsx, payments.tsx |
-| 6 | Confirmation, invoice, calendar file | `/booking/:code/confirmed`, `/invoice/:code`, `/booking/:code/calendar.ics` | payments.tsx |
+| 3 | Property details (+ enquiry box with estimated price, Q&A chat, availability, similar) | `/stay/:slug` | public.tsx |
+| 4 | Enquiry form | `/enquiry` (`?offer=CODE`) | public.tsx |
+| 5–6 | *(No online checkout — removed.)* Invoice and calendar file for confirmed stays | `/invoice/:code`, `/booking/:code/calendar.ics` | booking-docs.ts |
 | 7 | Login / sign up / Google / forgot password | `/login`, `/signup`, `/auth/google`, `/forgot` | auth.tsx |
 | 8 | Offers | `/offers` | public.tsx |
 | 9 | About / Contact / Policies | `/about`, `/contact`, `/policies/:kind` | public.tsx |
-| 10–17 | My trips, bookings, booking detail, enquiries & quotes, saved, review, profile | `/my…` | guest.tsx |
-| 14 | Quotation (no login, from WhatsApp) | `/q/:token` | public.tsx |
+| 10–17 | My trips, stays confirmed by the team, enquiries & quotes, saved, review, profile | `/my…` | guest.tsx |
+| 14 | Quotation (no login, from WhatsApp): Accept / Ask for changes / Decline | `/q/:token` | public.tsx |
 | 18 | Help & live chat | `/help` (WebSocket `/chat/ws` → `ChatRoom` Durable Object) | guest.tsx, `src/do/chat.ts` |
 | 19–21, 28–30 | Staff dashboard, inbox, enquiry workspace, guests, follow-ups, profile | `/staff…` | staff.tsx |
 | 22–27 | Property finder, quote builder, quotes, bookings, booking detail, availability | `/staff/finder`, `/staff/quotes…`, `/staff/bookings…`, `/staff/calendar` | staff-ops.tsx |

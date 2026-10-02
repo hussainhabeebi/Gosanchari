@@ -12,7 +12,7 @@ export interface PageOpts {
   description?: string
   area?: Area
   active?: string
-  /** Extra <head> content (e.g. Leaflet / Chart.js / Razorpay). */
+  /** Extra <head> content (e.g. Leaflet / Chart.js). */
   head?: Child
   noindex?: boolean
   image?: string

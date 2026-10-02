@@ -1,4 +1,4 @@
-// External services: Turnstile, WhatsApp Cloud API, Razorpay, email (Resend), media URLs.
+// External services: Turnstile, WhatsApp Cloud API, email (Resend), media URLs.
 // Each one degrades gracefully when its keys are missing (logs instead of sending) so the
 // portal can run locally and features can be switched on one by one.
 
@@ -80,55 +80,6 @@ export async function downloadWhatsAppMedia(env: Env, mediaId: string): Promise<
   const r = await fetch(meta.url, { headers: { Authorization: `Bearer ${env.WHATSAPP_TOKEN}` } })
   if (!r.ok) return null
   return { data: await r.arrayBuffer(), type: meta.mime_type ?? 'application/octet-stream' }
-}
-
-// ---- Razorpay ----
-
-export function paymentsLive(env: Env): boolean {
-  return !!(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET)
-}
-
-/** Test simulator is only allowed outside production. */
-export function paymentSimulatorAllowed(env: Env): boolean {
-  return !paymentsLive(env) && env.ENVIRONMENT !== 'production'
-}
-
-function rzpAuth(env: Env) {
-  return 'Basic ' + btoa(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`)
-}
-
-export async function createRazorpayOrder(env: Env, amountRupees: number, receipt: string): Promise<{ id: string } | { error: string }> {
-  if (!paymentsLive(env)) return { id: `sim_order_${crypto.randomUUID().slice(0, 12)}` }
-  const r = await fetch('https://api.razorpay.com/v1/orders', {
-    method: 'POST',
-    headers: { Authorization: rzpAuth(env), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ amount: Math.round(amountRupees * 100), currency: 'INR', receipt }),
-  })
-  const j = (await r.json()) as { id?: string; error?: { description?: string } }
-  if (!r.ok || !j.id) return { error: j.error?.description ?? 'Could not start payment' }
-  return { id: j.id }
-}
-
-export async function verifyRazorpayPayment(env: Env, orderId: string, paymentId: string, signature: string): Promise<boolean> {
-  if (!env.RAZORPAY_KEY_SECRET) return false
-  return timingSafeEqual(await hmacHex(env.RAZORPAY_KEY_SECRET, `${orderId}|${paymentId}`), signature)
-}
-
-export async function verifyRazorpayWebhook(env: Env, body: string, signature: string | undefined): Promise<boolean> {
-  if (!env.RAZORPAY_WEBHOOK_SECRET || !signature) return false
-  return timingSafeEqual(await hmacHex(env.RAZORPAY_WEBHOOK_SECRET, body), signature)
-}
-
-export async function razorpayRefund(env: Env, paymentId: string, amountRupees: number): Promise<{ id: string } | { error: string }> {
-  if (!paymentsLive(env)) return { id: `sim_refund_${crypto.randomUUID().slice(0, 12)}` }
-  const r = await fetch(`https://api.razorpay.com/v1/payments/${paymentId}/refund`, {
-    method: 'POST',
-    headers: { Authorization: rzpAuth(env), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ amount: Math.round(amountRupees * 100) }),
-  })
-  const j = (await r.json()) as { id?: string; error?: { description?: string } }
-  if (!r.ok || !j.id) return { error: j.error?.description ?? 'Refund failed' }
-  return { id: j.id }
 }
 
 // ---- Email ----

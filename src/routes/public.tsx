@@ -15,7 +15,6 @@ import { priceStay } from '../lib/bookings'
 import type { NearbyPlace, PhotoRow, PropertyRow, QuotationRow, QuoteOptionRow, ReviewRow, RoomRow } from '../lib/types'
 import { addDays, eachNight, fmtDate, int, isDate, money, nightsBetween, normalizePhone, nowIso, parseJson, refCode, str, todayIST } from '../lib/util'
 import { clientIp, form, redirectMsg } from './helpers'
-import { createBooking } from '../lib/bookings'
 
 export const publicRoutes = new Hono<AppEnv>()
 
@@ -102,7 +101,7 @@ publicRoutes.get('/', async (c) => {
             {offers.map((o) => (
               <a class="offer" href="/offers">
                 <strong>{o.title || (o.discount_type === 'pct' ? `${o.discount_value}% off` : `${money(o.discount_value)} off`)}</strong>
-                <span>Use code <code>{o.code}</code> · till {fmtDate(o.valid_to)}</span>
+                <span>Mention <code>{o.code}</code> in your enquiry · till {fmtDate(o.valid_to)}</span>
               </a>
             ))}
           </div>
@@ -346,7 +345,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                   <div class="room-price">
                     <div class="price">{money(r.base_rate)}</div>
                     <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
-                    <button class="btn btn-sm" data-pick-room={r.id}>Select</button>
+                    <button class="btn btn-sm" data-pick-room={r.id}>Enquire</button>
                   </div>
                 </div>
               ))}
@@ -429,22 +428,32 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
         <aside class="booking-box card" id="book">
           <div class="price-line"><span class="price">{money(rooms[0]?.base_rate ?? 0)}</span> <span class="muted">/ night onwards</span></div>
-          <form method="get" action="/book" class="stack" data-price-url={`/stay/${p.slug}/price`}>
-            <Field label="Room">
-              <Select name="room" id="room-select" value={rooms[0]?.id} options={rooms.map((r) => [r.id, `${r.name} (sleeps ${r.capacity})`])} />
+          <h3>Send an enquiry</h3>
+          <p class="muted small">Tell us your dates — our team will confirm availability and send you a quote on WhatsApp.</p>
+          <form method="post" action="/enquiry" class="stack" data-price-url={`/stay/${p.slug}/price`}>
+            <input type="hidden" name="property_id" value={p.id} />
+            <div class="row">
+              <Field label="Your name"><input name="guest_name" required maxlength={80} value={user?.name && user.name !== 'Guest' ? user.name : ''} autocomplete="name" /></Field>
+              <Field label="WhatsApp number"><input name="phone" required inputmode="tel" maxlength={20} value={user?.phone ?? ''} autocomplete="tel" /></Field>
+            </div>
+            <Field label="Room (optional)">
+              <Select name="room" id="room-select" value={rooms[0]?.id} options={[['', 'Any room'], ...rooms.map((r) => [r.id, `${r.name} (sleeps ${r.capacity})`] as [number, string])]} />
             </Field>
             <div class="row">
-              <Field label="Check-in"><input type="date" name="checkIn" value={checkIn} min={todayIST()} required /></Field>
-              <Field label="Check-out"><input type="date" name="checkOut" value={checkOut} min={todayIST()} required /></Field>
+              <Field label="Check-in"><input type="date" name="check_in" value={checkIn} min={todayIST()} /></Field>
+              <Field label="Check-out"><input type="date" name="check_out" value={checkOut} min={todayIST()} /></Field>
             </div>
             <div class="row">
               <Field label="Adults"><input type="number" name="adults" min="1" max="40" value={Math.max(1, guests)} /></Field>
               <Field label="Children"><input type="number" name="children" min="0" max="20" value="0" /></Field>
               <Field label="Rooms"><input type="number" name="rooms" min="1" max="20" value="1" /></Field>
             </div>
-            <div class="price-box" aria-live="polite"><span class="muted small">Pick dates to see the total.</span></div>
-            <button class="btn btn-lg">Book Now</button>
-            <a class="btn btn-outline" href={`/enquiry?property=${p.id}`} data-enquiry-link>Send Enquiry</a>
+            <div class="price-box" aria-live="polite"><span class="muted small">Pick dates to see an estimated price.</span></div>
+            <Field label="Message (optional)"><textarea name="message" rows={2} maxlength={2000} placeholder="Special requests, questions…"></textarea></Field>
+            <input type="hidden" name="whatsapp_optin" value="1" />
+            <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
+            <button class="btn btn-lg">Send Enquiry</button>
+            <p class="muted small">No payment now. Final price is confirmed in your quote.</p>
           </form>
         </aside>
       </div>
@@ -457,18 +466,23 @@ publicRoutes.get('/stay/:slug', async (c) => {
       )}
       <div class="mobile-book-bar">
         <div><span class="price">{money(rooms[0]?.base_rate ?? 0)}</span><span class="muted small"> /night</span></div>
-        <a class="btn" href="#book">Book Now</a>
+        <a class="btn" href="#book">Enquire</a>
       </div>
       {jsonScript('ld', ld)}
     </div>
   ))
 })
 
-// Live price for the booking box (rule-based).
+// Estimated price for the enquiry box (rule-based; the quote confirms the final price).
 publicRoutes.post('/stay/:slug/price', async (c) => {
   const f = await form(c)
   if (!isDate(f.checkIn) || !isDate(f.checkOut)) return c.json({ errors: ['Pick your dates'] })
-  const p = await priceStay(c.env, int(f.room), f.checkIn, f.checkOut, Math.max(1, int(f.rooms, 1)), f.coupon || null)
+  let roomId = int(f.room)
+  if (!roomId) {
+    const r = await first<{ id: number }>(c.env, "SELECT r.id FROM rooms r JOIN properties p ON p.id = r.property_id WHERE p.slug = ? AND r.active = 1 ORDER BY r.base_rate LIMIT 1", c.req.param('slug'))
+    roomId = r?.id ?? 0
+  }
+  const p = await priceStay(c.env, roomId, f.checkIn, f.checkOut, Math.max(1, int(f.rooms, 1)), null)
   return c.json(p)
 })
 
@@ -522,6 +536,7 @@ publicRoutes.get('/enquiry', async (c) => {
           <Field label="Children"><input type="number" name="children" min="0" max="30" value="0" /></Field>
           <Field label="Total budget (₹)"><input type="number" name="budget" min="0" step="500" /></Field>
         </div>
+        <Field label="Offer code (optional)"><input name="offer" maxlength={30} value={c.req.query('offer') ?? ''} /></Field>
         <Field label="Special requests"><textarea name="message" rows={4} maxlength={2000} placeholder="E.g. ground-floor room for elderly parents, vegetarian food, pickup from Aluva station…"></textarea></Field>
         <label class="check"><input type="checkbox" name="whatsapp_optin" value="1" checked /> Send me updates on WhatsApp</label>
         <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
@@ -549,7 +564,11 @@ publicRoutes.post('/enquiry', async (c) => {
   const checkOut = isDate(f.check_out) && checkIn && f.check_out > checkIn ? f.check_out : null
   const code = refCode('ENQ')
   const source = ['chat', 'website'].includes(f.source) ? f.source : 'website'
-  const message = str(f.message, 2000)
+  let message = str(f.message, 2000)
+  // From the property page: note which room and how many the guest is interested in.
+  const room = propertyId && int(f.room) ? await first<{ name: string }>(c.env, 'SELECT name FROM rooms WHERE id = ? AND property_id = ?', int(f.room), propertyId) : null
+  if (str(f.offer)) message = `Offer code: ${str(f.offer, 30).toUpperCase()}${message ? '\n' + message : ''}`
+  if (room) message = `Interested in: ${room.name} × ${Math.max(1, int(f.rooms, 1))}${message ? '\n' + message : ''}`
   // Rule-based auto-assign: staff covering the destination with the fewest open enquiries.
   const assignee = await first<{ id: number }>(
     c.env,
@@ -586,101 +605,6 @@ publicRoutes.get('/enquiry/thanks/:code', async (c) => {
   ))
 })
 
-// ---------- 5. Checkout ----------
-publicRoutes.get('/book', async (c) => {
-  const user = c.get('user')
-  const url = new URL(c.req.url)
-  if (!user) return redirectMsg(c, '/login?next=' + encodeURIComponent(url.pathname + url.search), { ok: 'Log in with your phone number to complete your booking.' })
-  const roomId = int(c.req.query('room'))
-  const checkIn = c.req.query('checkIn') ?? ''
-  const checkOut = c.req.query('checkOut') ?? ''
-  const adults = Math.max(1, int(c.req.query('adults'), 2))
-  const children = Math.max(0, int(c.req.query('children')))
-  const roomsCount = Math.max(1, int(c.req.query('rooms'), 1))
-  const coupon = str(c.req.query('coupon'), 30).toUpperCase()
-  const room = await first<RoomRow & { slug: string; property_name: string; destination: string; cancellation_policy: string; photo: string | null }>(
-    c.env,
-    `SELECT r.*, p.slug, p.name AS property_name, p.destination, p.cancellation_policy,
-       (SELECT r2_key FROM property_photos ph WHERE ph.property_id = p.id ORDER BY sort LIMIT 1) AS photo
-     FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.id = ? AND p.status = 'live'`,
-    roomId,
-  )
-  if (!room || !isDate(checkIn) || !isDate(checkOut)) return redirectMsg(c, room ? `/stay/${room.slug}#book` : '/search', { err: 'Please choose a room and dates.' })
-  const price = await priceStay(c.env, roomId, checkIn, checkOut, roomsCount, coupon || null)
-  const blocking = price.errors.filter((e) => !e.toLowerCase().includes('coupon'))
-  if (blocking.length) return redirectMsg(c, `/stay/${room.slug}?checkIn=${checkIn}&checkOut=${checkOut}#book`, { err: blocking[0] })
-  if (adults + children > room.capacity * roomsCount) return redirectMsg(c, `/stay/${room.slug}?checkIn=${checkIn}&checkOut=${checkOut}#book`, { err: `${room.name} sleeps ${room.capacity} per room — add rooms for ${adults + children} guests.` })
-  const pr = price
-  const couponErr = price.errors.find((e) => e.toLowerCase().includes('coupon'))
-  const qp = new URLSearchParams({ room: String(roomId), checkIn, checkOut, adults: String(adults), children: String(children), rooms: String(roomsCount) })
-
-  return page(c, { title: 'Checkout', noindex: true }, (
-    <div class="wrap section checkout">
-      <h1>Confirm and pay</h1>
-      <div class="prop-layout">
-        <form method="post" action="/book" class="card stack prop-main">
-          <h2>Guest details</h2>
-          <div class="row">
-            <Field label="Full name"><input name="guest_name" required maxlength={80} value={user.name} /></Field>
-            <Field label="Phone"><input name="guest_phone" required inputmode="tel" value={user.phone ?? ''} /></Field>
-          </div>
-          <div class="row">
-            <Field label="Email"><input type="email" name="guest_email" value={user.email ?? ''} /></Field>
-            <Field label="ID type (optional)"><Select name="id_type" options={[['', 'Choose later'], ['aadhaar', 'Aadhaar'], ['passport', 'Passport'], ['driving_licence', 'Driving licence'], ['voter_id', 'Voter ID']]} /></Field>
-          </div>
-          <Field label="Special requests"><textarea name="special_requests" rows={3} maxlength={1000}></textarea></Field>
-          <h3>Cancellation policy</h3>
-          <p class="small">{room.cancellation_policy || 'Free cancellation up to 7 days before check-in. 50% refund 3–7 days before. No refund within 3 days.'} <a href="/policies/cancellation" target="_blank">Full policy</a></p>
-          <label class="check"><input type="checkbox" name="agree" value="1" required /> I agree to the <a href="/policies/terms" target="_blank">terms</a> and cancellation policy</label>
-          {[...qp.entries()].map(([k, v]) => <input type="hidden" name={k} value={v} />)}
-          <input type="hidden" name="coupon" value={couponErr ? '' : coupon} />
-          <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
-          <button class="btn btn-lg">Pay Now {money(pr.total)}</button>
-          <p class="muted small">Secure payment by UPI, card or net banking. Your room is held for a few minutes while you pay.</p>
-        </form>
-        <aside class="card booking-box">
-          <img class="summary-img" src={mediaUrl(room.photo, 500)} alt="" />
-          <h3>{room.property_name}</h3>
-          <p class="muted small">{room.destination} · {room.name} × {roomsCount}</p>
-          <p>{fmtDate(checkIn)} → {fmtDate(checkOut)}<br />{pr.nights} night{pr.nights > 1 ? 's' : ''} · {adults} adult{adults > 1 ? 's' : ''}{children ? `, ${children} child${children > 1 ? 'ren' : ''}` : ''}</p>
-          <table class="breakdown">
-            <tr><td>Room charges</td><td>{money(pr.subtotal)}</td></tr>
-            {pr.discount > 0 && <tr><td>{pr.discountLabel}</td><td>− {money(pr.discount)}</td></tr>}
-            <tr><td>GST ({pr.taxRate}%)</td><td>{money(pr.taxes)}</td></tr>
-            <tr class="total"><td>Total</td><td>{money(pr.total)}</td></tr>
-          </table>
-          <form method="get" action="/book" class="row coupon-form">
-            {[...qp.entries()].map(([k, v]) => <input type="hidden" name={k} value={v} />)}
-            <input name="coupon" placeholder="Coupon code" value={coupon} maxlength={30} />
-            <button class="btn btn-sm btn-outline">Apply</button>
-          </form>
-          {couponErr && <p class="error small">{couponErr}</p>}
-          {coupon && !couponErr && pr.discount > 0 && <p class="ok small">Coupon applied.</p>}
-        </aside>
-      </div>
-    </div>
-  ))
-})
-
-publicRoutes.post('/book', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.redirect('/login', 303)
-  const f = await form(c)
-  const back = `/book?${new URLSearchParams({ room: f.room, checkIn: f.checkIn, checkOut: f.checkOut, adults: f.adults, children: f.children, rooms: f.rooms })}`
-  if (!(await verifyTurnstile(c.env, f['cf-turnstile-response'], clientIp(c)))) return redirectMsg(c, back, { err: 'Please complete the bot check.' })
-  if (!f.agree) return redirectMsg(c, back, { err: 'Please accept the terms.' })
-  const phone = normalizePhone(f.guest_phone)
-  if (!phone || !str(f.guest_name)) return redirectMsg(c, back, { err: 'Please enter the guest name and a valid phone.' })
-  if (!isDate(f.checkIn) || !isDate(f.checkOut)) return redirectMsg(c, back, { err: 'Invalid dates.' })
-  const r = await createBooking(c.env, {
-    roomId: int(f.room), checkIn: f.checkIn, checkOut: f.checkOut, adults: Math.max(1, int(f.adults, 1)), children: Math.max(0, int(f.children)),
-    roomsCount: Math.max(1, int(f.rooms, 1)), couponCode: f.coupon || null, guestName: str(f.guest_name, 80), guestPhone: phone,
-    guestEmail: str(f.guest_email, 120) || null, idType: f.id_type || null, specialRequests: str(f.special_requests, 1000), userId: user.id,
-  })
-  if ('error' in r) return redirectMsg(c, back, { err: r.error })
-  return c.redirect(`/pay/${r.code}`, 303)
-})
-
 // ---------- 8. Offers ----------
 publicRoutes.get('/offers', async (c) => {
   const offers = await all<{ code: string; title: string; description: string; discount_type: string; discount_value: number; max_discount: number | null; min_amount: number; valid_from: string; valid_to: string; property_ids: string | null }>(
@@ -702,7 +626,8 @@ publicRoutes.get('/offers', async (c) => {
               <div class="offer-amt">{o.discount_type === 'pct' ? `${o.discount_value}% off` : `${money(o.discount_value)} off`}</div>
               <h3>{o.title || o.code}</h3>
               <p>{o.description}</p>
-              <p>Code: <code class="code">{o.code}</code></p>
+              <p>Code: <code class="code">{o.code}</code> — mention it in your enquiry and we'll apply it to your quote.</p>
+              <a class="btn btn-sm" href={`/enquiry?offer=${encodeURIComponent(o.code)}`}>Enquire with this offer</a>
               <p class="muted small">Valid {fmtDate(o.valid_from)} – {fmtDate(o.valid_to)}{o.min_amount ? ` · min booking ${money(o.min_amount)}` : ''}{o.max_discount ? ` · up to ${money(o.max_discount)}` : ''}</p>
               <p class="small">Applies to: {ids?.length ? ids.map((id) => byId.get(id)).filter(Boolean).map((p, i) => <>{i > 0 && ', '}<a href={`/stay/${p!.slug}`}>{p!.name}</a></>) : 'all properties'}</p>
             </div>
@@ -818,7 +743,7 @@ publicRoutes.get('/q/:token', async (c) => {
       <h1>Your stay quote</h1>
       {q.explainer && <AiNote label="In short">{q.explainer}</AiNote>}
       {q.valid_till && <p class={expired ? 'error' : 'muted'}>{expired ? 'This quote has expired' : `Valid till ${fmtDate(q.valid_till)}`}</p>}
-      {q.status === 'accepted' && <div class="flash flash-ok">You accepted this quote. See <a href="/my/bookings">your bookings</a>.</div>}
+      {q.status === 'accepted' && <div class="flash flash-ok">Thank you — you accepted this quote. Our team will confirm your booking and share payment details on WhatsApp.</div>}
       {q.message && <div class="card"><p style="white-space:pre-line">{q.message}</p></div>}
       {options.map((o, i) => (
         <div class="card quote-option">
@@ -837,7 +762,7 @@ publicRoutes.get('/q/:token', async (c) => {
           {!closed && (
             <form method="post" action={`/q/${q.token}/accept`} class="mt-sm">
               <input type="hidden" name="option" value={o.id} />
-              <button class="btn btn-lg">Accept and Pay {money(o.total)}</button>
+              <button class="btn btn-lg">Accept this option ({money(o.total)})</button>
             </form>
           )}
         </div>
@@ -876,19 +801,18 @@ publicRoutes.post('/q/:token/accept', async (c) => {
   const f = await form(c)
   const o = options.find((x) => x.id === int(f.option))
   if (!o) return redirectMsg(c, `/q/${token}`, { err: 'Choose an option.' })
-  // Re-use an unpaid booking for this quote option if the guest comes back.
-  const existing = await first<{ code: string }>(c.env, "SELECT code FROM bookings WHERE quotation_id = ? AND room_id = ? AND status = 'pending' AND hold_expires_at > ?", q.id, o.room_id, nowIso())
-  if (existing) return c.redirect(`/pay/${existing.code}?t=${token}`, 303)
-  const userId = q.user_id ?? (await findOrCreateGuest(c.env, q.phone, q.guest_name, q.email))
-  const r = await createBooking(c.env, {
-    roomId: o.room_id, checkIn: o.check_in, checkOut: o.check_out, adults: o.adults, children: o.children, roomsCount: o.rooms_count,
-    guestName: q.guest_name, guestPhone: q.phone ?? '', guestEmail: q.email, userId, source: 'quotation', mealPlan: o.meal_plan,
-    quotationId: q.id, enquiryId: q.enquiry_id, staffId: q.staff_id,
-    fixedPrice: { subtotal: o.subtotal, discount: o.discount, extraCharges: o.extra_charges, taxes: o.taxes, total: o.total },
-  })
-  if ('error' in r) return redirectMsg(c, `/q/${token}`, { err: r.error + ' Please ask our team for another option.' })
-  await run(c.env, 'UPDATE quotations SET accepted_option_id = ? WHERE id = ?', o.id, q.id)
-  return c.redirect(`/pay/${r.code}?t=${token}`, 303)
+  // No online booking: the guest's acceptance goes to the team, who confirm the booking and collect payment.
+  await run(c.env, "UPDATE quotations SET status = 'accepted', accepted_option_id = ?, updated_at = ? WHERE id = ?", o.id, nowIso(), q.id)
+  const note = `Accepted quote ${q.code}: ${o.property_name}, ${fmtDate(o.check_in)} – ${fmtDate(o.check_out)}, ${money(o.total)}`
+  if (q.enquiry_id) {
+    await run(c.env, "INSERT INTO messages (enquiry_id, sender, channel, body) VALUES (?, 'guest', 'website', ?)", q.enquiry_id, note)
+    await run(c.env, "UPDATE enquiries SET waiting_on = 'us', urgent = 1, last_guest_msg_at = ?, updated_at = ? WHERE id = ?", nowIso(), nowIso(), q.enquiry_id)
+  }
+  await run(c.env, "UPDATE tasks SET status = 'done' WHERE quotation_id = ? AND status = 'open'", q.id)
+  await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — confirm the booking and share payment details`, nowIso())
+  await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Convert it to a booking.`)
+  await logActivity(c.env, null, 'quote.accepted', 'quotation', q.id, { option: o.id, total: o.total })
+  return redirectMsg(c, `/q/${token}`, { ok: 'Thank you! Our team will confirm your booking shortly.' })
 })
 
 async function quoteFeedback(c: Context<AppEnv>, status: 'changes_requested' | 'declined') {

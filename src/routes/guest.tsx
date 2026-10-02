@@ -114,7 +114,6 @@ guestRoutes.get('/my/bookings', async (c) => {
           </div>
           <div class="row wrap-row">
             <a class="btn btn-sm" href={`/my/bookings/${b.id}`}>View</a>
-            {b.status === 'pending' && <a class="btn btn-sm" href={`/pay/${b.code}`}>Pay now</a>}
             {b.amount_paid > 0 && <a class="btn btn-sm btn-outline" href={`/invoice/${b.code}`} target="_blank">Invoice</a>}
             {b.check_out <= today && ['confirmed', 'checked_in', 'completed'].includes(b.status) && !b.reviewed && <a class="btn btn-sm btn-outline" href={`/my/review/${b.id}`}>Write review</a>}
           </div>
@@ -154,7 +153,6 @@ guestRoutes.get('/my/bookings/:id', async (c) => {
           {payments.filter((p) => p.status === 'paid').map((p) => <div class="muted small">Receipt: {money(p.amount)} on {fmtDateTime(p.created_at)} (ref {p.gateway_payment_id})</div>)}
           <div class="row wrap-row mt-sm">
             {b.amount_paid > 0 && <a class="btn btn-sm btn-outline" href={`/invoice/${b.code}`} target="_blank">Download invoice</a>}
-            {b.status === 'pending' || (b.amount_paid < b.total && b.status === 'confirmed') ? <a class="btn btn-sm" href={`/pay/${b.code}`}>Pay {money(b.total - b.amount_paid)}</a> : null}
             <a class="btn btn-sm btn-outline" href={`/booking/${b.code}/calendar.ics`}>Add to calendar</a>
           </div>
         </div>

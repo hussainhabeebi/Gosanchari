@@ -2,10 +2,6 @@
 SESSION_SECRET=change-me-to-a-long-random-string
 # Cloudflare Turnstile (leave empty to skip bot checks locally)
 TURNSTILE_SECRET=
-# Razorpay (leave empty to use the built-in test-payment simulator outside production)
-RAZORPAY_KEY_ID=
-RAZORPAY_KEY_SECRET=
-RAZORPAY_WEBHOOK_SECRET=
 # WhatsApp Cloud API (leave empty to log messages instead of sending)
 WHATSAPP_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=

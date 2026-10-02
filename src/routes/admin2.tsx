@@ -437,7 +437,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
   const usage = await all<{ feature: string; n: number; failed: number; avg_ms: number }>(c.env, 'SELECT feature, COUNT(*) AS n, SUM(ok = 0) AS failed, AVG(ms) AS avg_ms FROM ai_usage WHERE created_at >= ? GROUP BY feature ORDER BY n DESC', since)
   const today = parseInt((await c.env.KV.get(`ai:count:${todayIST()}`)) ?? '0', 10)
   const events = Object.keys(s.notifications) as (keyof Settings['notifications'])[]
-  const eventLabel: Record<string, string> = { new_enquiry: 'New enquiry', booking: 'New booking', failed_payment: 'Failed payment', refund_request: 'Refund request', low_review: 'Low-rated review', daily_summary: 'Daily summary' }
+  const eventLabel: Record<string, string> = { new_enquiry: 'New enquiry', booking: 'New booking', quote_accepted: 'Quote accepted by guest', refund_request: 'Refund request', low_review: 'Low-rated review', daily_summary: 'Daily summary' }
   return page(c, { title: 'Settings', area: 'admin', active: 'settings' }, (
     <form method="post" action="/admin/settings" class="stack-lg">
       <h1>Settings</h1>
@@ -464,17 +464,10 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
           <textarea name="tax_slabs" rows={3}>{s.tax_slabs.map((t) => `${t.upto ?? ''} | ${t.rate}`).join('\n')}</textarea>
         </Field>
         <div class="row">
-          <Field label="Room hold during checkout (minutes)"><input type="number" name="hold_minutes" value={s.booking.hold_minutes} min="5" max="120" /></Field>
+          <Field label="Rooms held for an unconfirmed booking (minutes)"><input type="number" name="hold_minutes" value={s.booking.hold_minutes} min="30" max="10080" /></Field>
           <Field label="Quote validity (days)"><input type="number" name="quote_validity_days" value={s.booking.quote_validity_days} min="1" max="60" /></Field>
-          <Field label="Advance to confirm (%)"><input type="number" name="advance_pct" value={s.booking.advance_pct} min="10" max="100" /></Field>
         </div>
         <label class="check"><input type="checkbox" name="images_transform" value="1" checked={s.images_transform} /> Cloudflare Images resizing is enabled on this zone (serve resized photos)</label>
-      </section>
-
-      <section class="card stack">
-        <h2>Payment gateway</h2>
-        <p class="small">Razorpay keys are stored as encrypted Worker secrets, not in the database: <code>wrangler secret put RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code>, <code>RAZORPAY_WEBHOOK_SECRET</code>. Webhook URL: <code>{c.env.SITE_URL}/webhooks/razorpay</code></p>
-        <p>Status: {c.env.RAZORPAY_KEY_ID ? <span class="ok">Connected ({c.env.RAZORPAY_KEY_ID.slice(0, 12)}…)</span> : <span class="error">Not connected — test simulator only (disabled in production)</span>}</p>
       </section>
 
       <section class="card stack">
@@ -546,7 +539,7 @@ admin2Routes.post('/admin/settings', requirePerm('manage_settings'), async (c) =
   for (const k of Object.keys(models) as (keyof typeof models)[]) if (str(f[`model_${k}`])) models[k] = str(f[`model_${k}`], 120)
   await saveSetting(c.env, 'business', business)
   if (slabs.length && slabs.every((x) => Number.isFinite(x.rate))) await saveSetting(c.env, 'tax_slabs', slabs)
-  await saveSetting(c.env, 'booking', { hold_minutes: Math.max(5, int(f.hold_minutes, 20)), quote_validity_days: Math.max(1, int(f.quote_validity_days, 3)), advance_pct: Math.min(100, Math.max(10, int(f.advance_pct, 100))) })
+  await saveSetting(c.env, 'booking', { hold_minutes: Math.max(30, int(f.hold_minutes, 1440)), quote_validity_days: Math.max(1, int(f.quote_validity_days, 3)) })
   await saveSetting(c.env, 'whatsapp_templates', templates)
   await saveSetting(c.env, 'owner_whatsapp', normalizePhone(f.owner_whatsapp) ?? '')
   await saveSetting(c.env, 'email', { from: str(f.email_from, 120), reply_to: str(f.email_reply_to, 120) })

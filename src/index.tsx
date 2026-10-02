@@ -8,7 +8,7 @@ import type { AppEnv, Env, JobMessage } from './env'
 import { sessionMiddleware } from './lib/auth'
 import { page } from './views/layout'
 import { publicRoutes } from './routes/public'
-import { paymentRoutes } from './routes/payments'
+import { bookingDocRoutes } from './routes/booking-docs'
 import { authRoutes } from './routes/auth'
 import { guestRoutes } from './routes/guest'
 import { staffRoutes } from './routes/staff'
@@ -27,11 +27,11 @@ const app = new Hono<AppEnv>()
 const security = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://checkout.razorpay.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
+    scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
     styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-    connectSrc: ["'self'", 'https://api.razorpay.com', 'https://lumberjack.razorpay.com'],
-    frameSrc: ['https://challenges.cloudflare.com', 'https://api.razorpay.com', 'https://checkout.razorpay.com'],
+    connectSrc: ["'self'"],
+    frameSrc: ['https://challenges.cloudflare.com'],
     mediaSrc: ["'self'"],
     formAction: ["'self'"],
     frameAncestors: ["'none'"],
@@ -55,7 +55,7 @@ app.get('/chat/ws', async (c) => {
   return stub.fetch(new Request(c.req.raw, { headers }))
 })
 
-app.get('/robots.txt', (c) => c.text(`User-agent: *\nDisallow: /staff\nDisallow: /admin\nDisallow: /my\nDisallow: /q/\nDisallow: /pay/\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`))
+app.get('/robots.txt', (c) => c.text(`User-agent: *\nDisallow: /staff\nDisallow: /admin\nDisallow: /my\nDisallow: /q/\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`))
 app.get('/sitemap.xml', async (c) => {
   const props = await c.env.DB.prepare("SELECT slug, updated_at FROM properties WHERE status = 'live'").all<{ slug: string; updated_at: string }>()
   const urls = ['/', '/search', '/offers', '/about', '/contact', ...props.results.map((p) => `/stay/${p.slug}`)]
@@ -69,7 +69,7 @@ app.get('/healthz', (c) => c.json({ ok: true }))
 
 app.route('/', webhookRoutes)
 app.route('/', authRoutes)
-app.route('/', paymentRoutes)
+app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)

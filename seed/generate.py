@@ -179,12 +179,12 @@ for p in props:
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, pct_adjust, min_nights) VALUES (NULL, NULL, 'Christmas & New Year', strftime('%Y', 'now') || '-12-20', strftime('%Y', 'now') || '-12-31', 25, 2);")
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights) VALUES (5, NULL, 'Houseboat peak', strftime('%Y', 'now') || '-12-15', strftime('%Y', 'now') || '-12-31', 13500, NULL);")
 
-out.append(f"INSERT INTO coupons (code, title, description, discount_type, discount_value, max_discount, min_amount, valid_from, valid_to, property_ids, usage_limit) VALUES ('WELCOME10', 'Welcome offer', '10% off your first direct booking', 'pct', 10, 2000, 3000, {d(-30)}, {d(120)}, NULL, 500);")
+out.append(f"INSERT INTO coupons (code, title, description, discount_type, discount_value, max_discount, min_amount, valid_from, valid_to, property_ids, usage_limit) VALUES ('WELCOME10', 'Welcome offer', '10% off your first stay — mention the code in your enquiry', 'pct', 10, 2000, 3000, {d(-30)}, {d(120)}, NULL, 500);")
 out.append(f"INSERT INTO coupons (code, title, description, discount_type, discount_value, min_amount, valid_from, valid_to, property_ids) VALUES ('MONSOON1500', 'Monsoon in the hills', '₹1,500 off stays of ₹10,000+ in Munnar and Wayanad', 'flat', 1500, 10000, {d(-10)}, {d(60)}, '[1,2,3,4]');")
 
 # Content
 faqs = [
-    ('How do I pay?', 'You can pay online by UPI, card or net banking. Payments are processed securely by our payment partner. For quotations, you get a payment link on WhatsApp.'),
+    ('How do I book?', 'Send us an enquiry from any property page or the enquiry form. Our team checks availability and sends you a quote on WhatsApp. When you accept, we confirm the booking and share payment details (UPI or bank transfer).'),
     ('Is breakfast included?', 'It depends on the property and room. Each room on the property page shows what is included. Breakfast is included where the room says "Includes: Breakfast".'),
     ('What is your cancellation policy?', CANCEL + ' Refunds go back to the original payment method within 5–7 working days.'),
     ('When will I get check-in details?', 'One day before your check-in we send the address, map link and property contact on WhatsApp.'),
@@ -198,7 +198,7 @@ out.append(f"INSERT INTO content (key, value) VALUES ('about', {q('Go Sanchari i
 POLICIES = {
     'cancellation': CANCEL + '\n\nRefunds are approved by our team and sent to the original payment method within 5–7 working days. Date changes are subject to availability and any difference in rates. Houseboat bookings are non-refundable within 7 days of check-in because of weather and crew planning.',
     'privacy': 'We collect your name, phone, email and booking details only to arrange your stay. We share the guest name and phone with the property you booked. We never sell your data. You can ask us to delete your data at any time by emailing hello@gosanchari.com.',
-    'terms': "Bookings are confirmed only after payment. Prices include GST as shown at checkout. Guests must follow each property's house rules. Go Sanchari acts as a booking agent for partner properties.",
+    'terms': "Bookings are confirmed by our team after you accept a quote and pay as agreed. Prices include GST as shown at checkout. Guests must follow each property's house rules. Go Sanchari acts as a booking agent for partner properties.",
 }
 out.append("INSERT INTO content (key, value) VALUES ('policies', " + q(POLICIES) + ");")
 
@@ -247,7 +247,7 @@ out.append(f"UPDATE enquiries SET waiting_on = 'us', last_guest_msg_at = {ts(-1)
 out.append("INSERT INTO guest_notes (user_id, phone, note, kind, source) VALUES (10, '+919812345601', 'vegetarian', 'preference', 'ai'), (10, '+919812345601', 'travels with elderly parents', 'preference', 'ai'), (11, '+919812345602', 'prefers AC rooms', 'preference', 'staff');")
 
 # Quotation for enquiry 1 (sent, viewed 3 times). Quotes are price snapshots: 2 nights × 2 Estate View Rooms at the base rate + 5% GST.
-out.append(f"INSERT INTO quotations (id, code, token, enquiry_id, user_id, staff_id, guest_name, phone, email, status, valid_till, inclusions, payment_terms, message, explainer, view_count, last_viewed_at, sent_at, created_at) VALUES (1, 'GS-QT-DEMO01', 'demo-quote-token-1234567890', 1, 10, 3, 'Rahul Varma', '+919812345601', 'rahul@example.com', 'viewed', {d(2)}, 'Breakfast\nGST', 'Full payment to confirm the booking.', 'Hi Rahul, here is a lovely option for your family in Munnar — two rooms with breakfast.', '2 nights at Misty Tea Bungalow for 5 people in 2 Estate View Rooms, breakfast included, ₹15,960 total.', 3, {ts(-0.5)}, {ts(-1.5)}, {ts(-2)});")
+out.append(f"INSERT INTO quotations (id, code, token, enquiry_id, user_id, staff_id, guest_name, phone, email, status, valid_till, inclusions, payment_terms, message, explainer, view_count, last_viewed_at, sent_at, created_at) VALUES (1, 'GS-QT-DEMO01', 'demo-quote-token-1234567890', 1, 10, 3, 'Rahul Varma', '+919812345601', 'rahul@example.com', 'viewed', {d(2)}, 'Breakfast\nGST', 'Payment by UPI or bank transfer to confirm. Our team will share the details.', 'Hi Rahul, here is a lovely option for your family in Munnar — two rooms with breakfast.', '2 nights at Misty Tea Bungalow for 5 people in 2 Estate View Rooms, breakfast included, ₹15,960 total.', 3, {ts(-0.5)}, {ts(-1.5)}, {ts(-2)});")
 out.append(f"INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, taxes, total) VALUES (1, 1, {room_ids[1][0]}, {d(12)}, {d(14)}, 3, 2, 2, 'CP', 15200, 0, 760, 15960);")
 out.append(f"INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_user_id, guest_name, phone, reason, due_at, draft_message) VALUES (3, 1, 1, 10, 'Rahul Varma', '+919812345601', 'Follow up on quote GS-QT-DEMO01 (viewed 3×)', {ts(-0.1)}, 'Hi Rahul, just checking if you had a chance to look at the Munnar options. Happy to hold the rooms for you!');")
 
@@ -258,7 +258,7 @@ def booking(bid, code, uid, pid, rid, ci, co, nights, adults, children, subtotal
         + ', '.join([q(bid), q(code), q(uid), q(pid), q(rid), d(ci), d(co), q(nights), q(adults), q(children), '1', q(subtotal), q(taxes), q(total), q(paid), q(status), q(pstatus), q('website' if staff is None else 'quotation'), q(name), q(phone), q(staff), ts(created)])
         + ');')
     if paid:
-        out.append(f"INSERT INTO payments (booking_id, amount, status, gateway, gateway_order_id, gateway_payment_id, created_at, updated_at) VALUES ({bid}, {paid}, 'paid', 'simulator', 'sim_order_seed_{bid}', 'sim_pay_seed_{bid}', {ts(created)}, {ts(created)});")
+        out.append(f"INSERT INTO payments (booking_id, amount, status, gateway, gateway_order_id, gateway_payment_id, created_at, updated_at) VALUES ({bid}, {paid}, 'paid', 'upi', NULL, 'UPI-SEED-{bid}', {ts(created)}, {ts(created)});")
 
 booking(1, 'GS-BK-DEMO01', 13, 8, room_ids[8][0], 1, 3, 2, 2, 0, 10400, 10920, 520, 'confirmed', 'paid', 10920, 'David Thomas', '+919812345604', None, -10)
 booking(2, 'GS-BK-DEMO02', 14, 3, room_ids[3][0], -6, -3, 3, 2, 1, 8400, 8820, 420, 'completed', 'paid', 8820, 'Lakshmi Iyer', '+919812345605', 4, -25)

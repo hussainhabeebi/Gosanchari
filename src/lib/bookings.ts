@@ -3,7 +3,7 @@
 
 import type { Env } from '../env'
 import { all, enqueue, first, insertId, loadPricing, logActivity, notifyStaff, roomAvailability, run } from './db'
-import { createRazorpayOrder, fillTemplate, razorpayRefund, sendEmail } from './integrations'
+import { fillTemplate, sendEmail } from './integrations'
 import { calculatePrice, type Coupon, type PriceResult } from './pricing'
 import { getSettings } from './settings'
 import type { BookingRow, PropertyRow } from './types'
@@ -106,57 +106,35 @@ async function oversold(env: Env, bookingId: number): Promise<boolean> {
   return false
 }
 
-export async function amountDue(env: Env, b: BookingRow): Promise<number> {
-  const s = await getSettings(env)
-  if (b.amount_paid > 0) return Math.max(0, b.total - b.amount_paid)
-  return s.booking.advance_pct >= 100 ? b.total : Math.round((b.total * s.booking.advance_pct) / 100)
+/** Staff confirm a booking once the guest has agreed. Payment is collected offline and recorded separately. */
+export async function confirmBooking(env: Env, bookingId: number, byUserId: number): Promise<void> {
+  const b = await first<BookingRow>(env, 'SELECT * FROM bookings WHERE id = ?', bookingId)
+  if (!b || b.status !== 'pending') return
+  await run(env, "UPDATE bookings SET status = 'confirmed', hold_expires_at = NULL, updated_at = ? WHERE id = ?", nowIso(), b.id)
+  await onConfirmed(env, b.id)
+  await logActivity(env, byUserId, 'booking.confirmed_by_staff', 'booking', b.id)
 }
 
-export async function startPayment(env: Env, b: BookingRow): Promise<{ orderId: string; amount: number } | { error: string }> {
-  const amount = await amountDue(env, b)
-  if (amount <= 0) return { error: 'Nothing to pay.' }
-  // Re-use a recent open order (page refreshes shouldn't create new orders).
-  const open = await first<{ gateway_order_id: string }>(
-    env,
-    "SELECT gateway_order_id FROM payments WHERE booking_id = ? AND status = 'created' AND amount = ? AND created_at > ? ORDER BY id DESC LIMIT 1",
-    b.id, amount, new Date(Date.now() - 15 * 60_000).toISOString(),
-  )
-  if (open) return { orderId: open.gateway_order_id, amount }
-  const order = await createRazorpayOrder(env, amount, b.code)
-  if ('error' in order) return order
-  await run(env, 'INSERT INTO payments (booking_id, amount, status, gateway, gateway_order_id) VALUES (?, ?, ?, ?, ?)', b.id, amount, 'created', order.id.startsWith('sim_') ? 'simulator' : 'razorpay', order.id)
-  // Keep the room held while the guest pays.
-  if (b.status === 'pending') await run(env, 'UPDATE bookings SET hold_expires_at = ? WHERE id = ?', new Date(Date.now() + 20 * 60_000).toISOString(), b.id)
-  return { orderId: order.id, amount }
-}
+export const PAYMENT_METHODS = ['upi', 'bank_transfer', 'cash', 'card', 'other'] as const
 
-/** Idempotent: safe to call from both the browser callback and the webhook. */
-export async function markPaid(env: Env, orderId: string, gatewayPaymentId: string): Promise<BookingRow | null> {
-  const pay = await first<{ id: number; booking_id: number; amount: number; status: string }>(env, 'SELECT * FROM payments WHERE gateway_order_id = ?', orderId)
-  if (!pay) return null
-  if (pay.status === 'paid') return first<BookingRow>(env, 'SELECT * FROM bookings WHERE id = ?', pay.booking_id)
-  await run(env, "UPDATE payments SET status = 'paid', gateway_payment_id = ?, updated_at = ? WHERE id = ? AND status != 'paid'", gatewayPaymentId, nowIso(), pay.id)
-  const b = await first<BookingRow>(env, 'SELECT * FROM bookings WHERE id = ?', pay.booking_id)
-  if (!b) return null
-  const paid = b.amount_paid + pay.amount
-  const firstConfirmation = b.status === 'pending'
+/** Record a payment collected offline (UPI, bank transfer, cash…). Confirms a pending booking. */
+export async function recordPayment(env: Env, bookingId: number, amount: number, method: string, reference: string, byUserId: number): Promise<{ ok: true } | { error: string }> {
+  const b = await first<BookingRow>(env, 'SELECT * FROM bookings WHERE id = ?', bookingId)
+  if (!b) return { error: 'Booking not found.' }
+  if (b.status === 'cancelled') return { error: 'This booking is cancelled.' }
+  const due = b.total - b.amount_paid
+  if (!(amount > 0) || amount > due) return { error: `Enter an amount between ₹1 and ${money(due)}.` }
+  const gateway = (PAYMENT_METHODS as readonly string[]).includes(method) ? method : 'other'
+  await run(env, "INSERT INTO payments (booking_id, amount, status, gateway, gateway_payment_id) VALUES (?, ?, 'paid', ?, ?)", b.id, Math.round(amount), gateway, reference.slice(0, 80) || null)
+  const paid = b.amount_paid + Math.round(amount)
   await run(
     env,
-    `UPDATE bookings SET amount_paid = ?, payment_status = ?, status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END,
-       hold_expires_at = NULL, updated_at = ? WHERE id = ?`,
+    `UPDATE bookings SET amount_paid = ?, payment_status = ?, status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END, hold_expires_at = NULL, updated_at = ? WHERE id = ?`,
     paid, paid >= b.total ? 'paid' : 'partial', nowIso(), b.id,
   )
-  if (firstConfirmation) await onConfirmed(env, b.id)
-  return first<BookingRow>(env, 'SELECT * FROM bookings WHERE id = ?', b.id)
-}
-
-export async function markPaymentFailed(env: Env, orderId: string, reason: string) {
-  const pay = await first<{ id: number; booking_id: number; status: string }>(env, 'SELECT * FROM payments WHERE gateway_order_id = ?', orderId)
-  if (!pay || pay.status === 'paid') return
-  await run(env, "UPDATE payments SET status = 'failed', failure_reason = ?, updated_at = ? WHERE id = ?", reason.slice(0, 300), nowIso(), pay.id)
-  await run(env, "UPDATE bookings SET payment_status = CASE WHEN amount_paid = 0 THEN 'failed' ELSE payment_status END WHERE id = ?", pay.booking_id)
-  const b = await first<BookingRow>(env, 'SELECT code, guest_name, total FROM bookings WHERE id = ?', pay.booking_id)
-  if (b) await notifyStaff(env, 'failed_payment', `Payment failed for ${b.code} (${b.guest_name}, ${money(b.total)}): ${reason}`)
+  if (b.status === 'pending') await onConfirmed(env, b.id)
+  await logActivity(env, byUserId, 'payment.recorded', 'booking', b.id, { amount, method: gateway, reference })
+  return { ok: true }
 }
 
 async function onConfirmed(env: Env, bookingId: number) {
@@ -204,7 +182,7 @@ export async function cancelBooking(env: Env, bookingId: number, byUserId: numbe
   return { ok: true }
 }
 
-export async function processRefund(env: Env, refundId: number, adminId: number, approve: boolean): Promise<{ ok: true } | { error: string }> {
+export async function processRefund(env: Env, refundId: number, adminId: number, approve: boolean, reference?: string): Promise<{ ok: true } | { error: string }> {
   const r = await first<{ id: number; booking_id: number; payment_id: number | null; amount: number; status: string }>(env, 'SELECT * FROM refunds WHERE id = ?', refundId)
   if (!r || r.status !== 'requested') return { error: 'Refund is not waiting for a decision' }
   if (!approve) {
@@ -212,16 +190,8 @@ export async function processRefund(env: Env, refundId: number, adminId: number,
     await logActivity(env, adminId, 'refund.rejected', 'refund', r.id, { amount: r.amount })
     return { ok: true }
   }
-  const pay = r.payment_id ? await first<{ gateway_payment_id: string | null; gateway: string }>(env, 'SELECT gateway_payment_id, gateway FROM payments WHERE id = ?', r.payment_id) : null
-  let gatewayId = 'manual'
-  if (pay?.gateway_payment_id && pay.gateway === 'razorpay') {
-    const res = await razorpayRefund(env, pay.gateway_payment_id, r.amount)
-    if ('error' in res) {
-      await run(env, "UPDATE refunds SET status = 'failed', decided_by = ?, decided_at = ? WHERE id = ?", adminId, nowIso(), r.id)
-      return { error: res.error }
-    }
-    gatewayId = res.id
-  }
+  // Refunds are paid back offline (UPI / bank transfer); the reference is recorded here.
+  const gatewayId = reference?.trim().slice(0, 80) || 'manual'
   await run(env, "UPDATE refunds SET status = 'processed', gateway_refund_id = ?, decided_by = ?, decided_at = ? WHERE id = ?", gatewayId, adminId, nowIso(), r.id)
   const b = await first<BookingRow>(env, 'SELECT * FROM bookings WHERE id = ?', r.booking_id)
   if (b) {
