@@ -76,7 +76,9 @@ For a Cloudflare dashboard Git connection (Workers & Pages → Create → Import
    - **from the Cloudflare dashboard** (Git-connected): build command `npm run build`, deploy command `npm run deploy`; or
    - **from your computer**: `npm install`, `npx wrangler login`, then `npm run deploy`.
 3. Set a session secret: `npx wrangler secret put SESSION_SECRET` (or Worker → Settings → Variables and Secrets).
-4. Create your admin login: `npm run admin:create -- you@example.com "Your Name"`.
+4. Create your admin login, either:
+   - **from Cloudflare:** add a secret `SETUP_CODE` (Worker → Settings → Variables and Secrets), open `https://<site>/setup`, enter the code and your details, then delete the secret. The page only works while no admin exists.
+   - **from a terminal:** `npm run admin:create -- you@example.com "Your Name"`.
 
 Demo data is optional: `npm run db:seed:remote`. Don't load it on a live site without changing the demo passwords.
 

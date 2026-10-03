@@ -15,3 +15,5 @@ RESEND_API_KEY=
 # Google login
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+# One-time code for /setup (creates the first admin when none exists)
+SETUP_CODE=

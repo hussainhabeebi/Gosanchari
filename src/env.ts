@@ -42,6 +42,8 @@ export interface Env {
   RESEND_API_KEY?: string
   GOOGLE_CLIENT_ID?: string
   GOOGLE_CLIENT_SECRET?: string
+  /** One-time code for /setup (creating the first admin). Set it in the dashboard, use it once, then delete it. */
+  SETUP_CODE?: string
 }
 
 export interface SessionUser {

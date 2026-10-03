@@ -9,7 +9,7 @@ import { first, insertId, logActivity, run } from '../lib/db'
 import { fillTemplate, sendEmail, sendWhatsApp, verifyTurnstile, whatsappConfigured } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
 import type { Role } from '../lib/permissions'
-import { normalizePhone, randomToken, sha256Hex, str } from '../lib/util'
+import { normalizePhone, randomToken, sha256Hex, str, timingSafeEqual } from '../lib/util'
 import { clientIp, form, redirectMsg, safeNext } from './helpers'
 
 export const authRoutes = new Hono<AppEnv>()
@@ -258,4 +258,69 @@ authRoutes.post('/reset/:token', async (c) => {
 authRoutes.post('/logout', async (c) => {
   await destroySession(c)
   return c.redirect('/', 303)
+})
+
+// ---- First-run setup: create the first admin from the browser ----
+// Works only while no active admin exists, and only with the SETUP_CODE secret set in Cloudflare.
+
+async function hasAdmin(env: AppEnv['Bindings']): Promise<boolean> {
+  return !!(await first(env, "SELECT 1 FROM users WHERE role = 'admin' AND active = 1 AND blocked = 0 AND merged_into IS NULL LIMIT 1"))
+}
+
+authRoutes.get('/setup', async (c) => {
+  if (await hasAdmin(c.env)) return c.notFound()
+  return page(c, { title: 'First-time setup', noindex: true }, (
+    <div class="wrap narrow section">
+      <div class="card auth-card stack">
+        <h1>Create the first admin</h1>
+        {!c.env.SETUP_CODE ? (
+          <>
+            <p>To protect this page, first add a setup code in Cloudflare:</p>
+            <ol>
+              <li>Cloudflare dashboard → <strong>Workers &amp; Pages → gosanchari → Settings → Variables and Secrets</strong></li>
+              <li><strong>Add</strong> → Type: <strong>Secret</strong>, Name: <code>SETUP_CODE</code>, Value: any private word or number you choose</li>
+              <li>Click <strong>Deploy</strong>, then reload this page</li>
+            </ol>
+          </>
+        ) : (
+          <form method="post" action="/setup" class="stack">
+            <Field label="Setup code" hint="The SETUP_CODE value you added in Cloudflare."><input type="password" name="code" required autocomplete="off" /></Field>
+            <Field label="Your name"><input name="name" required maxlength={80} autocomplete="name" /></Field>
+            <Field label="Email (you log in with this)"><input type="email" name="email" required autocomplete="email" /></Field>
+            <Field label="Mobile (optional, for WhatsApp login and alerts)"><input name="phone" inputmode="tel" autocomplete="tel" /></Field>
+            <Field label="Password" hint="At least 8 characters."><input type="password" name="password" minlength={8} required autocomplete="new-password" /></Field>
+            <button class="btn btn-lg">Create admin and log in</button>
+          </form>
+        )}
+        <p class="muted small">This page switches itself off as soon as an admin exists.</p>
+      </div>
+    </div>
+  ))
+})
+
+authRoutes.post('/setup', async (c) => {
+  if (await hasAdmin(c.env)) return c.notFound()
+  if (!c.env.SETUP_CODE) return c.redirect('/setup', 303)
+  if (!(await rateLimit(c.env, `setup:${clientIp(c)}`, 5, 3600))) return redirectMsg(c, '/setup', { err: 'Too many attempts. Try again in an hour.' })
+  const f = await form(c)
+  if (!timingSafeEqual(await sha256Hex(f.code ?? ''), await sha256Hex(c.env.SETUP_CODE))) return redirectMsg(c, '/setup', { err: 'Setup code is not correct.' })
+  const email = str(f.email, 120).toLowerCase()
+  const name = str(f.name, 80)
+  const password = f.password ?? ''
+  if (!name || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) return redirectMsg(c, '/setup', { err: 'Enter your name, a valid email and a password of at least 8 characters.' })
+  const phone = normalizePhone(f.phone)
+  const hash = await hashPassword(password)
+  // Re-use an existing account with this email or phone (e.g. you sent an enquiry before), otherwise create one.
+  const existing = await first<{ id: number }>(c.env, 'SELECT id FROM users WHERE email = ? OR (phone = ? AND ? IS NOT NULL) ORDER BY id LIMIT 1', email, phone, phone)
+  let id: number
+  if (existing) {
+    id = existing.id
+    await run(c.env, "UPDATE users SET role = 'admin', name = ?, email = ?, password_hash = ?, active = 1, blocked = 0, merged_into = NULL WHERE id = ?", name, email, hash, id)
+    if (phone) await run(c.env, 'UPDATE users SET phone = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM users WHERE phone = ? AND id != ?)', phone, id, phone, id)
+  } else {
+    id = await insertId(c.env, "INSERT INTO users (role, name, email, phone, password_hash) VALUES ('admin', ?, ?, ?, ?)", name, email, phone, hash)
+  }
+  await logActivity(c.env, id, 'setup.first_admin', 'user', id, { email })
+  await createSession(c, id, 'admin')
+  return redirectMsg(c, '/admin', { ok: 'Welcome! Your admin account is ready. You can now delete SETUP_CODE in Cloudflare.' })
 })
