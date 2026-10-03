@@ -421,3 +421,24 @@ a.card.list-item { padding: 12px 16px; margin-bottom: 8px; }
   .info-list { grid-template-columns: 1fr; gap: 2px; }
   .info-list dt { margin-top: 8px; }
 }
+
+/* Responsive forms: fields wrap to new lines instead of squeezing */
+.wrap-row > .field { flex: 1 1 150px; }
+.field > input:not([type=checkbox]):not([type=radio]), .field > select, .field > textarea { width: 100%; max-width: 100%; }
+.field-label { overflow-wrap: normal; word-break: normal; }
+form, fieldset, .card { min-width: 0; max-width: 100%; }
+@media (max-width: 600px) {
+  .row:not(.row-between):not(.filters-inline) { flex-wrap: wrap; }
+  .row > .field { flex: 1 1 140px; }
+  .row > .field.grow, .row > textarea, .row > .field:has(textarea) { flex-basis: 100%; }
+  .w-sm, .w-md { width: 100%; }
+  .filters-inline input, .filters-inline select { min-width: 0; flex: 1 1 140px; }
+  .room-edit, .season-edit { padding: 10px; }
+  .dash-main { padding: 16px 12px 60px; }
+}
+code { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .section-nav { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .section-nav a { flex: 0 0 auto; }
+  .row > .field { align-self: stretch; justify-content: flex-end; }
+}

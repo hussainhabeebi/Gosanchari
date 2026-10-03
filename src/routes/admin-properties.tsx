@@ -59,7 +59,7 @@ const RoomFields = ({ r }: { r?: Partial<RoomRow> }) => {
   return (
     <>
       <div class="row wrap-row">
-        <Field label="Room category name"><input name="name" value={r?.name ?? ''} required maxlength={80} placeholder="e.g. Deluxe Valley View" /></Field>
+        <Field label="Room category name" class="grow"><input name="name" value={r?.name ?? ''} required maxlength={80} placeholder="e.g. Deluxe Valley View" /></Field>
         <Field label="Inventory (rooms of this type)"><input type="number" name="units" value={r?.units ?? 1} min="0" max="500" class="w-sm" /></Field>
         <Field label="Max guests"><input type="number" name="capacity" value={r?.capacity ?? 2} min="1" max="40" class="w-sm" /></Field>
         <Field label="Max adults"><input type="number" name="max_adults" value={r?.max_adults ?? ''} min="1" max="40" class="w-sm" /></Field>
@@ -77,7 +77,7 @@ const RoomFields = ({ r }: { r?: Partial<RoomRow> }) => {
       <div class="row wrap-row">
         <label class="check"><input type="checkbox" name="extra_bed" value="1" checked={!!r?.extra_bed} /> Extra bed available</label>
         <Field label="Extra bed ₹/night"><input type="number" name="extra_bed_rate" value={r?.extra_bed_rate ?? ''} min="0" class="w-md" /></Field>
-        <Field label="Includes"><input name="inclusions" value={r?.inclusions ?? ''} placeholder="Breakfast, welcome drink" /></Field>
+        <Field label="Includes" class="grow"><input name="inclusions" value={r?.inclusions ?? ''} placeholder="Breakfast, welcome drink" /></Field>
       </div>
       <Field label="Room description"><textarea name="description" rows={2} maxlength={1500}>{r?.description ?? ''}</textarea></Field>
       <Field label="Room amenities"><Checks name="amenities" options={Object.entries(ROOM_AMENITIES)} selected={am} /></Field>
@@ -346,7 +346,7 @@ function propertyForm(
                 <form method="post" action={`/admin/properties/${p.id}/seasons`} class="stack">
                   {g && <input type="hidden" name="orig_key" value={g.key} />}
                   <div class="row wrap-row">
-                    <Field label="Season name"><input name="name" value={g?.name ?? ''} required placeholder="Onam / Christmas & New Year / Summer / Monsoon" /></Field>
+                    <Field label="Season name" class="grow"><input name="name" value={g?.name ?? ''} required placeholder="Onam / Christmas & New Year / Summer / Monsoon" /></Field>
                     <Field label="From"><input type="date" name="start_date" value={g?.start_date ?? ''} required /></Field>
                     <Field label="To (last night)"><input type="date" name="end_date" value={g?.end_date ?? ''} required /></Field>
                     <Field label="Min nights"><input type="number" name="min_nights" value={g?.min_nights ?? ''} min="1" class="w-sm" /></Field>
