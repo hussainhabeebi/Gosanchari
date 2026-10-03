@@ -22,7 +22,8 @@ export interface Env {
   AI: Ai
   /** Optional so the portal still runs (with database-only answers) where AI Search is not set up. */
   AI_SEARCH?: AiSearchInstance
-  VECTORIZE: VectorizeIndex
+  /** Optional: semantic "Recommended" ranking and similar properties. Without it, rating-based ordering is used. */
+  VECTORIZE?: VectorizeIndex
   JOBS: Queue<JobMessage>
   CHAT: DurableObjectNamespace
   ASSETS: Fetcher

@@ -163,7 +163,7 @@ async function queryVector(env: Env, text: string): Promise<number[] | null> {
 }
 
 export async function semanticScores(env: Env, text: string, topK = 50): Promise<Map<number, number> | null> {
-  if (!(await aiEnabled(env, 'recommended'))) return null
+  if (!env.VECTORIZE || !(await aiEnabled(env, 'recommended'))) return null
   const v = await queryVector(env, text)
   if (!v) return null
   try {
@@ -198,7 +198,7 @@ export async function similarProperties(env: Env, propertyId: number, n = 4): Pr
   const cachedIds = await env.KV.get<number[]>(cacheKey, 'json')
   if (cachedIds) return cardsByIds(env, cachedIds)
   let ids: number[] = []
-  if (await aiEnabled(env, 'recommended')) {
+  if (env.VECTORIZE && (await aiEnabled(env, 'recommended'))) {
     try {
       const [vec] = await env.VECTORIZE.getByIds([`p-${propertyId}`])
       if (vec?.values) {
@@ -237,9 +237,10 @@ export async function closeMatches(env: Env, f: SearchFilters, exclude: number[]
 
 /** Create/refresh a property's embedding. Runs from the queue only when a property changes. */
 export async function embedProperty(env: Env, propertyId: number): Promise<void> {
+  if (!env.VECTORIZE) return
   const p = await first<PropertyRow>(env, 'SELECT * FROM properties WHERE id = ?', propertyId)
   if (!p) {
-    await env.VECTORIZE?.deleteByIds([`p-${propertyId}`]).catch(() => {})
+    await env.VECTORIZE.deleteByIds([`p-${propertyId}`]).catch(() => {})
     return
   }
   const rooms = await all<RoomRow>(env, 'SELECT name, capacity FROM rooms WHERE property_id = ? AND active = 1', propertyId)

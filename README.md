@@ -69,23 +69,22 @@ Trigger cron jobs locally: `curl "http://localhost:8787/cdn-cgi/handler/schedule
 
 For a Cloudflare dashboard Git connection (Workers & Pages → Create → Import a repository), use those same two commands. The root directory is `/`.
 
-**First time only:**
+**First deploy.** No IDs need editing: the deploy script creates the D1 database if needed and applies migrations. `wrangler deploy` then creates the KV namespace, R2 buckets and queue by name.
 
-```bash
-npm install
-npx wrangler login                   # or set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
-npm run setup:cloudflare             # creates D1, KV, R2 x2, queue, Vectorize; writes IDs into wrangler.toml; migrates
-npx wrangler secret put SESSION_SECRET
-# edit SITE_URL in wrangler.toml, commit wrangler.toml
-npm run deploy
-npm run admin:create -- you@example.com "Your Name" +919XXXXXXXXX
-```
+1. Change `SITE_URL` in `wrangler.toml` to your address, then commit.
+2. Deploy, either:
+   - **from the Cloudflare dashboard** (Git-connected): build command `npm run build`, deploy command `npm run deploy`; or
+   - **from your computer**: `npm install`, `npx wrangler login`, then `npm run deploy`.
+3. Set a session secret: `npx wrangler secret put SESSION_SECRET` (or Worker → Settings → Variables and Secrets).
+4. Create your admin login: `npm run admin:create -- you@example.com "Your Name"`.
 
 Demo data is optional: `npm run db:seed:remote`. Don't load it on a live site without changing the demo passwords.
 
 **Optional, turn on when ready** (all have safe fallbacks):
 1. **AI Gateway:** in the dashboard, create a gateway named `gosanchari` (matches `AI_GATEWAY_ID`). Turn on caching and rate limiting, and set a spend alert.
-2. **AI Search:** create the instance `gosanchari-kb` with the `gosanchari-kb` R2 bucket as its source, then uncomment the `[[ai_search]]` block in `wrangler.toml`. Deploys fail if the block is on but the instance doesn't exist.
+2. **Vectorize** ("Recommended" sorting and similar properties): run `npm run setup:cloudflare`, then uncomment the `[[vectorize]]` block in `wrangler.toml`.
+   **AI Search:** create the instance `gosanchari-kb` with the `gosanchari-kb` R2 bucket as its source, then uncomment the `[[ai_search]]` block.
+   Deploys fail if either block is on but its resource doesn't exist.
 3. **Turnstile:** set the widget site key in `TURNSTILE_SITE_KEY` (`[vars]`) and the secret with `wrangler secret put TURNSTILE_SECRET`. Until then, forms work without the bot check (rate limits still apply).
 4. **WhatsApp:** set the secrets `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET`. Point the Meta webhook to `https://<site>/webhooks/whatsapp` and create the approved templates (`otp` and the others). Until then, phone login is unavailable (use email login) and messages are only logged.
 5. **Email:** set `RESEND_API_KEY`. **Google login:** set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
