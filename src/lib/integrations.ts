@@ -9,7 +9,11 @@ import { hmacHex, timingSafeEqual } from './util'
 // ---- Turnstile ----
 
 export async function verifyTurnstile(env: Env, token: string | undefined, ip?: string | null): Promise<boolean> {
-  if (!env.TURNSTILE_SECRET) return env.ENVIRONMENT !== 'production'
+  // Not set up yet: allow the form (rate limits still apply). Add TURNSTILE_SECRET + TURNSTILE_SITE_KEY to turn the bot check on.
+  if (!env.TURNSTILE_SECRET) {
+    if (env.ENVIRONMENT === 'production') console.warn('Turnstile is not configured; bot check skipped')
+    return true
+  }
   if (!token) return false
   const body = new FormData()
   body.append('secret', env.TURNSTILE_SECRET)

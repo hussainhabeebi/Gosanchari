@@ -8,8 +8,10 @@ directory = "./public"
 binding = "ASSETS"
 
 [vars]
-ENVIRONMENT = "development"
-SITE_URL = "http://localhost:8787"
+# Live settings. For local development, .dev.vars overrides these (ENVIRONMENT=development, SITE_URL=http://localhost:8787).
+ENVIRONMENT = "production"
+# Your public address — used in WhatsApp/email links. Change to your domain or https://gosanchari.<your-subdomain>.workers.dev
+SITE_URL = "https://gosanchari.com"
 AI_GATEWAY_ID = "gosanchari"
 TURNSTILE_SITE_KEY = ""
 
@@ -35,10 +37,12 @@ bucket_name = "gosanchari-kb"
 [ai]
 binding = "AI"
 
-# AI Search (formerly AutoRAG). Create the instance in the dashboard with the gosanchari-kb R2 bucket as its source.
-[[ai_search]]
-binding = "AI_SEARCH"
-instance_name = "gosanchari-kb"
+# AI Search (formerly AutoRAG). Deploys fail if the instance does not exist, so this is off until you create it:
+# Dashboard → AI → AI Search → create "gosanchari-kb" with the gosanchari-kb R2 bucket as source, then uncomment.
+# Until then, property Q&A answers from the database and the help chat uses the FAQs.
+# [[ai_search]]
+# binding = "AI_SEARCH"
+# instance_name = "gosanchari-kb"
 
 [[vectorize]]
 binding = "VECTORIZE"

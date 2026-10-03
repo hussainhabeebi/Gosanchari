@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler d1 migrations apply gosanchari --remote && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate:local": "wrangler d1 migrations apply gosanchari --local",
@@ -16,7 +16,10 @@
     "cf-typegen": "wrangler types",
     "dev:offline": "wrangler dev -c wrangler.offline.toml",
     "db:migrate:offline": "wrangler d1 migrations apply gosanchari --local -c wrangler.offline.toml",
-    "db:seed:offline": "wrangler d1 execute gosanchari --local -c wrangler.offline.toml --file=seed/seed.sql"
+    "db:seed:offline": "wrangler d1 execute gosanchari --local -c wrangler.offline.toml --file=seed/seed.sql",
+    "build": "tsc --noEmit && vitest run",
+    "setup:cloudflare": "bash scripts/setup-cloudflare.sh",
+    "admin:create": "node scripts/create-admin.mjs"
   },
   "dependencies": {
     "hono": "^4.13.12"

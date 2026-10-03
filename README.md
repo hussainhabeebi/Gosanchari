@@ -62,35 +62,35 @@ Trigger cron jobs locally: `curl "http://localhost:8787/cdn-cgi/handler/schedule
 
 ## Deploy to Cloudflare
 
+| | Command |
+|---|---|
+| Build | `npm run build` (type check + tests; Wrangler bundles the Worker itself) |
+| Deploy | `npm run deploy` (applies D1 migrations, then `wrangler deploy`) |
+
+For a Cloudflare dashboard Git connection (Workers & Pages → Create → Import a repository), use those same two commands. The root directory is `/`.
+
+**First time only:**
+
 ```bash
-wrangler d1 create gosanchari                 # put database_id in wrangler.toml (and wrangler.offline.toml)
-wrangler kv namespace create KV               # put id in wrangler.toml
-wrangler r2 bucket create gosanchari-media
-wrangler r2 bucket create gosanchari-kb
-wrangler queues create gosanchari-jobs
-wrangler vectorize create gosanchari-properties --dimensions=1024 --metric=cosine
-wrangler vectorize create-metadata-index gosanchari-properties --property-name=status --type=string
-npm run db:migrate:remote
+npm install
+npx wrangler login                   # or set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
+npm run setup:cloudflare             # creates D1, KV, R2 x2, queue, Vectorize; writes IDs into wrangler.toml; migrates
+npx wrangler secret put SESSION_SECRET
+# edit SITE_URL in wrangler.toml, commit wrangler.toml
+npm run deploy
+npm run admin:create -- you@example.com "Your Name" +919XXXXXXXXX
 ```
 
-In the Cloudflare dashboard:
-1. **AI Gateway:** create a gateway named `gosanchari` (matches `AI_GATEWAY_ID`). Turn on caching and rate limiting, and set a spend alert.
-2. **AI Search:** create an instance `gosanchari-kb` with the `gosanchari-kb` R2 bucket as its data source.
-   The portal writes property details to `properties/<slug>/details.md`, and FAQs and policies to `general/…`. It asks AI Search to re-index when they change.
-3. **Turnstile:** create a widget and put its site key in `TURNSTILE_SITE_KEY` (`[vars]`).
-4. **Images (optional):** enable Image Transformations on the zone, then tick the option in *Admin → Settings*.
+Demo data is optional: `npm run db:seed:remote`. Don't load it on a live site without changing the demo passwords.
 
-Secrets (`wrangler secret put NAME`):
-`SESSION_SECRET`, `TURNSTILE_SECRET`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `RESEND_API_KEY`,
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
-
-Set `ENVIRONMENT = "production"` and `SITE_URL` in `[vars]`, then `npm run deploy`.
-
-Webhooks:
-- **WhatsApp:** `https://<site>/webhooks/whatsapp`.
-- In Meta, create approved templates `otp` (authentication) plus confirmation, reminder and follow-up templates for messages sent outside the 24-hour window.
-
-Seed demo data in production only if you want it: `npm run db:seed:remote`.
+**Optional, turn on when ready** (all have safe fallbacks):
+1. **AI Gateway:** in the dashboard, create a gateway named `gosanchari` (matches `AI_GATEWAY_ID`). Turn on caching and rate limiting, and set a spend alert.
+2. **AI Search:** create the instance `gosanchari-kb` with the `gosanchari-kb` R2 bucket as its source, then uncomment the `[[ai_search]]` block in `wrangler.toml`. Deploys fail if the block is on but the instance doesn't exist.
+3. **Turnstile:** set the widget site key in `TURNSTILE_SITE_KEY` (`[vars]`) and the secret with `wrangler secret put TURNSTILE_SECRET`. Until then, forms work without the bot check (rate limits still apply).
+4. **WhatsApp:** set the secrets `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET`. Point the Meta webhook to `https://<site>/webhooks/whatsapp` and create the approved templates (`otp` and the others). Until then, phone login is unavailable (use email login) and messages are only logged.
+5. **Email:** set `RESEND_API_KEY`. **Google login:** set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+6. **Images:** enable Image Transformations on the zone, then tick the option in *Admin → Settings*.
+7. **Custom domain:** Workers → gosanchari → Settings → Domains & Routes. Update `SITE_URL` to match.
 
 ## Where each page lives
 

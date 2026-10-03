@@ -1,3 +1,6 @@
+# Local development overrides (wrangler dev reads this file; never commit .dev.vars)
+ENVIRONMENT=development
+SITE_URL=http://localhost:8787
 # Copy to .dev.vars for local development. In production use `wrangler secret put NAME`.
 SESSION_SECRET=change-me-to-a-long-random-string
 # Cloudflare Turnstile (leave empty to skip bot checks locally)
