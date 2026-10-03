@@ -70,7 +70,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   business: {
     name: 'Go Sanchari',
-    tagline: 'Handpicked stays across Kerala',
+    tagline: 'Travel more, worry less. Handpicked stays across Kerala.',
     phone: '+91 90000 00000',
     whatsapp: '+919000000000',
     email: 'hello@gosanchari.com',

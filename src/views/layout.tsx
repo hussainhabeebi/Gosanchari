@@ -25,6 +25,7 @@ interface LayoutProps extends PageOpts {
   perms: Permissions | null
   flash: { ok?: string; err?: string }
   turnstileSiteKey: string
+  siteUrl: string
   children?: Child
 }
 
@@ -68,12 +69,20 @@ const GUEST_NAV = [
   { key: 'help', href: '/help', label: 'Help & chat' },
 ]
 
+/** "Go" in brand red, "Sanchari" in the logo's green→blue. Falls back to plain text for other names. */
+const Wordmark: FC<{ name: string }> = ({ name }) =>
+  /^go\s*sanchari$/i.test(name.trim()) ? (
+    <span class="wordmark"><span class="wm-sanchari">Sanchari</span><span class="wm-com">.com</span></span>
+  ) : (
+    <span class="wordmark">{name}</span>
+  )
+
 const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, settings }) => (
   <header class="topbar">
     <div class="wrap topbar-in">
       <a href="/" class="logo" aria-label={settings.business.name}>
-        <span class="logo-mark">GS</span>
-        <span>{settings.business.name}</span>
+        <img src="/brand/go-96.png" alt="" width="40" height="40" class="logo-img" />
+        <Wordmark name={settings.business.name} />
       </a>
       <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
       <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
@@ -106,7 +115,7 @@ const Footer: FC<{ settings: Settings }> = ({ settings }) => (
   <footer class="footer">
     <div class="wrap footer-grid">
       <div>
-        <div class="logo"><span class="logo-mark">GS</span><span>{settings.business.name}</span></div>
+        <img src="/brand/logo.webp" alt={settings.business.name} width="120" height="120" class="footer-logo" loading="lazy" />
         <p class="muted">{settings.business.tagline}</p>
       </div>
       <div>
@@ -183,9 +192,12 @@ export const Layout: FC<LayoutProps> = (p) => {
           {p.canonical && <link rel="canonical" href={p.canonical} />}
           <meta property="og:title" content={fullTitle} />
           {p.description && <meta property="og:description" content={p.description} />}
-          {p.image && <meta property="og:image" content={p.image} />}
+          <meta property="og:image" content={p.image ?? `${p.siteUrl}/brand/og.jpg`} />
+          <meta property="og:site_name" content={p.settings.business.name} />
+          <meta name="twitter:card" content="summary_large_image" />
           <meta name="theme-color" content="#0f5e57" />
-          <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+          <link rel="icon" href="/favicon.png" type="image/png" />
+          <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
           <link rel="stylesheet" href="/app.css" />
           {p.turnstileSiteKey && <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
           {p.head}
@@ -234,7 +246,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
   const perms = user && isStaff(user.role) ? resolvePermissions(user.role, settings.role_permissions) : null
   const flash = { ok: c.req.query('ok')?.slice(0, 200), err: c.req.query('err')?.slice(0, 200) }
   return c.html(
-    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY}>
+    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL}>
       {body}
     </Layout>,
     status as 200,

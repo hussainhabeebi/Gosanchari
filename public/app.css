@@ -82,12 +82,16 @@ legend { font-weight: 600; font-size: .9rem; margin-bottom: 4px; }
 
 /* Header */
 .topbar { background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 30; }
-.topbar-in { display: flex; align-items: center; justify-content: space-between; height: 62px; }
-.logo { display: flex; align-items: center; gap: 8px; font-weight: 800; color: var(--green); text-decoration: none; font-size: 1.15rem; }
-.logo-mark { background: var(--green); color: #fff; border-radius: 9px; width: 34px; height: 34px; display: grid; place-items: center; font-size: .85rem; }
+.topbar-in { display: flex; align-items: center; justify-content: space-between; height: 66px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--green); text-decoration: none; font-size: 1.2rem; }
+.logo-img { width: 40px; height: 40px; border-radius: 9px; }
+.wordmark { letter-spacing: -.01em; font-size: 1.45rem; line-height: 1; }
+.wm-com { color: #1d2b2a; font-size: .8rem; font-weight: 600; margin-left: 1px; }
+.wm-sanchari { background: linear-gradient(90deg, #2e8b2e 0%, #1f8f6a 55%, #1a8fd6 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.footer-logo { width: 120px; height: 120px; border-radius: 50%; margin-bottom: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, .3); }
 .nav-toggle { display: none; }
 .nav-burger { font-size: 1.5rem; cursor: pointer; padding: 8px; }
-.topnav { display: none; position: absolute; top: 62px; left: 0; right: 0; background: #fff; border-bottom: 1px solid var(--line); flex-direction: column; padding: 12px 16px; gap: 12px; }
+.topnav { display: none; position: absolute; top: 66px; left: 0; right: 0; background: #fff; border-bottom: 1px solid var(--line); flex-direction: column; padding: 12px 16px; gap: 12px; }
 .topnav a { text-decoration: none; color: var(--ink); font-weight: 500; }
 .topnav a.btn { color: #fff; }
 .topnav a.btn-outline { color: var(--green); }
@@ -374,8 +378,6 @@ a.card.list-item { padding: 12px 16px; margin-bottom: 8px; }
 /* Footer */
 .footer { background: #0c3d39; color: #d8ebe7; padding: 36px 0 20px; margin-top: 40px; }
 .footer a { color: #fff; }
-.footer .logo { color: #fff; }
-.footer .logo-mark { background: #fff; color: var(--green); }
 .footer .muted { color: #a9c7c1; }
 .footer-grid { display: grid; gap: 20px; grid-template-columns: 1fr; margin-bottom: 16px; }
 @media (min-width: 760px) { .footer-grid { grid-template-columns: 2fr 1fr 1fr 1fr; } }
