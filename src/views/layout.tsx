@@ -69,20 +69,11 @@ const GUEST_NAV = [
   { key: 'help', href: '/help', label: 'Help & chat' },
 ]
 
-/** "Go" in brand red, "Sanchari" in the logo's green→blue. Falls back to plain text for other names. */
-const Wordmark: FC<{ name: string }> = ({ name }) =>
-  /^go\s*sanchari$/i.test(name.trim()) ? (
-    <span class="wordmark"><span class="wm-sanchari">Sanchari</span><span class="wm-com">.com</span></span>
-  ) : (
-    <span class="wordmark">{name}</span>
-  )
-
 const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, settings }) => (
   <header class="topbar">
     <div class="wrap topbar-in">
       <a href="/" class="logo" aria-label={settings.business.name}>
-        <img src="/brand/go-96.png" alt="" width="40" height="40" class="logo-img" />
-        <Wordmark name={settings.business.name} />
+        <img src="/brand/logo-200.webp" alt={settings.business.name} width="72" height="72" class="logo-img" />
       </a>
       <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
       <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
