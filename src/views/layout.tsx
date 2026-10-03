@@ -134,7 +134,14 @@ const Footer: FC<{ settings: Settings }> = ({ settings }) => (
         </p>
       </div>
     </div>
-    <div class="wrap muted small">© {new Date().getFullYear()} {settings.business.legal_name}</div>
+    <div class="wrap muted small footer-bottom">
+      <span>© {new Date().getFullYear()} {settings.business.legal_name}</span>
+      <span class="footer-credits">
+        Built by team <a href="https://aiingo.com" target="_blank" rel="noopener">aiingo.com</a>
+        <span aria-hidden="true"> · </span>
+        Powered by <a href="https://leadvyne.com" target="_blank" rel="noopener">leadvyne.com</a>
+      </span>
+    </div>
   </footer>
 )
 

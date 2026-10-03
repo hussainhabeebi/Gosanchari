@@ -455,3 +455,5 @@ code { overflow-wrap: anywhere; }
   .sticky-actions .btn { flex: 0 0 auto; padding: 8px 12px; }
   .sticky-actions .muted { display: none; }
 }
+.footer-bottom { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
+.footer-credits a { color: #fff; }
