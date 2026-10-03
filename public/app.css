@@ -442,3 +442,9 @@ code { overflow-wrap: anywhere; }
   .section-nav a { flex: 0 0 auto; }
   .row > .field { align-self: stretch; justify-content: flex-end; }
 }
+
+/* Property quick fill */
+.quick-fill textarea { margin: 8px 0; }
+.qf-filled { background: #fff6cc; border-radius: 8px; box-shadow: 0 0 0 4px #fff6cc; }
+.qf-filled input, .qf-filled select, .qf-filled textarea { border-color: #e6a700; }
+#qf-extra-list ul { margin: 4px 0 8px; padding-left: 20px; }

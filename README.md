@@ -154,6 +154,7 @@ All AI calls go through `src/lib/ai.ts`. Each call is checked against its on/off
 | Review check, reply draft, daily summary, problem alerts | Workers AI | Queue / Cron | Rule checks (links, phones), plain-number summary |
 | Follow-up drafts | Workers AI | Cron (daily) + Queue | Template text |
 | Description writer (EN + ML), photo tags, SEO | Workers AI (llava for photos) | On click / photo upload | Manual |
+| Property quick fill (paste one paragraph → fields, room categories, seasons) | Workers AI (large model) | On click; staff review, nothing saved until Save | Fill fields by hand |
 | Ask AI | Workers AI → SQL guard → read-only views | On question; cached 1 hour | Disabled message |
 
 Ask AI safety:

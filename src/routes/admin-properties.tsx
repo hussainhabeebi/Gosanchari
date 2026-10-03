@@ -20,6 +20,7 @@ import { fmtDate, fmtDateTime, int, isDate, money, nowIso, parseJson, slugify, s
 import { form, redirectMsg, type Form } from './helpers'
 import { destinations } from '../lib/properties'
 import type { SeasonRate } from '../lib/pricing'
+import { extractProperty, type ExtractedRoom, type ExtractedSeason } from '../lib/propextract'
 
 export const propertyEditorRoutes = new Hono<AppEnv>()
 
@@ -118,7 +119,23 @@ function propertyForm(
       </nav>
       {isNew && <p class="flash">Fill in the details and save. Room categories, photos & videos and seasonal tariffs open after the first save.</p>}
 
+      <details class="card ai-box quick-fill" open={isNew}>
+        <summary><span class="ai-badge">AI</span> <strong>Quick fill — paste all details in one paragraph</strong></summary>
+        <p class="muted small">Paste everything you have — owner's WhatsApp message, brochure text, your notes (English or Malayalam). AI puts each detail into the right field below, plus room categories and seasonal rates. Nothing is saved until you check and press Save.</p>
+        <textarea id="qf-text" rows={8} maxlength={12000} placeholder={'e.g. Misty Hills Resort, Chithirapuram, Munnar. 3 star resort built 2018. 12 rooms: 8 Deluxe Valley View (king bed, AC, balcony, kettle) ₹4,500 weekdays ₹5,500 weekends, 4 Family Suites for 4 guests ₹7,000. Christmas–New Year 20 Dec–5 Jan Deluxe 7,500, Suite 10,000, min 2 nights. Pool, parking, free Wi-Fi, restaurant (Kerala, North Indian) breakfast 7:30–10. Check-in 2 pm, check-out 11 am. No pets. 50% advance. 30% refund if cancelled 7 days before. Owner Joseph 98470 12345. 18 km from Mattupetty Dam…'}></textarea>
+        <div class="row wrap-row">
+          <button type="button" class="btn btn-sm" data-ai-extract="/admin/ai/extract-property">Fill the form with AI</button>
+          <span class="muted small" id="qf-status"></span>
+        </div>
+        <div id="qf-extra" class="stack" hidden>
+          <div id="qf-extra-list" class="small"></div>
+          <label class="check"><input type="checkbox" name="ai_apply_extra" value="1" form="prop-form" checked /> Also add these room categories and seasons when I save</label>
+        </div>
+      </details>
+
       <form method="post" action={isNew ? '/admin/properties/new' : `/admin/properties/${p.id}`} class="stack-lg" id="prop-form">
+        <input type="hidden" name="ai_rooms" id="qf-rooms" value="" />
+        <input type="hidden" name="ai_seasons" id="qf-seasons" value="" />
         <section class="card stack" id="basics">
           <h2>1. Basics</h2>
           <div class="row wrap-row">
@@ -472,9 +489,10 @@ propertyEditorRoutes.post('/admin/properties/new', requirePerm('manage_propertie
   const cols = Object.keys(v)
   const id = await insertId(c.env, `INSERT INTO properties (slug, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, slug, ...(Object.values(v) as (string | number | null)[]))
   await run(c.env, 'INSERT OR IGNORE INTO destinations (name, slug) VALUES (?, ?)', v.destination, slugify(v.destination))
+  const extra = await applyExtracted(c, id, f)
   await afterPropertySave(c, id)
   await logActivity(c.env, c.get('user')!.id, 'property.created', 'property', id, { name: v.name })
-  return redirectMsg(c, `/admin/properties/${id}#rooms`, { ok: 'Property created. Now add room categories, photos & videos and seasonal rates below.' })
+  return redirectMsg(c, `/admin/properties/${id}#rooms`, { ok: `Property created.${extra} Now check room categories, add photos & videos and seasonal rates below.` })
 })
 
 propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_properties'), async (c) => {
@@ -487,10 +505,11 @@ propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_propertie
   await run(c.env, `UPDATE properties SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...(Object.values(v) as (string | number | null)[]), nowIso(), id)
   await run(c.env, 'UPDATE property_photos SET tags_confirmed = 1 WHERE property_id = ?', id)
   await run(c.env, 'INSERT OR IGNORE INTO destinations (name, slug) VALUES (?, ?)', v.destination, slugify(v.destination))
+  const extra = await applyExtracted(c, id, f)
   await afterPropertySave(c, id)
   const changed = cols.filter((k) => String((before as unknown as Record<string, unknown>)[k] ?? '') !== String((v as Record<string, unknown>)[k] ?? ''))
   await logActivity(c.env, c.get('user')!.id, 'property.updated', 'property', id, { changed })
-  return redirectMsg(c, `/admin/properties/${id}`, { ok: 'Saved.' })
+  return redirectMsg(c, `/admin/properties/${id}`, { ok: `Saved.${extra}` })
 })
 
 // ---- Room categories ----
@@ -532,6 +551,48 @@ propertyEditorRoutes.post('/admin/rooms/:id', requirePerm('manage_properties'), 
   await afterPropertySave(c, r.property_id)
   return redirectMsg(c, `/admin/properties/${r.property_id}#rooms`, { ok: `Saved “${v.name}”.` })
 })
+
+/** Rooms and seasons that "Quick fill" found, added on save when staff leave the box ticked. Returns a message part. */
+async function applyExtracted(c: Context<AppEnv>, propertyId: number, f: Form): Promise<string> {
+  if (!f.ai_apply_extra) return ''
+  const rooms = parseJson<ExtractedRoom[]>(f.ai_rooms, [])
+  const seasons = parseJson<ExtractedSeason[]>(f.ai_seasons, [])
+  if (!Array.isArray(rooms) || !Array.isArray(seasons) || (!rooms.length && !seasons.length)) return ''
+  const existing = await all<{ id: number; name: string }>(c.env, 'SELECT id, name FROM rooms WHERE property_id = ?', propertyId)
+  const byName = new Map(existing.map((r) => [r.name.trim().toLowerCase(), r.id]))
+  let addedRooms = 0
+  for (const r of rooms.slice(0, 20)) {
+    const fake = Object.assign(
+      Object.fromEntries(Object.entries(r).filter(([, v]) => !Array.isArray(v)).map(([k, v]) => [k, typeof v === 'boolean' ? (v ? '1' : '') : String(v)])),
+      { __all: { amenities: Array.isArray(r.amenities) ? r.amenities.map(String) : [] } },
+    ) as Form
+    const v = roomValues(fake)
+    if (!v.name || byName.has(v.name.toLowerCase())) continue
+    const cols = Object.keys(v)
+    const rid = await insertId(c.env, `INSERT INTO rooms (property_id, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, propertyId, ...(Object.values(v) as (string | number | null)[]))
+    byName.set(v.name.toLowerCase(), rid)
+    addedRooms++
+  }
+  let addedSeasons = 0
+  const stmts: D1PreparedStatement[] = []
+  for (const s of seasons.slice(0, 20)) {
+    const name = str(s.name, 60)
+    if (!name || !isDate(s.start_date) || !isDate(s.end_date) || s.end_date < s.start_date) continue
+    let n = 0
+    for (const [room, rate] of Object.entries(s.rates ?? {})) {
+      const rid = byName.get(room.trim().toLowerCase())
+      const amount = Math.round(Number(rate))
+      if (!rid || !(amount > 0)) continue
+      stmts.push(c.env.DB.prepare('INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(propertyId, rid, name, s.start_date, s.end_date, amount, int(String(s.min_nights ?? '')) || null, c.get('user')!.id))
+      n++
+    }
+    if (n) addedSeasons++
+  }
+  if (stmts.length) await c.env.DB.batch(stmts)
+  if (addedRooms || addedSeasons) await logActivity(c.env, c.get('user')!.id, 'property.quick_fill', 'property', propertyId, { rooms: addedRooms, seasons: addedSeasons })
+  const parts = [addedRooms && `${addedRooms} room categor${addedRooms === 1 ? 'y' : 'ies'}`, addedSeasons && `${addedSeasons} season${addedSeasons === 1 ? '' : 's'}`].filter(Boolean)
+  return parts.length ? ` Added ${parts.join(' and ')} from quick fill — please check them.` : ''
+}
 
 // ---- Photos & videos ----
 const IMAGE_TYPES = /^image\/(jpeg|png|webp)$/
@@ -649,4 +710,13 @@ propertyEditorRoutes.post('/admin/ai/seo', requirePerm('manage_properties'), asy
   const f = await form(c)
   const r = await seoSuggest(c.env, { name: str(f.name, 100), type: STAY_TYPES[f.type] ?? str(f.type, 20), destination: str(f.destination, 60), description: str(f.description, 3000) })
   return c.json(r ?? { error: 'AI SEO suggestions are off or unavailable.' })
+})
+
+propertyEditorRoutes.post('/admin/ai/extract-property', requirePerm('manage_properties'), async (c) => {
+  const f = await form(c)
+  const text = str(f.text, 12000)
+  if (text.length < 20) return c.json({ error: 'Paste a few lines about the property first.' })
+  const r = await extractProperty(c.env, text)
+  if (!r) return c.json({ error: 'AI quick fill is off or unavailable right now. Please fill the fields by hand.' })
+  return c.json(r)
 })

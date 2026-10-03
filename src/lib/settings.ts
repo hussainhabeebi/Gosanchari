@@ -27,6 +27,7 @@ export const AI_FEATURES = {
   ask_ai: 'Ask AI (business questions)',
   review_insights: 'Review problem alerts and reply drafts',
   description_writer: 'Property description writer',
+  property_extract: 'Property quick fill (paste details, AI fills the form)',
   photo_tags: 'Photo tag suggestions',
   seo_suggest: 'SEO title & description suggestions',
 } as const

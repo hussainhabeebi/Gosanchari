@@ -239,6 +239,49 @@
       $('#desc-en').value = r.en; if (r.ml) $('#desc-ml').value = r.ml
     })
   })
+  // Property quick fill: paste one paragraph, AI fills the editor fields (staff review, then save).
+  var qfBtn = $('[data-ai-extract]')
+  if (qfBtn) qfBtn.addEventListener('click', function () {
+    var f = $('#prop-form'), st = $('#qf-status'), text = $('#qf-text').value.trim()
+    if (text.length < 20) { st.textContent = 'Paste a few lines about the property first.'; return }
+    var old = qfBtn.textContent; qfBtn.disabled = true; qfBtn.textContent = 'Reading… (up to a minute)'; st.textContent = ''
+    post(qfBtn.dataset.aiExtract, { text: text }).then(function (r) {
+      qfBtn.disabled = false; qfBtn.textContent = old
+      if (r.error) { st.textContent = r.error; return }
+      $$('.qf-filled', f).forEach(function (el) { el.classList.remove('qf-filled') })
+      var n = 0
+      Object.keys(r.fields || {}).forEach(function (k) {
+        var v = r.fields[k], els = $$('[name="' + k + '"]', f)
+        if (!els.length) return
+        var touched = false
+        els.forEach(function (el) {
+          if (el.type === 'checkbox') {
+            if (Array.isArray(v)) { if (v.indexOf(el.value) >= 0 && !el.checked) { el.checked = true; touched = true; mark(el) } }
+            else if (typeof v === 'boolean' && el.checked !== v) { el.checked = v; touched = true; mark(el) }
+          } else if (el.tagName === 'SELECT') {
+            if ($$('option', el).some(function (o) { return o.value === String(v) })) { el.value = String(v); touched = true; mark(el) }
+          } else if (typeof v === 'string' && v) { el.value = v; touched = true; mark(el) }
+          if (touched) { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
+        })
+        if (touched) n++
+      })
+      var rooms = r.rooms || [], seasons = r.seasons || []
+      $('#qf-rooms').value = rooms.length ? JSON.stringify(rooms) : ''
+      $('#qf-seasons').value = seasons.length ? JSON.stringify(seasons) : ''
+      var box = $('#qf-extra'), list = $('#qf-extra-list')
+      if (rooms.length || seasons.length) {
+        list.innerHTML = (rooms.length ? '<strong>Room categories found:</strong><ul>' + rooms.map(function (x) {
+          return '<li>' + esc(x.name) + (x.units ? ' · ' + esc(x.units) + ' room(s)' : '') + (x.capacity ? ' · sleeps ' + esc(x.capacity) : '') + (x.base_rate ? ' · ' + money(+x.base_rate) : '') + (x.weekend_rate ? ' / ' + money(+x.weekend_rate) + ' wknd' : '') + '</li>'
+        }).join('') + '</ul>' : '') + (seasons.length ? '<strong>Seasons found:</strong><ul>' + seasons.map(function (x) {
+          return '<li>' + esc(x.name) + ' · ' + esc(x.start_date) + ' to ' + esc(x.end_date) + ' · ' + Object.keys(x.rates).map(function (k) { return esc(k) + ' ' + money(x.rates[k]) }).join(', ') + '</li>'
+        }).join('') + '</ul>' : '')
+        box.hidden = false
+      } else box.hidden = true
+      st.textContent = n ? 'Filled ' + n + ' field(s) — highlighted in yellow. Please check them, then press Save.' : 'Could not find details to fill. Try adding more information.'
+      var first = $('.qf-filled', f); if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }).catch(function () { qfBtn.disabled = false; qfBtn.textContent = old; st.textContent = 'Something went wrong. Please try again.' })
+    function mark(el) { (el.closest('.field') || el.closest('label') || el).classList.add('qf-filled') }
+  })
   var seoBtn = $('[data-ai-seo]')
   if (seoBtn) seoBtn.addEventListener('click', function () {
     var f = $('#prop-form'); seoBtn.disabled = true
