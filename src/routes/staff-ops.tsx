@@ -1,6 +1,7 @@
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
 import { Hono, type Context } from 'hono'
+import { contact as readContact, STAY_TYPES, stayTypeLabel } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, Field, Pager, Pill, Select, Table, Tabs } from '../views/components'
@@ -36,7 +37,7 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
   const results = await searchProperties(c.env, f, 100)
   const ids = results.map((r) => r.id)
   const [internal, rooms, dests] = await Promise.all([
-    ids.length ? all<Pick<PropertyRow, 'id' | 'owner_name' | 'owner_phone' | 'commission_pct' | 'internal_notes' | 'last_minute_note' | 'is_partner'>>(c.env, `SELECT id, owner_name, owner_phone, commission_pct, internal_notes, last_minute_note, is_partner FROM properties WHERE id IN (${placeholders(ids.length)})`, ...ids) : Promise.resolve([]),
+    ids.length ? all<Pick<PropertyRow, 'id' | 'owner_name' | 'owner_phone' | 'commission_pct' | 'internal_notes' | 'last_minute_note' | 'is_partner' | 'contact'>>(c.env, `SELECT id, owner_name, owner_phone, commission_pct, internal_notes, last_minute_note, is_partner, contact FROM properties WHERE id IN (${placeholders(ids.length)})`, ...ids) : Promise.resolve([]),
     ids.length ? all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(ids.length)}) ORDER BY base_rate`, ...ids) : Promise.resolve([]),
     destinations(c.env),
   ])
@@ -62,7 +63,7 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
         <input type="date" name="checkOut" value={f.checkOut ?? ''} />
         <input type="number" name="guests" value={f.guests ?? ''} placeholder="Guests" min="1" />
         <input type="number" name="priceMax" value={f.priceMax ?? ''} placeholder="Max ₹/night" />
-        <Select name="type" value={f.types?.[0]} options={[['', 'Any type'], ...PROPERTY_TYPES.map((t) => [t, t] as [string, string])]} />
+        <Select name="type" value={f.types?.[0]} options={[['', 'Any type'], ...PROPERTY_TYPES.map((t) => [t, STAY_TYPES[t]] as [string, string])]} />
         <input name="q" value={f.q ?? ''} placeholder="Feel: quiet, lake view, kids…" />
         <Select name="sort" value={f.sort} options={[['price_asc', 'Price ↑'], ['price_desc', 'Price ↓'], ['rating', 'Rating'], ['recommended', 'Best match']]} />
         <button class="btn btn-sm">Search</button>
@@ -81,7 +82,11 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
                 <div class="row-between"><a href={`/stay/${p.slug}`} target="_blank"><strong>{p.name}</strong></a><span>★ {p.rating_avg.toFixed(1)} · {p.type} · {p.destination}</span></div>
                 {i?.last_minute_note && <div class="small ok">⚡ {i.last_minute_note}</div>}
                 {perms.view_net_rates && i && (
-                  <div class="small internal">Owner: {i.owner_name} {i.owner_phone && <a href={`tel:${i.owner_phone}`}>{i.owner_phone}</a>} · {i.is_partner ? `Partner, commission ${i.commission_pct}%` : 'Own property'}{i.internal_notes ? ` · ${i.internal_notes}` : ''}</div>
+                  <div class="small internal">
+                    Owner: {i.owner_name} {i.owner_phone && <a href={`tel:${i.owner_phone}`}>{i.owner_phone}</a>} · {i.is_partner ? `Partner, commission ${i.commission_pct}%` : 'Own property'}
+                    {(() => { const k = readContact(i.contact); return <>{k.person && ` · Contact: ${k.person}`}{k.phone && <> · <a href={`tel:${k.phone}`}>{k.phone}</a></>}{k.whatsapp && <> · <a href={`https://wa.me/${k.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">WhatsApp</a></>}{k.reservation_email && <> · <a href={`mailto:${k.reservation_email}`}>{k.reservation_email}</a></>}{k.booking_url && <> · <a href={k.booking_url} target="_blank" rel="noopener">Direct booking link</a></>}</> })()}
+                    {i.internal_notes ? <div>Remarks: {i.internal_notes}</div> : null}
+                  </div>
                 )}
                 <Table head={['Room', 'Sleeps', 'Rate', ...(perms.view_net_rates ? ['Net'] : []), ...(avail ? ['Free'] : []), '']}>
                   {prs.map((r) => (
@@ -110,7 +115,7 @@ opsRoutes.get('/staff/finder/compare', requirePerm('manage_quotes'), async (c) =
   const props = await all<PropertyRow>(c.env, `SELECT * FROM properties WHERE id IN (${placeholders(ids.length)})`, ...ids)
   const rooms = await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(ids.length)}) ORDER BY base_rate`, ...ids)
   const rows: [string, (p: PropertyRow) => unknown][] = [
-    ['Type', (p) => p.type], ['Destination', (p) => p.destination], ['Rating', (p) => `★ ${p.rating_avg.toFixed(1)} (${p.rating_count})`],
+    ['Type', (p) => stayTypeLabel(p)], ['Destination', (p) => p.destination], ['Rating', (p) => `★ ${p.rating_avg.toFixed(1)} (${p.rating_count})`],
     ['From', (p) => money(Math.min(...rooms.filter((r) => r.property_id === p.id).map((r) => r.base_rate)))],
     ['Rooms', (p) => rooms.filter((r) => r.property_id === p.id).map((r) => `${r.name} (${r.capacity})`).join(', ')],
     ['Facilities', (p) => parseJson<string[]>(p.facilities, []).join(', ')],

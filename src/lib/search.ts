@@ -1,8 +1,9 @@
 // Search filters: parsing guest sentences without AI (fallback + pre-pass) and validating AI output.
 
 import { addDays, isDate, todayIST } from './util'
+import { STAY_TYPES } from './catalog'
 
-export const PROPERTY_TYPES = ['homestay', 'villa', 'resort', 'houseboat', 'cottage'] as const
+export const PROPERTY_TYPES = Object.keys(STAY_TYPES)
 export const FACILITIES: Record<string, string> = {
   pool: 'Pool',
   wifi: 'Wi-Fi',
@@ -23,6 +24,28 @@ export const FACILITIES: Record<string, string> = {
   spa: 'Spa',
   wheelchair: 'Wheelchair access',
   ground_floor: 'Ground floor rooms',
+  gym: 'Gym',
+  ayurveda: 'Ayurveda centre',
+  kids_play: 'Kids play area',
+  indoor_games: 'Indoor games',
+  bonfire: 'Bonfire area',
+  bbq: 'Barbecue',
+  elevator: 'Lift / elevator',
+  laundry: 'Laundry',
+  room_service: 'Room service',
+  housekeeping: 'Daily housekeeping',
+  front_desk_24h: '24-hour front desk',
+  cctv: 'CCTV / security',
+  ev_charging: 'EV charging',
+  airport_transfer: 'Airport / station pickup',
+  doctor_on_call: 'Doctor on call',
+  conference: 'Meeting / conference hall',
+  bar: 'Bar',
+  trekking: 'Trekking / nature walks',
+  boating: 'Boating / kayaking',
+  plantation_tour: 'Plantation tour',
+  cycling: 'Bicycles',
+  fishing: 'Fishing',
 }
 export const MEAL_PLANS: Record<string, string> = {
   EP: 'Room only',
@@ -93,7 +116,7 @@ export function parseQueryRules(text: string, destinations: string[], today = to
   const above = t.match(/\b(?:above|over|more than)\s*(?:rs\.?|inr)?\s*([\d,.]+\s*(?:k|thousand)?)/)
   if (above) f.priceMin = parseAmount(above[1])
 
-  const types = PROPERTY_TYPES.filter((ty) => t.includes(ty) || (ty === 'houseboat' && /house ?boat/.test(t)))
+  const types = PROPERTY_TYPES.filter((ty) => t.includes(ty) || (ty === 'houseboat' && /house ?boat/.test(t)) || (ty === 'glamping' && /\btents?\b|camping/.test(t)) || (ty === 'treehouse' && /tree ?house/.test(t)))
   if (types.length) f.types = [...types]
 
   const fac: string[] = []
@@ -149,7 +172,7 @@ export function sanitizeFilters(raw: unknown, destinations: string[]): SearchFil
   f.priceMax = num(r.priceMax ?? r.budget, 300, 1_000_000)
   f.priceMin = num(r.priceMin, 0, 1_000_000)
   if (Array.isArray(r.types)) {
-    const ty = r.types.map(String).map((s) => s.toLowerCase()).filter((s): s is (typeof PROPERTY_TYPES)[number] => (PROPERTY_TYPES as readonly string[]).includes(s))
+    const ty = r.types.map(String).map((s) => s.toLowerCase()).filter((s) => PROPERTY_TYPES.includes(s))
     if (ty.length) f.types = ty
   }
   if (Array.isArray(r.facilities)) {
@@ -194,7 +217,7 @@ export function filtersFromQuery(q: Record<string, string | string[] | undefined
     rooms: n('rooms'),
     priceMin: n('priceMin'),
     priceMax: n('priceMax'),
-    types: many('type')?.filter((t) => (PROPERTY_TYPES as readonly string[]).includes(t)),
+    types: many('type')?.filter((t) => PROPERTY_TYPES.includes(t)),
     facilities: many('facility')?.filter((t) => t in FACILITIES),
     mealPlan: one('meal') && one('meal')! in MEAL_PLANS ? one('meal') : undefined,
     rating: n('rating'),

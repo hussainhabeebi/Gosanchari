@@ -1,6 +1,8 @@
 // Public pages (1–9) and the public quotation link (14).
 
 import { Hono, type Context } from 'hono'
+import { COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
+import type { SeasonRate } from '../lib/pricing'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
@@ -13,10 +15,31 @@ import { mediaUrl, verifyTurnstile } from '../lib/integrations'
 import { rateLimit } from '../lib/auth'
 import { priceStay } from '../lib/bookings'
 import type { NearbyPlace, PhotoRow, PropertyRow, QuotationRow, QuoteOptionRow, ReviewRow, RoomRow } from '../lib/types'
-import { addDays, eachNight, fmtDate, int, isDate, money, nightsBetween, normalizePhone, nowIso, parseJson, refCode, str, todayIST } from '../lib/util'
+import { addDays, eachNight, fmtDate, fmtShortDate, int, isDate, money, nightsBetween, normalizePhone, nowIso, parseJson, refCode, str, todayIST } from '../lib/util'
 import { clientIp, form, redirectMsg } from './helpers'
 
 export const publicRoutes = new Hono<AppEnv>()
+
+const NEARBY_ICONS: Record<string, string> = { railway: '🚆', airport: '✈️', bus: '🚌', hospital: '🏥', atm: '🏧', shopping: '🛍', restaurant: '🍽', beach: '🏖', waterfall: '💧', viewpoint: '🌄', attraction: '📍' }
+
+/** Season rows → per-room nightly rate for each upcoming season (room-specific beats property-wide beats all-property). */
+function seasonRates(rooms: RoomRow[], rows: SeasonRate[]) {
+  const groups = new Map<string, { name: string; start: string; end: string; minNights: number | null; rates: Record<number, number> }>()
+  for (const s of rows) {
+    const key = `${s.name}|${s.start_date}|${s.end_date}`
+    if (!groups.has(key)) groups.set(key, { name: s.name, start: s.start_date, end: s.end_date, minNights: s.min_nights, rates: {} })
+  }
+  for (const g of groups.values()) {
+    const inGroup = rows.filter((s) => s.name === g.name && s.start_date === g.start && s.end_date === g.end)
+    for (const r of rooms) {
+      const s = inGroup.find((x) => x.room_id === r.id) ?? inGroup.find((x) => x.room_id == null && x.property_id != null) ?? inGroup.find((x) => x.property_id == null)
+      if (!s) { g.rates[r.id] = r.base_rate; continue }
+      g.rates[r.id] = s.rate ?? Math.round(r.base_rate * (1 + (s.pct_adjust ?? 0) / 100))
+      if (s.min_nights) g.minNights = Math.max(g.minNights ?? 0, s.min_nights)
+    }
+  }
+  return [...groups.values()].sort((a, b) => a.start.localeCompare(b.start))
+}
 
 async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv['Variables']['user'] }): Promise<Set<number>> {
   const u = c.get('user')
@@ -191,7 +214,7 @@ publicRoutes.get('/search', async (c) => {
             <Field label="Max ₹/night"><input type="number" name="priceMax" min="0" step="500" value={f.priceMax ?? ''} /></Field>
           </div>
           <fieldset><legend>Property type</legend>
-            {PROPERTY_TYPES.map((t) => <label class="check"><input type="checkbox" name="type" value={t} checked={f.types?.includes(t)} /> {t}</label>)}
+            {PROPERTY_TYPES.map((t) => <label class="check"><input type="checkbox" name="type" value={t} checked={f.types?.includes(t)} /> {STAY_TYPES[t]}</label>)}
           </fieldset>
           <fieldset><legend>Facilities</legend>
             {['pool', 'wifi', 'parking', 'ac', 'kitchen', 'ground_floor'].map((k) => <label class="check"><input type="checkbox" name="facility" value={k} checked={f.facilities?.includes(k)} /> {FACILITIES[k]}</label>)}
@@ -258,13 +281,22 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const isStaffUser = !!user && user.role !== 'guest'
   if (!p || (p.status !== 'live' && !isStaffUser)) return page(c, { title: 'Not found' }, <div class="wrap section"><Empty><h2>This stay is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
   const settings = await getSettings(c.env)
-  const [photos, rooms, reviews, similar, saved] = await Promise.all([
+  const [media, rooms, reviews, similar, saved, seasonRows] = await Promise.all([
     all<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE property_id = ? ORDER BY sort, id', p.id),
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id),
     all<ReviewRow>(c.env, "SELECT * FROM reviews WHERE property_id = ? AND status = 'approved' ORDER BY id DESC LIMIT 20", p.id),
     similarProperties(c.env, p.id, 4),
     savedIds(c),
+    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
+  const photos = media.filter((m) => m.media_type !== 'video' && m.r2_key).sort((a, b) => COVER_ORDER.indexOf(a.category) - COVER_ORDER.indexOf(b.category) || a.sort - b.sort)
+  const videos = media.filter((m) => m.media_type === 'video')
+  const mediaGroups = Object.keys(PHOTO_CATEGORIES).map((k) => [k, photos.filter((m) => m.category === k)] as const).filter(([k, list]) => list.length && k !== 'room')
+  const seasonTable = seasonRates(rooms, seasonRows)
+  const din = readDining(p.dining)
+  const pol = readPolicies(p.policies)
+  const themes = parseJson<string[]>(p.themes, [])
+  const languages = parseJson<string[]>(p.languages, [])
   // Availability calendar: next ~2 months, a date is greyed out when every room is full.
   const from = todayIST()
   const to = addDays(from, 62)
@@ -311,7 +343,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
           </a>
         ))}
         {gallery.slice(5).map((ph) => <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} data-full hidden></a>)}
-        {photos.length > 5 && <button class="btn btn-sm g-all" data-open-gallery>Show all {photos.length} photos</button>}
+        {(photos.length > 5 || videos.length > 0) && <a class="btn btn-sm g-all" href="#photos">See all {photos.length} photos{videos.length ? ` & ${videos.length} video${videos.length > 1 ? 's' : ''}` : ''}</a>}
       </div>
 
       <div class="prop-layout">
@@ -319,62 +351,167 @@ publicRoutes.get('/stay/:slug', async (c) => {
           <div class="row-between">
             <div>
               <h1>{p.name}</h1>
-              <div class="muted">📍 {p.destination}, Kerala · <span class="cap">{p.type}</span> · <Stars value={p.rating_avg} count={p.rating_count} /></div>
+              <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
+              {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
             </div>
             <form method="post" action={`/saved/${p.id}`}><button class="btn btn-outline btn-sm">{saved.has(p.id) ? '♥ Saved' : '♡ Save'}</button></form>
           </div>
+          <nav class="media-tabs mt-sm">
+            {['Rooms|rooms', 'Photos|photos', 'Rates|rates', 'Dining|dining', 'Facilities|facilities', 'Policies|policies', 'Location|location', 'Reviews|reviews'].map((x) => { const [l, h] = x.split('|'); return <a href={`#${h}`}>{l}</a> })}
+          </nav>
           {p.review_summary && <AiNote label="Guests say">{p.review_summary}</AiNote>}
           {highlights.length > 0 && <ul class="highlights">{highlights.map((h) => <li>{h}</li>)}</ul>}
 
           <section class="section-sm">
             <h2>About this property</h2>
             {description.split(/\n{2,}/).map((para) => <p>{para}</p>)}
+            {(p.built_year || languages.length > 0 || p.best_time) && (
+              <dl class="info-list">
+                {p.built_year && <><dt>Built / renovated</dt><dd>{p.built_year}</dd></>}
+                {languages.length > 0 && <><dt>Languages spoken</dt><dd>{languages.join(', ')}</dd></>}
+                {p.best_time && <><dt>Best time to visit</dt><dd>{p.best_time}</dd></>}
+              </dl>
+            )}
+            {p.good_to_know && <div class="flash mt-sm"><strong>Good to know:</strong> {p.good_to_know}</div>}
           </section>
 
-          <section class="section-sm">
-            <h2>Rooms and rates</h2>
+          <section class="section-sm" id="rooms">
+            <h2>Room categories</h2>
             <div class="rooms">
-              {rooms.map((r) => (
-                <div class="room card">
-                  <div>
-                    <h3>{r.name}</h3>
-                    <div class="muted small">Sleeps {r.capacity}{r.bed_type ? ` · ${r.bed_type}` : ''}</div>
-                    {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
-                    <div class="chips">{parseJson<string[]>(r.facilities, []).map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>
+              {rooms.map((r) => {
+                const rp = photos.filter((m) => m.room_id === r.id)
+                const am = parseJson<string[]>(r.facilities, [])
+                return (
+                  <div class="room card">
+                    <div class="grow">
+                      <h3>{r.name}</h3>
+                      {rp.length > 0 && <div class="room-photos" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 300, settings.images_transform)} alt={m.caption ?? r.name} loading="lazy" /></a>)}</div>}
+                      <div class="room-meta">
+                        <span>👥 Up to {r.capacity} guests{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
+                        {r.bed_type && <span>🛏 {r.bed_type}</span>}
+                        {r.size_sqft && <span>📐 {r.size_sqft} sq ft</span>}
+                        {r.room_view && <span>🪟 {r.room_view} view</span>}
+                        <span>🏠 {r.units} room{r.units === 1 ? '' : 's'} of this type</span>
+                      </div>
+                      {r.description && <p class="small mt-sm">{r.description}</p>}
+                      {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
+                      {r.extra_bed ? <div class="small">Extra bed available{r.extra_bed_rate ? ` · ${money(r.extra_bed_rate)}/night` : ''}</div> : null}
+                      <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>
+                    </div>
+                    <div class="room-price">
+                      <div class="price">{money(r.base_rate)}</div>
+                      <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
+                      <button class="btn btn-sm" data-pick-room={r.id}>Enquire</button>
+                    </div>
                   </div>
-                  <div class="room-price">
-                    <div class="price">{money(r.base_rate)}</div>
-                    <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
-                    <button class="btn btn-sm" data-pick-room={r.id}>Enquire</button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </section>
 
-          <section class="section-sm">
+          {(mediaGroups.length > 0 || videos.length > 0) && (
+            <section class="section-sm" id="photos">
+              <h2>Photos & videos</h2>
+              <nav class="media-tabs">
+                {mediaGroups.map(([k, list]) => <a href={`#ph-${k}`}>{PHOTO_CATEGORIES[k]} ({list.length})</a>)}
+                {rooms.some((r) => photos.some((m) => m.room_id === r.id)) && <a href="#rooms">Rooms</a>}
+                {videos.length > 0 && <a href="#ph-videos">Videos ({videos.length})</a>}
+              </nav>
+              {mediaGroups.map(([k, list]) => (
+                <div class="media-group" id={`ph-${k}`}>
+                  <h3>{PHOTO_CATEGORIES[k]}</h3>
+                  <div class="media-strip" data-gallery>
+                    {list.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 400, settings.images_transform)} alt={m.caption ?? PHOTO_CATEGORIES[k]} loading="lazy" /></a>)}
+                  </div>
+                </div>
+              ))}
+              {videos.length > 0 && (
+                <div class="media-group" id="ph-videos">
+                  <h3>Videos</h3>
+                  <div class="grid grid-2">
+                    {videos.map((v) => {
+                      const embed = videoEmbedUrl(v.video_url)
+                      return (
+                        <div>
+                          {embed
+                            ? <iframe class="video-embed" src={embed} title={v.caption ?? p.name} loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+                            : <video class="video-embed" src={mediaUrl(v.r2_key)} controls preload="metadata"></video>}
+                          {v.caption && <div class="muted small">{v.caption}</div>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {seasonTable.length > 0 && rooms.length > 0 && (
+            <section class="section-sm" id="rates">
+              <h2>Rates by season</h2>
+              <p class="muted small">Per room per night, before GST. Final price is confirmed in your quote.</p>
+              <div class="table-wrap">
+                <table class="table rate-table">
+                  <thead><tr><th>Season</th><th>Dates</th>{rooms.map((r) => <th>{r.name}</th>)}</tr></thead>
+                  <tbody>
+                    <tr><td>Regular</td><td>Sun – Thu nights</td>{rooms.map((r) => <td>{money(r.base_rate)}</td>)}</tr>
+                    {rooms.some((r) => r.weekend_rate && r.weekend_rate !== r.base_rate) && <tr><td>Weekend</td><td>Fri & Sat nights</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>}
+                    {seasonTable.map((s) => <tr><td>{s.name}{s.minNights ? <div class="muted small">min {s.minNights} nights</div> : null}</td><td class="nowrap">{fmtShortDate(s.start)} – {fmtShortDate(s.end)}</td>{rooms.map((r) => <td>{money(s.rates[r.id])}</td>)}</tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {(din.restaurant_name || din.cuisines?.length || din.breakfast || din.notes || meals.length > 0) && (
+            <section class="section-sm" id="dining">
+              <h2>Dining{din.restaurant_name ? ` · ${din.restaurant_name}` : ''}</h2>
+              <dl class="info-list">
+                {din.cuisines?.length ? <><dt>Cuisines</dt><dd>{din.cuisines.join(', ')}</dd></> : null}
+                {din.menu_types?.length ? <><dt>Menu</dt><dd>{din.menu_types.join(', ')}</dd></> : null}
+                {din.breakfast && <><dt>Breakfast</dt><dd>{din.breakfast}</dd></>}
+                {din.lunch && <><dt>Lunch</dt><dd>{din.lunch}</dd></>}
+                {din.dinner && <><dt>Dinner</dt><dd>{din.dinner}</dd></>}
+                {meals.length > 0 && <><dt>Meal plans</dt><dd>{meals.map((m) => {
+                  const price = m === 'CP' ? din.price_cp : m === 'MAP' ? din.price_map : m === 'AP' ? din.price_ap : undefined
+                  return `${MEAL_PLANS[m] ?? m}${price ? ` (+${money(price)}/person/night)` : ''}`
+                }).join(' · ')}</dd></>}
+                {din.child_meal_note && <><dt>Children's meals</dt><dd>{din.child_meal_note}</dd></>}
+                <dt>Also</dt><dd>{[din.in_room_dining ? 'In-room dining' : null, din.bar ? 'Bar' : null, din.outside_food ? 'Outside food allowed' : 'No outside food'].filter(Boolean).join(' · ')}</dd>
+              </dl>
+              {din.notes && <p class="small mt-sm">{din.notes}</p>}
+            </section>
+          )}
+
+          <section class="section-sm" id="facilities">
             <h2>Facilities</h2>
             <div class="facility-grid">{facilities.map((f) => <div>{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</div>)}</div>
-            {meals.length > 0 && <p class="mt-sm"><strong>Meal plans:</strong> {meals.map((m) => MEAL_PLANS[m] ?? m).join(', ')}</p>}
           </section>
 
-          <section class="section-sm">
-            <h2>House rules</h2>
-            <ul class="rules">
-              <li>Check-in from <strong>{p.checkin_time}</strong>, check-out by <strong>{p.checkout_time}</strong></li>
-              <li>{p.id_required ? 'Government photo ID required for all adults' : 'ID not required'}</li>
-              <li>{p.pet_friendly ? 'Pets allowed' : 'No pets'} · {p.family_friendly ? 'Family-friendly' : 'Best for adults'}</li>
-              {p.house_rules.split('\n').filter(Boolean).map((l) => <li>{l.replace(/^-\s*/, '')}</li>)}
-            </ul>
-            <h3>Cancellation policy</h3>
-            <p>{p.cancellation_policy || 'Standard policy — see our cancellation page.'} <a href="/policies/cancellation">Full policy</a></p>
+          <section class="section-sm" id="policies">
+            <h2>Policies</h2>
+            <dl class="info-list">
+              <dt>Check-in / out</dt><dd>From <strong>{p.checkin_time}</strong> · by <strong>{p.checkout_time}</strong></dd>
+              <dt>ID</dt><dd>{pol.id_documents || (p.id_required ? 'Government photo ID required for all adults' : 'Not required')}</dd>
+              <dt>Pets</dt><dd>{pol.pet || (p.pet_friendly ? 'Pets allowed' : 'No pets')}</dd>
+              <dt>Children</dt><dd>{pol.child || (p.family_friendly ? 'Children welcome' : 'Best suited to adults')}</dd>
+              {POLICY_FIELDS.filter(([k]) => !['pet', 'child', 'id_documents', 'payment'].includes(k) && pol[k]).map(([k, label]) => <><dt>{label}</dt><dd>{pol[k]}</dd></>)}
+              <dt>Cancellation</dt><dd>{p.cancellation_policy || 'Standard policy'} <a href="/policies/cancellation">Full policy</a></dd>
+            </dl>
+            {p.house_rules && <ul class="rules mt-sm">{p.house_rules.split('\n').filter(Boolean).map((l) => <li>{l.replace(/^-\s*/, '')}</li>)}</ul>}
           </section>
 
-          <section class="section-sm">
+          <section class="section-sm" id="location">
             <h2>Location</h2>
+            {p.address && <p>📍 {p.address}</p>}
             {p.lat && p.lng && <div id="prop-map" class="map" data-lat={p.lat} data-lng={p.lng} data-name={p.name}></div>}
+            {(p.map_url || (p.lat && p.lng)) && <p><a class="btn btn-sm btn-outline" target="_blank" rel="noopener" href={p.map_url || `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`}>Open in Google Maps</a></p>}
+            {p.how_to_reach && <><h3>How to reach</h3><p style="white-space:pre-line">{p.how_to_reach}</p></>}
             {nearby.length > 0 && (
-              <ul class="nearby">{nearby.map((n) => <li><span>{n.kind === 'railway' ? '🚆' : n.kind === 'airport' ? '✈️' : n.kind === 'bus' ? '🚌' : '📍'} {n.name}</span><span class="muted">{n.km} km</span></li>)}</ul>
+              <>
+                <h3>Nearby</h3>
+                <ul class="nearby">{nearby.map((n) => <li><span>{NEARBY_ICONS[n.kind] ?? '📍'} {n.name}</span><span class="muted">{n.km} km{n.time ? ` · ${n.time}` : ''}</span></li>)}</ul>
+              </>
             )}
           </section>
 
@@ -411,7 +548,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
             </div>
           </section>
 
-          <section class="section-sm">
+          <section class="section-sm" id="reviews">
             <h2>Reviews {p.rating_count > 0 && <Stars value={p.rating_avg} count={p.rating_count} />}</h2>
             {reviews.length === 0 && <p class="muted">No reviews yet.</p>}
             {reviews.map((r) => (
@@ -718,7 +855,7 @@ async function loadQuote(env: AppEnv['Bindings'], token: string) {
   const options = await all<QuoteOptionRow & { property_name: string; slug: string; destination: string; room_name: string; photo: string | null; description: string }>(
     env,
     `SELECT o.*, p.name AS property_name, p.slug, p.destination, p.description, r.name AS room_name,
-       (SELECT r2_key FROM property_photos ph WHERE ph.property_id = p.id ORDER BY sort LIMIT 1) AS photo
+       ${COVER_PHOTO_SQL} AS photo
      FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE o.quotation_id = ? ORDER BY o.id`,
     q.id,
   )
@@ -736,7 +873,7 @@ publicRoutes.get('/q/:token', async (c) => {
   }
   const expired = q.status === 'expired' || (q.valid_till != null && q.valid_till < todayIST())
   const closed = expired || ['accepted', 'declined'].includes(q.status)
-  const photos = await all<{ property_id: number; r2_key: string }>(c.env, `SELECT property_id, r2_key FROM property_photos WHERE property_id IN (${options.map(() => '?').join(',') || 'NULL'}) ORDER BY sort LIMIT 30`, ...options.map((o) => o.property_id))
+  const photos = await all<{ property_id: number; r2_key: string }>(c.env, `SELECT property_id, r2_key FROM property_photos WHERE media_type = 'image' AND r2_key != '' AND property_id IN (${options.map(() => '?').join(',') || 'NULL'}) ORDER BY (category = 'facade') DESC, sort LIMIT 30`, ...options.map((o) => o.property_id))
 
   return page(c, { title: `Your quote ${q.code}`, noindex: true }, (
     <div class="wrap narrow section">
@@ -840,12 +977,25 @@ publicRoutes.post('/q/:token/decline', (c) => quoteFeedback(c, 'declined'))
 publicRoutes.get('/media/*', async (c) => {
   const key = decodeURIComponent(c.req.path.replace(/^\/media\//, ''))
   if (!key || key.includes('..') || key.startsWith('invoices/') || key.startsWith('voice/') || key.startsWith('private/')) return c.notFound()
-  const obj = await c.env.MEDIA.get(key)
+  // Byte ranges let browsers seek in uploaded videos.
+  const m = (c.req.header('range') ?? '').match(/^bytes=(\d*)-(\d*)$/)
+  let range: R2Range | undefined
+  if (m && (m[1] || m[2])) range = m[1] ? { offset: Number(m[1]), ...(m[2] ? { length: Number(m[2]) - Number(m[1]) + 1 } : {}) } : { suffix: Number(m[2]) }
+  const obj = await c.env.MEDIA.get(key, range ? { range } : undefined)
   if (!obj) return c.notFound()
   const h = new Headers()
   obj.writeHttpMetadata(h)
   h.set('etag', obj.httpEtag)
+  h.set('accept-ranges', 'bytes')
   h.set('cache-control', 'public, max-age=31536000, immutable')
-  return new Response(obj.body, { headers: h })
+  if (range && 'body' in obj) {
+    const r = obj.range as { offset?: number; length?: number; suffix?: number } | undefined
+    const offset = r?.suffix != null ? Math.max(0, obj.size - r.suffix) : r?.offset ?? 0
+    const length = r?.length ?? obj.size - offset
+    h.set('content-range', `bytes ${offset}-${offset + length - 1}/${obj.size}`)
+    h.set('content-length', String(length))
+    return new Response(obj.body, { status: 206, headers: h })
+  }
+  return new Response((obj as R2ObjectBody).body, { headers: h })
 })
 

@@ -93,6 +93,26 @@ Demo data is optional: `npm run db:seed:remote`. Don't load it on a live site wi
 6. **Images:** enable Image Transformations on the zone, then tick the option in *Admin → Settings*.
 7. **Custom domain:** Workers → gosanchari → Settings → Domains & Routes. Update `SITE_URL` to match.
 
+## Adding a property (Admin → Properties → Add property)
+
+The editor is split into sections. Sections 1–10 are filled in first; sections 11–13 open after the first save.
+
+| # | Section | Notes |
+|---|---|---|
+| 1 | Basics | Name, type (villa, cottage, resort, homestay, houseboat, hotel, treehouse, glamping…), destination, star category, year, "best for" themes, languages, highlights |
+| 2 | Location | Complete address, **Google Maps link** (the map pin is filled in from it), pin on map, how to reach, best time to visit |
+| 3 | Description | English and Malayalam (AI writer optional), "good to know" notes |
+| 4 | Dining | Restaurant, cuisines, menu types, meal timings, meal-plan prices per person, children's meals |
+| 5 | Facilities | Pool, parking, Wi-Fi, spa, bonfire, activities… |
+| 6 | Policies | Check-in/out, cancellation, pets, children, extra bed, ID, couples, smoking, alcohol, visitors, payment |
+| 7 | Contact & direct booking | Owner and property contacts, direct booking link, GSTIN, bank details. **Staff only:** shown in the property finder, never on the website |
+| 8 | Nearby | `Name \| type \| km \| travel time`, one per line |
+| 9 | SEO | Title and description (AI suggestions optional) |
+| 10 | Remarks | Internal notes for staff |
+| 11 | Room categories | Inventory (rooms of each type), guests/adults/children, bed, size, view, weekday/weekend/net rates, extra bed, inclusions, **room amenities** (AC, TV, kettle, balcony…) |
+| 12 | Photos & videos | Upload into sections: common areas, facade, **each room category**, pool, views, restaurant, activities. Videos are MP4/WebM files up to 90 MB, or YouTube/Vimeo links |
+| 13 | Tariff & seasons | One block per season (Onam, Christmas & New Year, summer…) with dates, minimum nights and a rate for each room category |
+
 ## Where each page lives
 
 | # | Page | URL | Code |

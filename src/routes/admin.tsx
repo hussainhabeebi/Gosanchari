@@ -1,18 +1,18 @@
 // Admin pages 31–40: dashboard, properties, rates, offers, all enquiries/quotes/bookings, payments, guests.
 
-import { Hono, type Context } from 'hono'
+import { Hono } from 'hono'
+import { stayTypeLabel } from '../lib/catalog'
 import type { AppEnv } from '../env'
+import { COVER_PHOTO_SQL } from '../lib/catalog'
 import { page } from '../views/layout'
-import { AiNote, ChartHead, Empty, Field, jsonScript, LeafletHead, Pager, Pill, Select, Stat, Table, Tabs } from '../views/components'
+import { AiNote, ChartHead, Empty, Field, jsonScript, Pager, Pill, Select, Stat, Table, Tabs } from '../views/components'
 import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
-import { all, enqueue, first, insertId, logActivity, placeholders, run } from '../lib/db'
-import { seoSuggest, writeDescription } from '../lib/assist'
+import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { cancelBooking, processRefund } from '../lib/bookings'
 import { mediaUrl } from '../lib/integrations'
 import { nightlyRate, type SeasonRate } from '../lib/pricing'
-import { FACILITIES, MEAL_PLANS, PROPERTY_TYPES } from '../lib/search'
-import type { NearbyPlace, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
-import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShort, nowIso, parseJson, slugify, str, toCsv, todayIST } from '../lib/util'
+import type { PropertyRow, RoomRow } from '../lib/types'
+import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShort, nowIso, parseJson, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
 import { renderBookings, renderQuotes } from './staff-ops'
 import { renderGuests, renderInbox } from './staff'
@@ -111,7 +111,7 @@ adminRoutes.get('/admin/properties', requirePerm('manage_properties'), async (c)
   const monthStart = todayIST().slice(0, 7) + '-01'
   const rows = await all<PropertyRow & { photo: string | null; bookings: number }>(
     c.env,
-    `SELECT p.*, (SELECT r2_key FROM property_photos ph WHERE ph.property_id = p.id ORDER BY sort LIMIT 1) AS photo,
+    `SELECT p.*, ${COVER_PHOTO_SQL} AS photo,
        (SELECT COUNT(*) FROM bookings b WHERE b.property_id = p.id AND b.${CONFIRMED} AND b.check_in >= ?) AS bookings
      FROM properties p WHERE 1=1 ${q ? 'AND p.name LIKE ?' : ''} ${status ? 'AND p.status = ?' : ''} ${dest ? 'AND p.destination = ?' : ''} ORDER BY p.destination, p.name`,
     monthStart, ...(q ? [`%${q}%`] : []), ...(status ? [status] : []), ...(dest ? [dest] : []),
@@ -131,7 +131,7 @@ adminRoutes.get('/admin/properties', requirePerm('manage_properties'), async (c)
           <tr>
             <td><img class="thumb" src={mediaUrl(p.photo, 120)} alt="" /></td>
             <td><a href={`/admin/properties/${p.id}`}><strong>{p.name}</strong></a>{p.featured ? <span class="pill pill-accepted">featured</span> : null}</td>
-            <td>{p.destination}</td><td>{p.type}</td><td><Pill s={p.status} /></td>
+            <td>{p.destination}</td><td>{stayTypeLabel(p)}</td><td><Pill s={p.status} /></td>
             <td>★ {p.rating_avg.toFixed(1)} ({p.rating_count})</td><td>{p.bookings}</td>
             <td class="nowrap">
               <a class="btn btn-sm" href={`/admin/properties/${p.id}`}>Edit</a>
@@ -164,319 +164,16 @@ adminRoutes.post('/admin/properties/:id/duplicate', requirePerm('manage_properti
   const slug = `${p.slug}-copy-${Date.now().toString(36)}`
   const id = await insertId(
     c.env,
-    `INSERT INTO properties (slug, name, type, destination, address, lat, lng, owner_name, owner_phone, owner_email, is_partner, commission_pct, highlights, description, description_ml, facilities, meal_plans, checkin_time, checkout_time, cancellation_policy, house_rules, id_required, nearby, pet_friendly, family_friendly, internal_notes, status)
-     SELECT ?, name || ' (copy)', type, destination, address, lat, lng, owner_name, owner_phone, owner_email, is_partner, commission_pct, highlights, description, description_ml, facilities, meal_plans, checkin_time, checkout_time, cancellation_policy, house_rules, id_required, nearby, pet_friendly, family_friendly, internal_notes, 'draft' FROM properties WHERE id = ?`,
+    `INSERT INTO properties (slug, name, type, stay_type, destination, address, map_url, lat, lng, owner_name, owner_phone, owner_email, is_partner, commission_pct, highlights, description, description_ml, facilities, meal_plans, checkin_time, checkout_time, cancellation_policy, house_rules, id_required, nearby, pet_friendly, family_friendly, internal_notes, star_category, built_year, themes, languages, how_to_reach, best_time, good_to_know, dining, policies, contact, status)
+     SELECT ?, name || ' (copy)', type, stay_type, destination, address, map_url, lat, lng, owner_name, owner_phone, owner_email, is_partner, commission_pct, highlights, description, description_ml, facilities, meal_plans, checkin_time, checkout_time, cancellation_policy, house_rules, id_required, nearby, pet_friendly, family_friendly, internal_notes, star_category, built_year, themes, languages, how_to_reach, best_time, good_to_know, dining, policies, contact, 'draft' FROM properties WHERE id = ?`,
     slug, p.id,
   )
-  await run(c.env, 'INSERT INTO rooms (property_id, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, min_nights) SELECT ?, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, min_nights FROM rooms WHERE property_id = ? AND active = 1', id, p.id)
+  await run(c.env, 'INSERT INTO rooms (property_id, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, min_nights, description, size_sqft, room_view, max_adults, max_children, extra_bed, extra_bed_rate) SELECT ?, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, min_nights, description, size_sqft, room_view, max_adults, max_children, extra_bed, extra_bed_rate FROM rooms WHERE property_id = ? AND active = 1', id, p.id)
   await logActivity(c.env, c.get('user')!.id, 'property.duplicated', 'property', id, { from: p.id })
   return c.redirect(`/admin/properties/${id}`, 303)
 })
 
-// ---------- 33. Add / edit property ----------
-function propertyForm(c: Context<AppEnv>, p: Partial<PropertyRow> & { id?: number }, rooms: RoomRow[], photos: PhotoRow[], dests: string[]) {
-  const fac = parseJson<string[]>(p.facilities, [])
-  const meals = parseJson<string[]>(p.meal_plans, [])
-  const nearby = parseJson<NearbyPlace[]>(p.nearby, [])
-  const isNew = !p.id
-  const suggestedTags = [...new Set(photos.filter((ph) => !ph.tags_confirmed).flatMap((ph) => parseJson<string[]>(ph.ai_tags, [])))].filter((t) => !fac.includes(t))
-  return page(c, { title: isNew ? 'Add property' : `Edit ${p.name}`, area: 'admin', active: 'properties', head: <LeafletHead /> }, (
-    <div class="stack-lg">
-      <a href="/admin/properties" class="small">← Properties</a>
-      <div class="row-between"><h1>{isNew ? 'Add property' : p.name}</h1>{!isNew && <div><Pill s={p.status ?? 'draft'} /> {p.embedded_at && <span class="muted small">search index updated {fmtDateTime(p.embedded_at)}</span>}</div>}</div>
-      <form method="post" action={isNew ? '/admin/properties/new' : `/admin/properties/${p.id}`} class="stack" id="prop-form">
-        <section class="card stack">
-          <h2>Basic info</h2>
-          <div class="row">
-            <Field label="Name"><input name="name" value={p.name ?? ''} required maxlength={100} /></Field>
-            <Field label="Type"><Select name="type" value={p.type} options={PROPERTY_TYPES.map((t) => [t, t])} /></Field>
-            <Field label="Destination"><input name="destination" value={p.destination ?? ''} list="dests" required /><datalist id="dests">{dests.map((d) => <option value={d} />)}</datalist></Field>
-          </div>
-          <Field label="Address"><input name="address" value={p.address ?? ''} /></Field>
-          <div class="row">
-            <Field label="Latitude"><input name="lat" id="lat" value={p.lat ?? ''} inputmode="decimal" /></Field>
-            <Field label="Longitude"><input name="lng" id="lng" value={p.lng ?? ''} inputmode="decimal" /></Field>
-          </div>
-          <div id="pin-map" class="map" data-lat={p.lat ?? 10.0889} data-lng={p.lng ?? 77.0595}></div>
-          <p class="muted small">Click the map to drop the pin.</p>
-          <h3>Owner</h3>
-          <div class="row">
-            <Field label="Owner name"><input name="owner_name" value={p.owner_name ?? ''} /></Field>
-            <Field label="Owner phone"><input name="owner_phone" value={p.owner_phone ?? ''} /></Field>
-            <Field label="Owner email"><input name="owner_email" value={p.owner_email ?? ''} /></Field>
-          </div>
-          <div class="row">
-            <label class="check"><input type="checkbox" name="is_partner" value="1" checked={!!p.is_partner} /> Partner property (we pay the owner)</label>
-            <Field label="Commission %"><input type="number" name="commission_pct" value={p.commission_pct ?? 0} min="0" max="100" step="0.5" /></Field>
-          </div>
-        </section>
-
-        <section class="card stack">
-          <h2>Description</h2>
-          <Field label="Highlights (one per line)"><textarea name="highlights" rows={3}>{parseJson<string[]>(p.highlights, []).join('\n')}</textarea></Field>
-          <details class="ai-box">
-            <summary><span class="ai-badge">AI</span> Write description from points</summary>
-            <textarea id="desc-points" rows={3} placeholder="e.g. 3 bedrooms, tea estate views, home-cooked Kerala food, 20 min from Munnar town"></textarea>
-            <button type="button" class="btn btn-sm" data-ai-desc="/admin/ai/description">Write in English & Malayalam</button>
-            <p class="muted small">You can edit the text before saving.</p>
-          </details>
-          <Field label="Description (English)"><textarea name="description" id="desc-en" rows={6}>{p.description ?? ''}</textarea></Field>
-          <Field label="Description (Malayalam)"><textarea name="description_ml" id="desc-ml" rows={6}>{p.description_ml ?? ''}</textarea></Field>
-        </section>
-
-        <section class="card stack">
-          <h2>Facilities</h2>
-          {suggestedTags.length > 0 && (
-            <AiNote label="From your photos">
-              Suggested: {suggestedTags.map((t) => <label class="check inline-check"><input type="checkbox" name="facilities" value={t} /> {FACILITIES[t] ?? t}</label>)}
-              <span class="muted small"> — tick to confirm</span>
-            </AiNote>
-          )}
-          <div class="facility-grid">{Object.entries(FACILITIES).map(([k, l]) => <label class="check"><input type="checkbox" name="facilities" value={k} checked={fac.includes(k)} /> {l}</label>)}</div>
-          <h3>Meal plans</h3>
-          <div class="row wrap-row">{Object.entries(MEAL_PLANS).map(([k, l]) => <label class="check"><input type="checkbox" name="meal_plans" value={k} checked={meals.includes(k)} /> {l}</label>)}</div>
-          <div class="row wrap-row">
-            <label class="check"><input type="checkbox" name="pet_friendly" value="1" checked={!!p.pet_friendly} /> Pet-friendly</label>
-            <label class="check"><input type="checkbox" name="family_friendly" value="1" checked={p.family_friendly == null ? true : !!p.family_friendly} /> Family-friendly</label>
-          </div>
-        </section>
-
-        <section class="card stack">
-          <h2>House rules and cancellation</h2>
-          <div class="row">
-            <Field label="Check-in from"><input type="time" name="checkin_time" value={p.checkin_time ?? '14:00'} /></Field>
-            <Field label="Check-out by"><input type="time" name="checkout_time" value={p.checkout_time ?? '11:00'} /></Field>
-            <label class="check"><input type="checkbox" name="id_required" value="1" checked={p.id_required == null ? true : !!p.id_required} /> Photo ID required</label>
-          </div>
-          <Field label="House rules (one per line)"><textarea name="house_rules" rows={3}>{p.house_rules ?? ''}</textarea></Field>
-          <Field label="Cancellation policy"><textarea name="cancellation_policy" rows={2}>{p.cancellation_policy ?? ''}</textarea></Field>
-          <Field label="Nearby places (one per line: Name | railway/airport/bus/attraction | km)">
-            <textarea name="nearby" rows={4}>{nearby.map((n) => `${n.name} | ${n.kind} | ${n.km}`).join('\n')}</textarea>
-          </Field>
-        </section>
-
-        <section class="card stack internal">
-          <h2>Internal (staff and admin only)</h2>
-          <Field label="Internal notes"><textarea name="internal_notes" rows={2}>{p.internal_notes ?? ''}</textarea></Field>
-          <Field label="Last-minute availability note"><input name="last_minute_note" value={p.last_minute_note ?? ''} placeholder="e.g. Owner can open the annex for groups" /></Field>
-        </section>
-
-        <section class="card stack">
-          <div class="row-between"><h2>SEO</h2><button type="button" class="btn btn-sm btn-outline" data-ai-seo="/admin/ai/seo"><span class="ai-badge sm">AI</span> Suggest</button></div>
-          <Field label="Page title"><input name="seo_title" id="seo-title" value={p.seo_title ?? ''} maxlength={70} /></Field>
-          <Field label="Meta description"><textarea name="seo_description" id="seo-desc" rows={2} maxlength={170}>{p.seo_description ?? ''}</textarea></Field>
-        </section>
-
-        <div class="row wrap-row sticky-actions">
-          <Select name="status" value={p.status ?? 'draft'} options={[['draft', 'Draft'], ['live', 'Live (published)'], ['hidden', 'Hidden']]} />
-          <label class="check"><input type="checkbox" name="featured" value="1" checked={!!p.featured} /> Featured on home page</label>
-          <button class="btn">Save</button>
-        </div>
-      </form>
-
-      {!isNew && (
-        <>
-          <section class="card stack">
-            <h2>Rooms</h2>
-            <Table head={['Room', 'Sleeps', 'Bed', 'Units', 'Base', 'Weekend', 'Net', 'Min nights', 'Includes', '']}>
-              {rooms.map((r) => (
-                <tr>
-                  <td colSpan={10}>
-                    <form method="post" action={`/admin/rooms/${r.id}`} class="row wrap-row room-form">
-                      <input name="name" value={r.name} required />
-                      <input type="number" name="capacity" value={r.capacity} min="1" class="w-sm" />
-                      <input name="bed_type" value={r.bed_type ?? ''} class="w-md" placeholder="Bed" />
-                      <input type="number" name="units" value={r.units} min="0" class="w-sm" />
-                      <input type="number" name="base_rate" value={r.base_rate} min="0" class="w-md" />
-                      <input type="number" name="weekend_rate" value={r.weekend_rate ?? ''} min="0" class="w-md" />
-                      <input type="number" name="net_rate" value={r.net_rate ?? ''} min="0" class="w-md" />
-                      <input type="number" name="min_nights" value={r.min_nights} min="1" class="w-sm" />
-                      <input name="inclusions" value={r.inclusions} placeholder="Breakfast, …" />
-                      <input name="room_facilities" value={parseJson<string[]>(r.facilities, []).join(',')} placeholder="ac,tv,hot_water" />
-                      <label class="check small"><input type="checkbox" name="active" value="1" checked={!!r.active} /> active</label>
-                      <button class="btn btn-sm btn-outline">Save</button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </Table>
-            <form method="post" action={`/admin/properties/${p.id}/rooms`} class="row wrap-row room-form">
-              <input name="name" placeholder="Room name" required />
-              <input type="number" name="capacity" placeholder="Sleeps" min="1" value="2" class="w-sm" />
-              <input name="bed_type" placeholder="Bed" class="w-md" />
-              <input type="number" name="units" placeholder="Units" min="1" value="1" class="w-sm" />
-              <input type="number" name="base_rate" placeholder="Base ₹" min="0" required class="w-md" />
-              <input type="number" name="weekend_rate" placeholder="Weekend ₹" min="0" class="w-md" />
-              <input type="number" name="net_rate" placeholder="Net ₹" min="0" class="w-md" />
-              <input name="inclusions" placeholder="Includes" />
-              <button class="btn btn-sm">Add room</button>
-            </form>
-          </section>
-
-          <section class="card stack">
-            <h2>Photos</h2>
-            <div class="photo-grid">
-              {photos.map((ph) => (
-                <form method="post" action={`/admin/photos/${ph.id}`} class="photo-tile">
-                  <img src={mediaUrl(ph.r2_key, 300)} alt="" />
-                  <input name="caption" value={ph.caption ?? ''} placeholder="Caption" />
-                  <div class="row"><input type="number" name="sort" value={ph.sort} class="w-sm" title="Order" /><button class="btn btn-sm btn-outline">Save</button><button class="btn btn-sm btn-danger" name="delete" value="1">Delete</button></div>
-                  {parseJson<string[]>(ph.ai_tags, []).length > 0 && <div class="small"><span class="ai-badge sm">AI</span> {parseJson<string[]>(ph.ai_tags, []).map((t) => FACILITIES[t] ?? t).join(', ')}</div>}
-                </form>
-              ))}
-            </div>
-            <form method="post" action={`/admin/properties/${p.id}/photos`} enctype="multipart/form-data" class="row">
-              <input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple required />
-              <button class="btn btn-sm">Upload</button>
-            </form>
-            <p class="muted small">Stored in R2. AI suggests facility tags from each photo — confirm them under Facilities.</p>
-          </section>
-        </>
-      )}
-    </div>
-  ))
-}
-
-adminRoutes.get('/admin/properties/new', requirePerm('manage_properties'), async (c) => propertyForm(c, {}, [], [], await destinations(c.env)))
-
-adminRoutes.get('/admin/properties/:id', requirePerm('manage_properties'), async (c) => {
-  const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', int(c.req.param('id')))
-  if (!p) return c.notFound()
-  const [rooms, photos, dests] = await Promise.all([
-    all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? ORDER BY active DESC, base_rate', p.id),
-    all<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE property_id = ? ORDER BY sort, id', p.id),
-    destinations(c.env),
-  ])
-  return propertyForm(c, p, rooms, photos, dests)
-})
-
-function propertyValues(f: Awaited<ReturnType<typeof form>>) {
-  const nearby: NearbyPlace[] = (f.nearby ?? '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((x) => x[0]).map(([name, kind, km]) => ({ name, kind: kind || 'attraction', km: parseFloat(km) || 0 }))
-  const lat = parseFloat(f.lat)
-  const lng = parseFloat(f.lng)
-  return {
-    name: str(f.name, 100), type: (PROPERTY_TYPES as readonly string[]).includes(f.type) ? f.type : 'homestay', destination: str(f.destination, 60),
-    address: str(f.address, 300) || null, lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
-    owner_name: str(f.owner_name, 80) || null, owner_phone: str(f.owner_phone, 20) || null, owner_email: str(f.owner_email, 120) || null,
-    is_partner: f.is_partner ? 1 : 0, commission_pct: Math.max(0, Math.min(100, parseFloat(f.commission_pct) || 0)),
-    highlights: JSON.stringify((f.highlights ?? '').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 8)),
-    description: str(f.description, 6000), description_ml: str(f.description_ml, 9000),
-    facilities: JSON.stringify([...new Set((f.__all.facilities ?? []).filter((x) => x in FACILITIES))]),
-    meal_plans: JSON.stringify((f.__all.meal_plans ?? []).filter((x) => x in MEAL_PLANS)),
-    checkin_time: /^\d{2}:\d{2}$/.test(f.checkin_time) ? f.checkin_time : '14:00', checkout_time: /^\d{2}:\d{2}$/.test(f.checkout_time) ? f.checkout_time : '11:00',
-    cancellation_policy: str(f.cancellation_policy, 2000), house_rules: str(f.house_rules, 2000), id_required: f.id_required ? 1 : 0,
-    nearby: JSON.stringify(nearby), pet_friendly: f.pet_friendly ? 1 : 0, family_friendly: f.family_friendly ? 1 : 0,
-    internal_notes: str(f.internal_notes, 2000), last_minute_note: str(f.last_minute_note, 300),
-    seo_title: str(f.seo_title, 70) || null, seo_description: str(f.seo_description, 170) || null,
-    status: ['draft', 'live', 'hidden'].includes(f.status) ? f.status : 'draft', featured: f.featured ? 1 : 0,
-  }
-}
-
-async function afterPropertySave(c: Context<AppEnv>, id: number) {
-  // Embedding + knowledge base refresh run in the background, only when a property changes.
-  await enqueue(c.env, { type: 'embed_property', propertyId: id })
-  await enqueue(c.env, { type: 'sync_kb', what: 'property', id })
-  await c.env.KV.delete(`similar:${id}`)
-}
-
-adminRoutes.post('/admin/properties/new', requirePerm('manage_properties'), async (c) => {
-  const f = await form(c)
-  const v = propertyValues(f)
-  if (!v.name || !v.destination) return redirectMsg(c, '/admin/properties/new', { err: 'Name and destination are required.' })
-  let slug = slugify(`${v.name} ${v.destination}`)
-  if (await first(c.env, 'SELECT 1 FROM properties WHERE slug = ?', slug)) slug += '-' + Date.now().toString(36)
-  const cols = Object.keys(v)
-  const id = await insertId(c.env, `INSERT INTO properties (slug, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, slug, ...(Object.values(v) as (string | number | null)[]))
-  await run(c.env, 'INSERT OR IGNORE INTO destinations (name, slug) VALUES (?, ?)', v.destination, slugify(v.destination))
-  await afterPropertySave(c, id)
-  await logActivity(c.env, c.get('user')!.id, 'property.created', 'property', id, { name: v.name })
-  return redirectMsg(c, `/admin/properties/${id}`, { ok: 'Property created. Now add rooms and photos.' })
-})
-
-adminRoutes.post('/admin/properties/:id', requirePerm('manage_properties'), async (c) => {
-  const id = int(c.req.param('id'))
-  const before = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', id)
-  if (!before) return c.notFound()
-  const f = await form(c)
-  const v = propertyValues(f)
-  const cols = Object.keys(v)
-  await run(c.env, `UPDATE properties SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...(Object.values(v) as (string | number | null)[]), nowIso(), id)
-  // Facilities ticked from photo suggestions are now confirmed.
-  await run(c.env, 'UPDATE property_photos SET tags_confirmed = 1 WHERE property_id = ?', id)
-  await run(c.env, 'INSERT OR IGNORE INTO destinations (name, slug) VALUES (?, ?)', v.destination, slugify(v.destination))
-  await afterPropertySave(c, id)
-  const changed = cols.filter((k) => String((before as unknown as Record<string, unknown>)[k] ?? '') !== String((v as Record<string, unknown>)[k] ?? ''))
-  await logActivity(c.env, c.get('user')!.id, 'property.updated', 'property', id, { changed })
-  return redirectMsg(c, `/admin/properties/${id}`, { ok: 'Saved.' })
-})
-
-adminRoutes.post('/admin/properties/:id/rooms', requirePerm('manage_properties'), async (c) => {
-  const id = int(c.req.param('id'))
-  const f = await form(c)
-  await run(c.env, 'INSERT INTO rooms (property_id, name, capacity, bed_type, units, base_rate, weekend_rate, net_rate, inclusions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', id, str(f.name, 80), Math.max(1, int(f.capacity, 2)), str(f.bed_type, 60) || null, Math.max(1, int(f.units, 1)), Math.max(0, int(f.base_rate)), int(f.weekend_rate) || null, int(f.net_rate) || null, str(f.inclusions, 200))
-  await afterPropertySave(c, id)
-  await logActivity(c.env, c.get('user')!.id, 'room.created', 'property', id, { name: f.name, base: f.base_rate })
-  return c.redirect(`/admin/properties/${id}#rooms`, 303)
-})
-
-adminRoutes.post('/admin/rooms/:id', requirePerm('manage_properties'), async (c) => {
-  const r = await first<RoomRow>(c.env, 'SELECT * FROM rooms WHERE id = ?', int(c.req.param('id')))
-  if (!r) return c.notFound()
-  const f = await form(c)
-  const fac = (f.room_facilities ?? '').split(',').map((x) => x.trim()).filter((x) => x in FACILITIES)
-  const next = { base: Math.max(0, int(f.base_rate)), weekend: int(f.weekend_rate) || null, net: int(f.net_rate) || null }
-  await run(
-    c.env,
-    'UPDATE rooms SET name = ?, capacity = ?, bed_type = ?, units = ?, base_rate = ?, weekend_rate = ?, net_rate = ?, min_nights = ?, inclusions = ?, facilities = ?, active = ? WHERE id = ?',
-    str(f.name, 80), Math.max(1, int(f.capacity, 2)), str(f.bed_type, 60) || null, Math.max(0, int(f.units, 1)), next.base, next.weekend, next.net, Math.max(1, int(f.min_nights, 1)), str(f.inclusions, 200), JSON.stringify(fac), f.active ? 1 : 0, r.id,
-  )
-  if (r.base_rate !== next.base || r.weekend_rate !== next.weekend || r.net_rate !== next.net) {
-    await logActivity(c.env, c.get('user')!.id, 'price.changed', 'room', r.id, { from: { base: r.base_rate, weekend: r.weekend_rate, net: r.net_rate }, to: next })
-  }
-  await afterPropertySave(c, r.property_id)
-  return c.redirect(`/admin/properties/${r.property_id}`, 303)
-})
-
-adminRoutes.post('/admin/properties/:id/photos', requirePerm('manage_properties'), async (c) => {
-  const id = int(c.req.param('id'))
-  const body = await c.req.parseBody({ all: true })
-  const files = (Array.isArray(body.photos) ? body.photos : [body.photos]).filter((f): f is File => f instanceof File && f.size > 0)
-  const maxSort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', id))?.m ?? 0
-  let n = 0
-  for (const f of files.slice(0, 20)) {
-    if (f.size > 15 * 1024 * 1024 || !/^image\/(jpeg|png|webp)$/.test(f.type)) continue
-    const key = `properties/${id}/${crypto.randomUUID()}.${f.type.split('/')[1]}`
-    await c.env.MEDIA.put(key, await f.arrayBuffer(), { httpMetadata: { contentType: f.type } })
-    const pid = await insertId(c.env, 'INSERT INTO property_photos (property_id, r2_key, sort) VALUES (?, ?, ?)', id, key, maxSort + ++n)
-    await enqueue(c.env, { type: 'photo_tags', photoId: pid })
-  }
-  await logActivity(c.env, c.get('user')!.id, 'photos.uploaded', 'property', id, { count: n })
-  return redirectMsg(c, `/admin/properties/${id}`, { ok: `${n} photo(s) uploaded. Tag suggestions will appear shortly.` })
-})
-
-adminRoutes.post('/admin/photos/:id', requirePerm('manage_properties'), async (c) => {
-  const ph = await first<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE id = ?', int(c.req.param('id')))
-  if (!ph) return c.notFound()
-  const f = await form(c)
-  if (f.delete) {
-    await run(c.env, 'DELETE FROM property_photos WHERE id = ?', ph.id)
-    if (!ph.r2_key.startsWith('http')) await c.env.MEDIA.delete(ph.r2_key)
-    await logActivity(c.env, c.get('user')!.id, 'photo.deleted', 'property', ph.property_id)
-  } else await run(c.env, 'UPDATE property_photos SET caption = ?, sort = ? WHERE id = ?', str(f.caption, 120) || null, int(f.sort), ph.id)
-  return c.redirect(`/admin/properties/${ph.property_id}`, 303)
-})
-
-adminRoutes.post('/admin/ai/description', requirePerm('manage_properties'), async (c) => {
-  const f = await form(c)
-  const r = await writeDescription(c.env, str(f.name, 100), str(f.type, 20), str(f.destination, 60), str(f.points, 1500))
-  return c.json(r ?? { error: 'AI description writer is off or unavailable.' })
-})
-
-adminRoutes.post('/admin/ai/seo', requirePerm('manage_properties'), async (c) => {
-  const f = await form(c)
-  const r = await seoSuggest(c.env, { name: str(f.name, 100), type: str(f.type, 20), destination: str(f.destination, 60), description: str(f.description, 3000) })
-  return c.json(r ?? { error: 'AI SEO suggestions are off or unavailable.' })
-})
+// ---------- 33. Add / edit property: see admin-properties.tsx ----------
 
 // ---------- 34. Rates and availability ----------
 adminRoutes.get('/admin/rates', requirePerm('manage_rates'), async (c) => {

@@ -1,3 +1,4 @@
+import { STAY_TYPES } from '../lib/catalog'
 import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
 import { FACILITIES } from '../lib/search'
@@ -9,6 +10,13 @@ export const FACILITY_ICONS: Record<string, string> = {
   pool: '🏊', wifi: '📶', parking: '🅿️', ac: '❄️', kitchen: '🍳', breakfast: '🥐', garden: '🌿', view: '🏞', campfire: '🔥',
   power_backup: '🔋', hot_water: '🚿', tv: '📺', lake_view: '🛶', sea_view: '🌊', hill_view: '⛰', restaurant: '🍽', spa: '💆',
   wheelchair: '♿', ground_floor: '⬇️',
+  // more facilities
+  gym: '🏋️', ayurveda: '🌿', kids_play: '🧸', indoor_games: '🎲', bonfire: '🔥', bbq: '🍖', elevator: '🛗', laundry: '🧺', room_service: '🛎',
+  housekeeping: '🧹', front_desk_24h: '🕐', cctv: '📹', ev_charging: '🔌', airport_transfer: '🚐', doctor_on_call: '🩺', conference: '📊', bar: '🍸',
+  trekking: '🥾', boating: '🛶', plantation_tour: '🍃', cycling: '🚲', fishing: '🎣',
+  // room amenities
+  fan: '🌀', kettle: '☕', minibar: '🍾', fridge: '🧊', balcony: '🌅', sitout: '🪑', private_pool: '🏊', jacuzzi: '🛁', safe: '🔐', hairdryer: '💨',
+  work_desk: '💻', wardrobe: '🚪', toiletries: '🧴', slippers: '🥿', intercom: '📞', sofa: '🛋', kitchenette: '🍳', mosquito_net: '🦟', heater: '♨️',
 }
 
 export const Stars: FC<{ value: number; count?: number }> = ({ value, count }) =>
@@ -29,7 +37,7 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
     <article class="card pcard">
       <a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`} class="pcard-img">
         <img src={mediaUrl(p.photo, 600, transform)} alt={p.name} loading="lazy" width="600" height="400" />
-        <span class="pcard-type">{p.type}</span>
+        <span class="pcard-type">{STAY_TYPES[p.type] ?? p.type}</span>
       </a>
       <form method="post" action={`/saved/${p.id}`} class="pcard-heart">
         <button title={saved ? 'Remove from saved' : 'Save'} aria-label="Save property" class={saved ? 'on' : ''}>{saved ? '♥' : '♡'}</button>

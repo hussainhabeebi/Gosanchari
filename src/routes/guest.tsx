@@ -2,6 +2,7 @@
 
 import { Hono } from 'hono'
 import type { AppEnv } from '../env'
+import { COVER_PHOTO_SQL } from '../lib/catalog'
 import { page } from '../views/layout'
 import { Empty, Field, Pill, PropertyCard, Select, Tabs } from '../views/components'
 import { requireUser } from '../lib/auth'
@@ -20,7 +21,7 @@ guestRoutes.use('/my/*', requireUser)
 type BookingView = BookingRow & { property_name: string; slug: string; destination: string; photo: string | null; checkin_time: string; lat: number | null; lng: number | null; owner_phone: string | null; address: string | null }
 
 const BOOKING_SELECT = `SELECT b.*, p.name AS property_name, p.slug, p.destination, p.checkin_time, p.lat, p.lng, p.address, p.owner_phone,
-  (SELECT r2_key FROM property_photos ph WHERE ph.property_id = p.id ORDER BY sort LIMIT 1) AS photo
+  ${COVER_PHOTO_SQL} AS photo
   FROM bookings b JOIN properties p ON p.id = b.property_id`
 
 function mapsLink(b: { lat: number | null; lng: number | null; property_name: string; destination: string }) {

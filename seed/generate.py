@@ -167,13 +167,41 @@ for p in props:
                                     p['highlights'], p['desc'], p['facilities'], p['meals'], CANCEL, p['rules'], nearby, p['pet'], p['family'], 'live', p['featured'],
                                     f"{p['name']}, {p['destination']} | Go Sanchari", p['desc'][:150]])
         + ');')
-    for i, ph in enumerate(p['photos']):
-        out.append(f"INSERT INTO property_photos (property_id, r2_key, caption, sort, tags_confirmed) VALUES ({p['id']}, {q('/demo/' + ph + '.svg')}, {q(p['name'])}, {i}, 1);")
+    out.append(f"UPDATE properties SET stay_type = type WHERE id = {p['id']};")
+    first_room = room_id + 1
     for r in p['rooms']:
         room_id += 1
         room_ids.setdefault(p['id'], []).append(room_id)
         name, cap, bed, units, base, wk, net, inc = r
-        out.append(f"INSERT INTO rooms (id, property_id, name, capacity, bed_type, units, base_rate, weekend_rate, net_rate, inclusions, facilities) VALUES ({room_id}, {p['id']}, {q(name)}, {cap}, {q(bed)}, {units}, {base}, {wk}, {net}, {q(inc)}, {q(['hot_water'] + (['ac'] if 'ac' in p['facilities'] else []))});")
+        amen = ['hot_water', 'wifi', 'kettle'] + (['ac', 'tv'] if 'ac' in p['facilities'] else ['fan']) + (['balcony'] if p['type'] in ('villa', 'resort', 'cottage') else [])
+        out.append(f"INSERT INTO rooms (id, property_id, name, capacity, bed_type, units, base_rate, weekend_rate, net_rate, inclusions, facilities, size_sqft, max_adults, max_children, extra_bed, extra_bed_rate) VALUES ({room_id}, {p['id']}, {q(name)}, {cap}, {q(bed)}, {units}, {base}, {wk}, {net}, {q(inc)}, {q(amen)}, {250 + 60 * cap}, {min(cap, 3)}, {max(0, cap - 2)}, 1, 1000);")
+    # Photos in sections: first picture = facade, scenery = view, room = first room category, pool = pool.
+    for i, ph in enumerate(p['photos']):
+        cat = 'room' if ph == 'room' else 'pool' if ph == 'pool' else 'facade' if i == 0 else 'view'
+        rid = first_room if cat == 'room' else 'NULL'
+        out.append(f"INSERT INTO property_photos (property_id, r2_key, caption, sort, tags_confirmed, category, room_id) VALUES ({p['id']}, {q('/demo/' + ph + '.svg')}, {q(p['name'])}, {i}, 1, {q(cat)}, {rid});")
+
+# Rich details for two demo properties.
+DETAILS = {
+    1: dict(map_url='https://www.google.com/maps/@10.0889,77.0595,15z', star_category=None, built_year=2016, themes=['family', 'nature', 'honeymoon'], languages=['Malayalam', 'English', 'Hindi', 'Tamil'],
+            how_to_reach='From Aluva railway station: about 3.5 hours by taxi via Kothamangalam and Adimali. The last 600 m is an estate road; the hosts can pick you up from the main road.',
+            best_time='September to May; monsoon (June–August) for mist and waterfalls', good_to_know='No lift — rooms are on two floors. Mobile signal is weak inside the estate (Wi-Fi available).',
+            dining=dict(restaurant_name='Estate Kitchen', cuisines=['Kerala', 'South Indian', 'Vegetarian'], menu_types=['Home-cooked', 'Set menu'], breakfast='7:30 – 10:00', lunch='12:30 – 2:30', dinner='7:30 – 10:00', in_room_dining=False, bar=False, outside_food=True, price_cp=0, price_map=650, price_ap=1100, child_meal_note='Below 5 years free; 5–12 years half price', notes='Kerala sadya on request. Bonfire dinner ₹1,500 for the group.'),
+            policies=dict(pet='Pets not allowed', child='Children below 5 stay free; extra mattress ₹800/night for older children', extra_bed='Extra mattress ₹1,000/night, max 1 per room', early_late='Early check-in from 11:00 if available, free', id_documents='Aadhaar, passport, driving licence or voter ID for all adults', couples='Unmarried couples welcome with valid ID', smoking='Only in the garden', alcohol='Allowed in rooms; no loud parties', visitors='Not allowed after 8 pm', quiet_hours='10 pm – 7 am', payment='Full payment to confirm'),
+            contact=dict(person='Joseph Kurian', phone='+919847000001', whatsapp='+919847000001', reservation_email='stay@mistyteabungalow.example', booking_url='https://mistyteabungalow.example/book')),
+    7: dict(star_category=4, built_year=2012, themes=['family', 'ayurveda', 'luxury'], languages=['Malayalam', 'English', 'Hindi'],
+            how_to_reach='From Kottayam railway station: 3 hours by taxi via Mundakayam. Madurai airport is 140 km.', best_time='All year; October – March is driest',
+            dining=dict(restaurant_name='Cardamom', cuisines=['Kerala', 'North Indian', 'Chinese', 'Continental'], menu_types=['Buffet', 'À la carte', 'Kids menu', 'Room service'], breakfast='7:00 – 10:30', lunch='12:30 – 3:00', dinner='7:30 – 10:30', in_room_dining=True, bar=True, outside_food=False, price_map=900, price_ap=1600),
+            policies=dict(pet='Not allowed', child='Below 6 free without extra bed', extra_bed='₹1,500/night including breakfast', smoking='Designated areas only', payment='50% advance, balance at check-in'),
+            contact=dict(person='Front office', phone='+919847000007', reservation_email='reservations@spicegarden.example', website='https://spicegarden.example', booking_url='https://spicegarden.example/reserve')),
+}
+for pid, dd in DETAILS.items():
+    sets = ', '.join(f"{k} = {q(v)}" for k, v in dd.items() if v is not None)
+    out.append(f"UPDATE properties SET {sets} WHERE id = {pid};")
+# Per-room seasonal tariff for Misty Tea Bungalow
+for name, start, end, mult, mn in [('Onam', '-08-25', '-09-10', 1.15, 2), ('Christmas & New Year', '-12-20', '-12-31', 1.4, 3), ('Summer holidays', '-04-01', '-05-31', 1.2, None)]:
+    for rid, base in zip(room_ids[1], [3800, 6500]):
+        out.append(f"INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights) VALUES (1, {rid}, {q(name)}, strftime('%Y', 'now') || '{start}', strftime('%Y', 'now') || '{end}', {int(round(base * mult, -2))}, {mn if mn else 'NULL'});")
 
 # Seasons: Christmas/New Year (+25% everywhere, 3-night minimum) and Onam style fixed example.
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, pct_adjust, min_nights) VALUES (NULL, NULL, 'Christmas & New Year', strftime('%Y', 'now') || '-12-20', strftime('%Y', 'now') || '-12-31', 25, 2);")

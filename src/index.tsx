@@ -14,6 +14,7 @@ import { guestRoutes } from './routes/guest'
 import { staffRoutes } from './routes/staff'
 import { opsRoutes } from './routes/staff-ops'
 import { adminRoutes } from './routes/admin'
+import { propertyEditorRoutes } from './routes/admin-properties'
 import { admin2Routes } from './routes/admin2'
 import { webhookRoutes } from './routes/webhooks'
 import { handleQueue } from './jobs/queue'
@@ -31,7 +32,7 @@ const security = secureHeaders({
     styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
     connectSrc: ["'self'"],
-    frameSrc: ['https://challenges.cloudflare.com'],
+    frameSrc: ['https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
     mediaSrc: ["'self'"],
     formAction: ["'self'"],
     frameAncestors: ["'none'"],
@@ -73,6 +74,7 @@ app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', propertyEditorRoutes)
 app.route('/', adminRoutes)
 app.route('/', admin2Routes)
 app.route('/', publicRoutes)

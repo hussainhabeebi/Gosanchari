@@ -25,37 +25,34 @@
     })
   })
 
-  // ---------- Gallery lightbox ----------
-  var gal = $('[data-gallery]')
-  if (gal) {
-    var links = $$('[data-full]', gal)
-    var idx = 0
-    var box
-    function show(i) {
-      idx = (i + links.length) % links.length
-      if (!box) {
-        box = document.createElement('div')
-        box.className = 'lightbox'
-        box.innerHTML = '<img alt=""><button class="lb-close" aria-label="Close">×</button><button class="lb-prev" aria-label="Previous">‹</button><button class="lb-next" aria-label="Next">›</button>'
-        document.body.appendChild(box)
-        box.addEventListener('click', function (e) {
-          if (e.target.classList.contains('lb-prev')) show(idx - 1)
-          else if (e.target.classList.contains('lb-next')) show(idx + 1)
-          else if (e.target.tagName !== 'IMG') { box.remove(); box = null }
-        })
-        document.addEventListener('keydown', function (e) {
-          if (!box) return
-          if (e.key === 'Escape') { box.remove(); box = null }
-          if (e.key === 'ArrowLeft') show(idx - 1)
-          if (e.key === 'ArrowRight') show(idx + 1)
-        })
-      }
-      $('img', box).src = links[idx].href
+  // ---------- Gallery lightbox (every [data-gallery] block is its own set) ----------
+  var box, set = [], idx = 0
+  function show(list, i) {
+    set = list
+    idx = (i + set.length) % set.length
+    if (!box) {
+      box = document.createElement('div')
+      box.className = 'lightbox'
+      box.innerHTML = '<img alt=""><button class="lb-close" aria-label="Close">×</button><button class="lb-prev" aria-label="Previous">‹</button><button class="lb-next" aria-label="Next">›</button>'
+      document.body.appendChild(box)
+      box.addEventListener('click', function (e) {
+        if (e.target.classList.contains('lb-prev')) show(set, idx - 1)
+        else if (e.target.classList.contains('lb-next')) show(set, idx + 1)
+        else if (e.target.tagName !== 'IMG') { box.remove(); box = null }
+      })
     }
-    links.forEach(function (a, i) { a.addEventListener('click', function (e) { e.preventDefault(); show(i) }) })
-    var all = $('[data-open-gallery]', gal)
-    if (all) all.addEventListener('click', function () { show(0) })
+    $('img', box).src = set[idx].href
   }
+  document.addEventListener('keydown', function (e) {
+    if (!box) return
+    if (e.key === 'Escape') { box.remove(); box = null }
+    if (e.key === 'ArrowLeft') show(set, idx - 1)
+    if (e.key === 'ArrowRight') show(set, idx + 1)
+  })
+  $$('[data-gallery]').forEach(function (gal) {
+    var links = $$('[data-full]', gal)
+    links.forEach(function (a, i) { a.addEventListener('click', function (e) { e.preventDefault(); show(links, i) }) })
+  })
 
   // ---------- Maps (Leaflet, loaded with defer) ----------
   window.addEventListener('load', function () {
@@ -83,6 +80,15 @@
       var la = $('#lat'), ln = $('#lng')
       var m3 = L.map(pin).setView([+pin.dataset.lat, +pin.dataset.lng], la.value ? 13 : 8); tiles(m3)
       var mk = la.value ? L.marker([+la.value, +ln.value]).addTo(m3) : null
+      var mu = document.getElementById('map-url')
+      if (mu) mu.addEventListener('change', function () {
+        var v = mu.value, mm = v.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || v.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || v.match(/[?&](?:q|ll|query|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/)
+        if (!mm) return
+        la.value = (+mm[1]).toFixed(6); ln.value = (+mm[2]).toFixed(6)
+        var ll = [+la.value, +ln.value]
+        if (mk) mk.setLatLng(ll); else mk = L.marker(ll).addTo(m3)
+        m3.setView(ll, 14)
+      })
       m3.on('click', function (e) {
         la.value = e.latlng.lat.toFixed(6); ln.value = e.latlng.lng.toFixed(6)
         if (mk) mk.setLatLng(e.latlng); else mk = L.marker(e.latlng).addTo(m3)

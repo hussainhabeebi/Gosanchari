@@ -40,6 +40,18 @@ export interface PropertyRow {
   embedded_at: string | null
   created_at: string
   updated_at: string
+  stay_type: string | null
+  map_url: string | null
+  star_category: number | null
+  built_year: number | null
+  themes: string
+  languages: string
+  how_to_reach: string
+  best_time: string
+  good_to_know: string
+  dining: string
+  policies: string
+  contact: string
 }
 
 export interface RoomRow {
@@ -56,6 +68,13 @@ export interface RoomRow {
   net_rate: number | null
   min_nights: number
   active: number
+  description: string
+  size_sqft: number | null
+  room_view: string | null
+  max_adults: number | null
+  max_children: number | null
+  extra_bed: number
+  extra_bed_rate: number | null
 }
 
 export interface PhotoRow {
@@ -66,12 +85,17 @@ export interface PhotoRow {
   sort: number
   ai_tags: string
   tags_confirmed: number
+  category: string
+  room_id: number | null
+  media_type: 'image' | 'video'
+  video_url: string | null
 }
 
 export interface NearbyPlace {
   name: string
   kind: string
   km: number
+  time?: string
 }
 
 export interface EnquiryRow {

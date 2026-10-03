@@ -1,3 +1,4 @@
+import { COVER_PHOTO_SQL, dining as readDining, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, stayType, stayTypeLabel, THEMES } from './catalog'
 // Property search (database), semantic ranking (Vectorize), similar properties, knowledge-base docs.
 
 import type { Env } from '../env'
@@ -10,11 +11,11 @@ import type { NearbyPlace, PropertyCard, PropertyRow, RoomRow } from './types'
 import { nightsBetween, nowIso, parseJson, sha256Hex, todayIST } from './util'
 
 const CARD_SQL = `
-SELECT p.id, p.slug, p.name, p.type, p.destination, p.rating_avg, p.rating_count, p.facilities, p.meal_plans,
+SELECT p.id, p.slug, p.name, COALESCE(p.stay_type, p.type) AS type, p.destination, p.rating_avg, p.rating_count, p.facilities, p.meal_plans,
        p.lat, p.lng, p.featured, p.pet_friendly, p.family_friendly, p.created_at,
        (SELECT MIN(base_rate) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS from_price,
        (SELECT COALESCE(SUM(capacity * units), 0) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS max_guests,
-       (SELECT r2_key FROM property_photos ph WHERE ph.property_id = p.id ORDER BY sort, id LIMIT 1) AS photo
+       ${COVER_PHOTO_SQL} AS photo
 FROM properties p`
 
 export async function destinations(env: Env): Promise<string[]> {
@@ -70,7 +71,7 @@ export async function searchProperties(env: Env, f: SearchFilters, limit = 60): 
   const where: string[] = ["p.status = 'live'"]
   const binds: (string | number)[] = []
   if (f.destination) { where.push('p.destination = ?'); binds.push(f.destination) }
-  if (f.types?.length) { where.push(`p.type IN (${placeholders(f.types.length)})`); binds.push(...f.types) }
+  if (f.types?.length) { where.push(`COALESCE(p.stay_type, p.type) IN (${placeholders(f.types.length)})`); binds.push(...f.types) }
   if (f.rating) { where.push('p.rating_avg >= ?'); binds.push(f.rating) }
   if (f.pet) where.push('p.pet_friendly = 1')
   if (f.family) where.push('p.family_friendly = 1')
@@ -139,10 +140,13 @@ export function propertyEmbeddingText(p: PropertyRow, rooms: Pick<RoomRow, 'name
   const fac = parseJson<string[]>(p.facilities, []).map((k) => FACILITIES[k] ?? k)
   const hl = parseJson<string[]>(p.highlights, [])
   return [
-    `${p.name}, a ${p.type} in ${p.destination}, Kerala.`,
+    `${p.name}, a ${stayTypeLabel(p)} in ${p.destination}, Kerala.`,
     hl.join('. '),
     p.description,
     `Facilities: ${fac.join(', ')}.`,
+    parseJson<string[]>(p.themes, []).map((t) => THEMES[t] ?? t).join(', '),
+    p.good_to_know,
+    readDining(p.dining).cuisines?.join(', ') ?? '',
     p.family_friendly ? 'Good for families and kids.' : '',
     p.pet_friendly ? 'Pet friendly.' : '',
     `Rooms: ${rooms.map((r) => `${r.name} for ${r.capacity}`).join('; ')}.`,
@@ -210,12 +214,12 @@ export async function similarProperties(env: Env, propertyId: number, n = 4): Pr
     }
   }
   if (ids.length < n) {
-    const p = await first<{ destination: string; type: string }>(env, 'SELECT destination, type FROM properties WHERE id = ?', propertyId)
+    const p = await first<{ destination: string; type: string; stay_type: string | null }>(env, 'SELECT destination, type, stay_type FROM properties WHERE id = ?', propertyId)
     if (p) {
       const extra = await all<{ id: number }>(
         env,
-        "SELECT id FROM properties WHERE status = 'live' AND id != ? ORDER BY (destination = ?) DESC, (type = ?) DESC, rating_avg DESC LIMIT ?",
-        propertyId, p.destination, p.type, n * 2,
+        "SELECT id FROM properties WHERE status = 'live' AND id != ? ORDER BY (destination = ?) DESC, (COALESCE(stay_type, type) = ?) DESC, rating_avg DESC LIMIT ?",
+        propertyId, p.destination, stayType(p), n * 2,
       )
       for (const e of extra) if (!ids.includes(e.id) && ids.length < n) ids.push(e.id)
     }
@@ -246,7 +250,7 @@ export async function embedProperty(env: Env, propertyId: number): Promise<void>
   const rooms = await all<RoomRow>(env, 'SELECT name, capacity FROM rooms WHERE property_id = ? AND active = 1', propertyId)
   const v = await aiEmbed(env, 'recommended', [propertyEmbeddingText(p, rooms)])
   if (!v?.[0]) return
-  await env.VECTORIZE.upsert([{ id: `p-${p.id}`, values: v[0], metadata: { status: p.status, destination: p.destination, type: p.type } }])
+  await env.VECTORIZE.upsert([{ id: `p-${p.id}`, values: v[0], metadata: { status: p.status, destination: p.destination, type: stayType(p) } }])
   await run(env, 'UPDATE properties SET embedded_at = ? WHERE id = ?', nowIso(), p.id)
   await env.KV.delete(`similar:${p.id}`)
 }
@@ -255,40 +259,68 @@ export async function embedProperty(env: Env, propertyId: number): Promise<void>
 
 export async function propertyDoc(env: Env, p: PropertyRow): Promise<string> {
   const rooms = await all<RoomRow>(env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id)
+  const seasons = await all<{ name: string; start_date: string; end_date: string; room_id: number | null; rate: number | null; pct_adjust: number | null }>(
+    env, 'SELECT name, start_date, end_date, room_id, rate, pct_adjust FROM season_rates WHERE property_id = ? ORDER BY start_date', p.id,
+  )
   const fac = parseJson<string[]>(p.facilities, []).map((k) => FACILITIES[k] ?? k)
   const meals = parseJson<string[]>(p.meal_plans, []).map((k) => MEAL_PLANS[k] ?? k)
   const near = parseJson<NearbyPlace[]>(p.nearby, [])
+  const d = readDining(p.dining)
+  const pol = readPolicies(p.policies)
+  const themes = parseJson<string[]>(p.themes, []).map((t) => THEMES[t] ?? t)
+  const langs = parseJson<string[]>(p.languages, [])
+  const roomLine = (r: RoomRow) => {
+    const am = parseJson<string[]>(r.facilities, []).map((k) => ROOM_AMENITIES[k] ?? FACILITIES[k] ?? k)
+    return `- ${r.name}: ${r.units} room(s) of this type, sleeps up to ${r.capacity}${r.max_adults ? ` (max ${r.max_adults} adults${r.max_children != null ? `, ${r.max_children} children` : ''})` : ''}` +
+      `${r.bed_type ? `, ${r.bed_type}` : ''}${r.size_sqft ? `, ${r.size_sqft} sq ft` : ''}${r.room_view ? `, ${r.room_view} view` : ''}. ` +
+      `From ₹${r.base_rate} per night${r.weekend_rate ? ` (weekends ₹${r.weekend_rate})` : ''}. Includes: ${r.inclusions || 'room only'}. ` +
+      `Amenities: ${am.join(', ') || 'standard'}. ${r.extra_bed ? `Extra bed available${r.extra_bed_rate ? ` at ₹${r.extra_bed_rate}/night` : ''}.` : 'No extra bed.'} ${r.description}`
+  }
+  const seasonLines = [...new Set(seasons.map((s) => `${s.name} (${s.start_date} to ${s.end_date})`))]
   return `# ${p.name}
 
-Type: ${p.type}. Location: ${p.destination}, Kerala. ${p.address ?? ''}
+Type: ${stayTypeLabel(p)}${p.star_category ? `, ${p.star_category}-star` : ''}. Location: ${p.destination}, Kerala. ${p.address ?? ''}
+${themes.length ? `Best for: ${themes.join(', ')}.` : ''} ${langs.length ? `Languages spoken: ${langs.join(', ')}.` : ''} ${p.built_year ? `Built/renovated: ${p.built_year}.` : ''}
 
 ## Highlights
 ${parseJson<string[]>(p.highlights, []).map((h) => `- ${h}`).join('\n')}
 
 ## About
 ${p.description}
+${p.good_to_know ? `\nGood to know: ${p.good_to_know}` : ''}
 
-## Rooms
-${rooms.map((r) => `- ${r.name}: sleeps ${r.capacity}${r.bed_type ? `, ${r.bed_type}` : ''}. From ₹${r.base_rate} per night. Includes: ${r.inclusions || 'room only'}. Room facilities: ${parseJson<string[]>(r.facilities, []).map((k) => FACILITIES[k] ?? k).join(', ') || 'standard'}.`).join('\n')}
+## Room categories
+${rooms.map(roomLine).join('\n')}
+
+## Seasonal rates
+${seasonLines.length ? `Special season rates apply during: ${seasonLines.join('; ')}. Exact prices are confirmed in the quote.` : 'Regular rates all year.'}
 
 ## Facilities
 ${fac.join(', ') || 'Not listed'}
 
-## Meals
-Meal plans available: ${meals.join(', ') || 'Room only'}.
+## Dining
+${d.restaurant_name ? `Restaurant: ${d.restaurant_name}. ` : ''}Cuisines: ${d.cuisines?.join(', ') || 'not listed'}. Menu: ${d.menu_types?.join(', ') || 'not listed'}.
+Timings: breakfast ${d.breakfast || 'not listed'}, lunch ${d.lunch || 'not listed'}, dinner ${d.dinner || 'not listed'}.
+Meal plans available: ${meals.join(', ') || 'Room only'}.${d.price_cp ? ` Breakfast plan ₹${d.price_cp}/person/night.` : ''}${d.price_map ? ` Breakfast + dinner ₹${d.price_map}/person/night.` : ''}${d.price_ap ? ` All meals ₹${d.price_ap}/person/night.` : ''}
+In-room dining: ${d.in_room_dining ? 'yes' : 'no'}. Bar: ${d.bar ? 'yes' : 'no'}. Outside food: ${d.outside_food ? 'allowed' : 'not allowed'}. ${d.child_meal_note ?? ''} ${d.notes ?? ''}
 
-## House rules
+## Policies
 - Check-in from ${p.checkin_time}, check-out by ${p.checkout_time}.
-- Government photo ID ${p.id_required ? 'is required for all adult guests' : 'is not required'}.
-- Pets: ${p.pet_friendly ? 'allowed' : 'not allowed'}.
-- Children and families: ${p.family_friendly ? 'welcome, good for families' : 'better suited to adults'}.
+- ID: ${pol.id_documents || (p.id_required ? 'Government photo ID required for all adult guests' : 'not required')}.
+- Pets: ${pol.pet || (p.pet_friendly ? 'allowed' : 'not allowed')}.
+- Children: ${pol.child || (p.family_friendly ? 'welcome, good for families' : 'better suited to adults')}.
+${POLICY_FIELDS.filter(([k]) => !['pet', 'child', 'id_documents'].includes(k) && pol[k]).map(([k, label]) => `- ${label}: ${pol[k]}`).join('\n')}
 ${p.house_rules ? p.house_rules.split('\n').map((l) => `- ${l.replace(/^-\s*/, '')}`).join('\n') : ''}
 
 ## Cancellation policy
 ${p.cancellation_policy || 'Standard Go Sanchari cancellation policy applies.'}
 
+## Location and how to reach
+${p.address ?? ''} ${p.how_to_reach ?? ''}
+${p.best_time ? `Best time to visit: ${p.best_time}.` : ''}
+
 ## Nearby
-${near.map((n) => `- ${n.name} (${n.kind}): ${n.km} km`).join('\n') || 'Not listed'}
+${near.map((n) => `- ${n.name} (${n.kind}): ${n.km} km${n.time ? `, about ${n.time}` : ''}`).join('\n') || 'Not listed'}
 `
 }
 
