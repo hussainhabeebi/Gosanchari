@@ -83,7 +83,7 @@ For a Cloudflare dashboard Git connection (Workers & Pages → Create → Import
 Demo data is optional: `npm run db:seed:remote`. Don't load it on a live site without changing the demo passwords.
 
 **Optional, turn on when ready** (all have safe fallbacks):
-1. **AI Gateway:** in the dashboard, create a gateway named `gosanchari` (matches `AI_GATEWAY_ID`). Turn on caching and rate limiting, and set a spend alert.
+1. **AI Gateway (recommended, optional):** in the dashboard, create a gateway named `gosanchari` (matches `AI_GATEWAY_ID`). If it is missing, AI calls fall back to Workers AI directly. Turn on caching and rate limiting, and set a spend alert.
 2. **Vectorize** ("Recommended" sorting and similar properties): run `npm run setup:cloudflare`, then uncomment the `[[vectorize]]` block in `wrangler.toml`.
    **AI Search:** create the instance `gosanchari-kb` with the `gosanchari-kb` R2 bucket as its source, then uncomment the `[[ai_search]]` block.
    Deploys fail if either block is on but its resource doesn't exist.

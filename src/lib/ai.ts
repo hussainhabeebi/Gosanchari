@@ -48,10 +48,23 @@ function gatewayOpts(env: Env, cacheTtl?: number) {
   }
 }
 
+// Set once the gateway has failed in this isolate, so later calls go straight to Workers AI.
+let gatewayBroken = false
+
 async function callModel(env: Env, model: string, input: Record<string, unknown>, cacheTtl?: number): Promise<unknown> {
   // Model names come from Settings, so the binding's literal model union cannot be used here.
   const run = env.AI.run as unknown as (m: string, i: unknown, o?: unknown) => Promise<unknown>
-  return run.call(env.AI, model, input, gatewayOpts(env, cacheTtl))
+  const gw = gatewayBroken ? undefined : gatewayOpts(env, cacheTtl)
+  if (!gw) return run.call(env.AI, model, input)
+  try {
+    return await run.call(env.AI, model, input, gw)
+  } catch (e) {
+    // A missing or misconfigured AI Gateway must not switch AI off: retry directly.
+    console.error(`AI Gateway "${env.AI_GATEWAY_ID}" failed, calling Workers AI directly`, e)
+    const out = await run.call(env.AI, model, input)
+    gatewayBroken = true
+    return out
+  }
 }
 
 /** Guard + limit + log + fallback wrapper. */
@@ -130,8 +143,47 @@ export function extractJson<T>(text: string | null): T | null {
   const open = body[start]
   const close = open === '{' ? '}' : ']'
   const end = body.lastIndexOf(close)
-  if (end <= start) return null
-  return parseJson<T | null>(body.slice(start, end + 1), null)
+  const parsed = end > start ? parseJson<T | null>(body.slice(start, end + 1), null) : null
+  return parsed ?? parseJson<T | null>(repairJson(body.slice(start)), null)
+}
+
+/** Best-effort fix for model JSON: trailing commas, and replies cut off at the token limit. */
+export function repairJson(s: string): string {
+  let out = ''
+  const stack: string[] = []
+  let inStr = false
+  let esc = false
+  let lastSafe = 0
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    out += ch
+    if (inStr) {
+      if (esc) esc = false
+      else if (ch === '\\') esc = true
+      else if (ch === '"') inStr = false
+      continue
+    }
+    if (ch === '"') inStr = true
+    else if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']')
+    else if (ch === '}' || ch === ']') {
+      stack.pop()
+      if (!stack.length) return out.replace(/,\s*([}\]])/g, '$1')
+    }
+    if (!inStr && (ch === ',' || ch === '{' || ch === '[')) lastSafe = out.length - (ch === ',' ? 1 : 0)
+  }
+  // Cut off mid-way: drop the unfinished item and close what is open.
+  let cut = out.slice(0, lastSafe).replace(/,\s*$/, '')
+  const open: string[] = []
+  let q = false
+  let e2 = false
+  for (const ch of cut) {
+    if (q) { if (e2) e2 = false; else if (ch === '\\') e2 = true; else if (ch === '"') q = false; continue }
+    if (ch === '"') q = true
+    else if (ch === '{' || ch === '[') open.push(ch === '{' ? '}' : ']')
+    else if (ch === '}' || ch === ']') open.pop()
+  }
+  cut += open.reverse().join('')
+  return cut.replace(/,\s*([}\]])/g, '$1')
 }
 
 export async function aiJson<T>(env: Env, feature: AiFeature, o: TextOptions): Promise<T | null> {

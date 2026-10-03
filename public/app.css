@@ -448,3 +448,10 @@ code { overflow-wrap: anywhere; }
 .qf-filled { background: #fff6cc; border-radius: 8px; box-shadow: 0 0 0 4px #fff6cc; }
 .qf-filled input, .qf-filled select, .qf-filled textarea { border-color: #e6a700; }
 #qf-extra-list ul { margin: 4px 0 8px; padding-left: 20px; }
+@media (max-width: 600px) {
+  .row.wrap-row.sticky-actions { padding: 8px 0; gap: 8px; flex-wrap: nowrap; }
+  .sticky-actions select { width: auto; flex: 1 1 auto; min-width: 0; padding: 7px 8px; }
+  .sticky-actions .check { font-size: .8rem; gap: 4px; flex: 0 1 auto; }
+  .sticky-actions .btn { flex: 0 0 auto; padding: 8px 12px; }
+  .sticky-actions .muted { display: none; }
+}

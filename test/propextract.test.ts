@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { extractPrompt, normalizeExtract } from '../src/lib/propextract'
+import { fieldsPrompt, normalizeExtract, roomsPrompt, tidyNotes } from '../src/lib/propextract'
+import { extractJson } from '../src/lib/ai'
 
 describe('property quick fill', () => {
   it('maps loose AI output onto editor fields', () => {
@@ -38,10 +39,19 @@ describe('property quick fill', () => {
     expect(normalizeExtract('text')).toEqual({ fields: {}, rooms: [], seasons: [] })
   })
 
-  it('prompt lists allowed options and the notes', () => {
-    const p = extractPrompt('Lake view cottage', '2026-10-03')
+  it('prompts list allowed options and the notes', () => {
+    expect(fieldsPrompt('Lake view cottage')).toContain('d_cuisines')
+    const p = roomsPrompt('Lake view cottage', '2026-10-03')
     expect(p).toContain('Today is 2026-10-03')
     expect(p).toContain('Lake view cottage')
-    expect(p).toContain('d_cuisines')
+  })
+
+  it('tidies pasted chat formatting', () => {
+    expect(tidyNotes('* 🧒 **Child Without Bed:** ₹650 on CPAI\n\n---\n\n\n* 🍽️ **Lunch:** ₹800')).toBe('- Child Without Bed: ₹650 on CPAI\n\n- Lunch: ₹800')
+  })
+
+  it('repairs cut-off and trailing-comma JSON', () => {
+    expect(extractJson('{"a": 1, "b": [1, 2,],}')).toEqual({ a: 1, b: [1, 2] })
+    expect(extractJson('```json\n{"name": "X", "rooms": [{"name": "Deluxe", "base_rate": 4500}, {"name": "Sui')).toEqual({ name: 'X', rooms: [{ name: 'Deluxe', base_rate: 4500 }, {}] })
   })
 })

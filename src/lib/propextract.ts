@@ -2,7 +2,7 @@
 // WhatsApp message, a brochure), AI sorts it into the editor's fields. Nothing is saved until staff review and save.
 
 import type { Env } from '../env'
-import { aiJson } from './ai'
+import { aiEnabled, aiJson } from './ai'
 import { CONTACT_FIELDS, CUISINES, LANGUAGES, MENU_TYPES, POLICY_FIELDS, ROOM_AMENITIES, ROOM_VIEWS, STAY_TYPES, THEMES } from './catalog'
 import { FACILITIES, MEAL_PLANS } from './search'
 import { todayIST } from './util'
@@ -96,26 +96,47 @@ function describe(spec: Record<string, [Kind, string]>) {
   }).join('\n')
 }
 
-export function extractPrompt(text: string, today = todayIST()) {
-  return `Today is ${today}. Below are notes about a holiday property in Kerala, India (may mix English and Malayalam).
-Sort the facts into JSON: {"fields": {...}, "rooms": [...], "seasons": [...]}.
-Rules: use ONLY facts in the notes, never invent. Leave out a key when the notes don't say. Rates are numbers in rupees (no symbols, "4.5k" = 4500).
-Translate Malayalam facts to English.
+const RULES = `Rules: use ONLY facts in the notes, never invent. Leave out a key when the notes don't say.
+Rates are plain numbers in rupees (no symbols; "4.5k" = 4500). Translate Malayalam facts to English. Reply with JSON only, no explanation.`
 
-"fields" keys:
+/** Prompt for the property's own fields (call 1 of 2). */
+export function fieldsPrompt(text: string) {
+  return `Below are notes about a holiday property in Kerala, India. Sort the facts into one JSON object with these keys:
 ${describe(FIELDS)}
-
-"rooms": one object per room category with keys:
-${describe(ROOM_KEYS)}
-
-"seasons": seasonal / peak rates, each {"name": string, "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" (last night), "min_nights": number, "rates": {"<room category name>": rate}}.
-For dates without a year use the next upcoming occurrence.
+${RULES}
 
 Notes:
 """
 ${text}
+"""`
+}
+
+/** Prompt for room categories and seasonal rates (call 2 of 2). */
+export function roomsPrompt(text: string, today = todayIST()) {
+  return `Today is ${today}. Below are notes about a holiday property in Kerala, India. Find its room categories and seasonal rates.
+Reply as JSON: {"rooms": [...], "seasons": [...]}.
+"rooms": one object per room category with keys:
+${describe(ROOM_KEYS)}
+"seasons": seasonal / peak / festival rates, each {"name": string, "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" (last night), "min_nights": number, "rates": {"<room category name exactly as in rooms>": rate}}.
+For dates without a year use the next upcoming occurrence. Use [] when there are none.
+${RULES}
+
+Notes:
 """
-Reply with the JSON only.`
+${text}
+"""`
+}
+
+/** Strip chat formatting (markdown, emoji, separators) so the model gets the facts in fewer tokens. */
+export function tidyNotes(text: string) {
+  return text
+    .replace(/\*\*|__|`/g, '')
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '')
+    .replace(/^\s*(?:-{3,}|_{3,}|\*{3,}|={3,})\s*$/gm, '')
+    .replace(/^[ \t]*[*•▪►]\s+/gm, '- ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 const clean = (v: unknown, max = 2000) => (v == null ? '' : String(v).replace(/\s+\n/g, '\n').trim().slice(0, max))
@@ -237,8 +258,20 @@ export function normalizeExtract(raw: unknown): Extracted {
   return { fields, rooms, seasons }
 }
 
-export async function extractProperty(env: Env, text: string): Promise<Extracted | null> {
-  const raw = await aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: extractPrompt(text), maxTokens: 3500 })
-  if (!raw) return null
-  return normalizeExtract(raw)
+export type ExtractResult = (Extracted & { warning?: string }) | { error: string }
+
+/** Two smaller AI calls in parallel (fields; rooms + seasons): faster, and less chance of a cut-off reply. */
+export async function extractProperty(env: Env, text: string): Promise<ExtractResult> {
+  if (!env.AI) return { error: 'Workers AI is not connected to this site (the [ai] binding is missing).' }
+  if (!(await aiEnabled(env, 'property_extract'))) return { error: 'Quick fill is switched off in Admin → AI settings.' }
+  const notes = tidyNotes(text)
+  const [a, b] = await Promise.all([
+    aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: fieldsPrompt(notes), maxTokens: 2500 }),
+    aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: roomsPrompt(notes), maxTokens: 2000 }),
+  ])
+  if (!a && !b) return { error: 'The AI service did not answer (or the daily AI limit was reached). Please try again in a minute.' }
+  const r = normalizeExtract({ fields: a ?? {}, ...(b && typeof b === 'object' ? b : {}) })
+  const warning = !a ? 'Room categories were read, but the other details could not be — please fill them by hand.'
+    : !b ? 'Property details were read, but room categories and seasons could not be — add them by hand.' : undefined
+  return { ...r, ...(warning ? { warning } : {}) }
 }

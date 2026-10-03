@@ -277,7 +277,7 @@
         }).join('') + '</ul>' : '')
         box.hidden = false
       } else box.hidden = true
-      st.textContent = n ? 'Filled ' + n + ' field(s) — highlighted in yellow. Please check them, then press Save.' : 'Could not find details to fill. Try adding more information.'
+      st.textContent = (n ? 'Filled ' + n + ' field(s) — highlighted in yellow. Please check them, then press Save.' : 'Could not find details to fill. Try adding more information.') + (r.warning ? ' ' + r.warning : '')
       var first = $('.qf-filled', f); if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }).catch(function () { qfBtn.disabled = false; qfBtn.textContent = old; st.textContent = 'Something went wrong. Please try again.' })
     function mark(el) { (el.closest('.field') || el.closest('label') || el).classList.add('qf-filled') }

@@ -716,7 +716,5 @@ propertyEditorRoutes.post('/admin/ai/extract-property', requirePerm('manage_prop
   const f = await form(c)
   const text = str(f.text, 12000)
   if (text.length < 20) return c.json({ error: 'Paste a few lines about the property first.' })
-  const r = await extractProperty(c.env, text)
-  if (!r) return c.json({ error: 'AI quick fill is off or unavailable right now. Please fill the fields by hand.' })
-  return c.json(r)
+  return c.json(await extractProperty(c.env, text))
 })
