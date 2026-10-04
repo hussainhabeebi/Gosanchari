@@ -296,7 +296,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const din = readDining(p.dining)
   const pol = readPolicies(p.policies)
   const themes = parseJson<string[]>(p.themes, [])
-  const languages = parseJson<string[]>(p.languages, [])
   // Availability calendar: next ~2 months, a date is greyed out when every room is full.
   const from = todayIST()
   const to = addDays(from, 62)
@@ -365,11 +364,9 @@ publicRoutes.get('/stay/:slug', async (c) => {
           <section class="section-sm">
             <h2>About this property</h2>
             {description.split(/\n{2,}/).map((para) => <p>{para}</p>)}
-            {(p.built_year || languages.length > 0 || p.best_time) && (
+            {p.built_year && (
               <dl class="info-list">
-                {p.built_year && <><dt>Built / renovated</dt><dd>{p.built_year}</dd></>}
-                {languages.length > 0 && <><dt>Languages spoken</dt><dd>{languages.join(', ')}</dd></>}
-                {p.best_time && <><dt>Best time to visit</dt><dd>{p.best_time}</dd></>}
+                <dt>Built / renovated</dt><dd>{p.built_year}</dd>
               </dl>
             )}
             {p.good_to_know && <div class="flash mt-sm"><strong>Good to know:</strong> {p.good_to_know}</div>}

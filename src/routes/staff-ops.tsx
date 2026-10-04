@@ -81,11 +81,15 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
               <div class="grow">
                 <div class="row-between"><a href={`/stay/${p.slug}`} target="_blank"><strong>{p.name}</strong></a><span>★ {p.rating_avg.toFixed(1)} · {p.type} · {p.destination}</span></div>
                 {i?.last_minute_note && <div class="small ok">⚡ {i.last_minute_note}</div>}
-                {perms.view_net_rates && i && (
+                {(perms.view_net_rates || perms.view_property_contacts) && i && (
                   <div class="small internal">
-                    Owner: {i.owner_name} {i.owner_phone && <a href={`tel:${i.owner_phone}`}>{i.owner_phone}</a>} · {i.is_partner ? `Partner, commission ${i.commission_pct}%` : 'Own property'}
-                    {(() => { const k = readContact(i.contact); return <>{k.person && ` · Contact: ${k.person}`}{k.phone && <> · <a href={`tel:${k.phone}`}>{k.phone}</a></>}{k.whatsapp && <> · <a href={`https://wa.me/${k.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">WhatsApp</a></>}{k.reservation_email && <> · <a href={`mailto:${k.reservation_email}`}>{k.reservation_email}</a></>}{k.booking_url && <> · <a href={k.booking_url} target="_blank" rel="noopener">Direct booking link</a></>}</> })()}
-                    {i.internal_notes ? <div>Remarks: {i.internal_notes}</div> : null}
+                    {perms.view_net_rates && <>{i.is_partner ? `Partner, commission ${i.commission_pct}%` : 'Own property'}</>}
+                    {perms.view_property_contacts && (() => {
+                      const k = readContact(i.contact)
+                      const phones = [k.phone, k.phone2, k.phone3].filter(Boolean) as string[]
+                      return <>{k.person && ` · Contact: ${k.person}`}{phones.map((ph) => <> · <a href={`tel:${ph}`}>{ph}</a></>)}{k.email && <> · <a href={`mailto:${k.email}`}>{k.email}</a></>}</>
+                    })()}
+                    {perms.view_net_rates && i.internal_notes ? <div>Remarks: {i.internal_notes}</div> : null}
                   </div>
                 )}
                 <Table head={['Room', 'Sleeps', 'Rate', ...(perms.view_net_rates ? ['Net'] : []), ...(avail ? ['Free'] : []), '']}>
@@ -123,7 +127,7 @@ opsRoutes.get('/staff/finder/compare', requirePerm('manage_quotes'), async (c) =
     ['Check-in / out', (p) => `${p.checkin_time} / ${p.checkout_time}`],
     ['Family / pets', (p) => `${p.family_friendly ? 'Family ✓' : '—'} · ${p.pet_friendly ? 'Pets ✓' : 'No pets'}`],
     ['Cancellation', (p) => p.cancellation_policy],
-    ...(perms.view_net_rates ? ([['Commission', (p: PropertyRow) => (p.is_partner ? `${p.commission_pct}%` : 'Own')], ['Owner', (p: PropertyRow) => `${p.owner_name ?? ''} ${p.owner_phone ?? ''}`], ['Internal notes', (p: PropertyRow) => p.internal_notes]] as [string, (p: PropertyRow) => unknown][]) : []),
+    ...(perms.view_net_rates ? ([['Commission', (p: PropertyRow) => (p.is_partner ? `${p.commission_pct}%` : 'Own')], ['Internal notes', (p: PropertyRow) => p.internal_notes]] as [string, (p: PropertyRow) => unknown][]) : []),
   ]
   return page(c, { title: 'Compare properties', area: 'staff', active: 'finder' }, (
     <div class="stack-lg">
@@ -734,7 +738,7 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
             <tr><td>GST</td><td>{money(b.taxes)}</td></tr>
             <tr class="total"><td>Total</td><td>{money(b.total)}</td></tr>
             <tr><td>Paid</td><td>{money(b.amount_paid)}</td></tr>
-            {perms.view_net_rates && b.owner_phone && <tr class="internal"><td>Owner</td><td>{b.owner_name} {b.owner_phone}</td></tr>}
+            {perms.view_property_contacts && b.owner_phone && <tr class="internal"><td>Owner</td><td>{b.owner_name} {b.owner_phone}</td></tr>}
           </table>
           <div class="row wrap-row mt-sm">
             <a class="btn btn-sm btn-outline" href={`/invoice/${b.code}`} target="_blank">Invoice</a>
@@ -816,7 +820,7 @@ opsRoutes.post('/staff/bookings/:id/whatsapp', requirePerm('manage_bookings'), a
   const map = b.lat && b.lng ? `https://maps.google.com/?q=${b.lat},${b.lng}` : `https://maps.google.com/?q=${encodeURIComponent(b.property_name + ' ' + b.destination)}`
   const text = fillTemplate(s.whatsapp_templates[kind] ?? s.whatsapp_templates.confirmation, {
     name: b.guest_name, code: b.code, property: b.property_name, dates: `${fmtDate(b.check_in)} – ${fmtDate(b.check_out)}`, date: fmtDate(b.check_in),
-    amount: money(b.amount_paid), time: b.checkin_time, map, address: b.address ?? b.destination, contact: b.owner_phone ?? s.business.phone,
+    amount: money(b.amount_paid), time: b.checkin_time, map, address: b.address ?? b.destination, contact: s.business.phone,
   })
   const r = await sendWhatsApp(c.env, b.guest_phone, text)
   await run(c.env, "INSERT INTO messages (booking_id, sender, user_id, channel, body) VALUES (?, 'staff', ?, 'whatsapp', ?)", b.id, c.get('user')!.id, text)

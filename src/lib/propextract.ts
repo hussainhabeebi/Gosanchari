@@ -3,7 +3,7 @@
 
 import type { Env } from '../env'
 import { aiEnabled, aiJson } from './ai'
-import { CONTACT_FIELDS, CUISINES, LANGUAGES, MENU_TYPES, POLICY_FIELDS, ROOM_AMENITIES, ROOM_VIEWS, STAY_TYPES, THEMES } from './catalog'
+import { CONTACT_FIELDS, CUISINES, MENU_TYPES, POLICY_FIELDS, ROOM_AMENITIES, ROOM_VIEWS, STAY_TYPES, THEMES } from './catalog'
 import { FACILITIES, MEAL_PLANS } from './search'
 import { todayIST } from './util'
 
@@ -17,14 +17,12 @@ const FIELDS: Record<string, [Kind, string]> = {
   star_category: ['num', 'star rating 1-5'],
   built_year: ['num', 'year built or renovated'],
   themes: [{ list: Object.keys(THEMES) }, 'best for'],
-  languages: [{ list: LANGUAGES }, 'languages spoken by staff'],
   highlights: ['lines', 'up to 6 short selling points'],
   address: ['long', 'full postal address'],
   map_url: ['text', 'Google Maps link'],
   lat: ['num', 'latitude'],
   lng: ['num', 'longitude'],
   how_to_reach: ['long', 'directions, distance from station/airport'],
-  best_time: ['text', 'best time to visit'],
   description: ['long', 'guest-facing description in English, 2-4 short paragraphs, only facts given'],
   good_to_know: ['long', 'honest notes: steep road, no lift, weak signal…'],
   d_restaurant_name: ['text', 'restaurant name'],
@@ -51,11 +49,7 @@ const FIELDS: Record<string, [Kind, string]> = {
   cancellation_policy: ['long', 'cancellation policy'],
   ...Object.fromEntries(POLICY_FIELDS.map(([k, label]) => [`pol_${k}`, ['text', label.toLowerCase()] as [Kind, string]])),
   house_rules: ['lines', 'other house rules'],
-  owner_name: ['text', 'owner name'],
-  owner_phone: ['text', 'owner phone'],
-  owner_email: ['text', 'owner email'],
   ...Object.fromEntries(CONTACT_FIELDS.map(([k, label]) => [`con_${k}`, [k === 'bank_details' ? 'long' : 'text', label.toLowerCase()] as [Kind, string]])),
-  commission_pct: ['num', 'our commission %'],
   nearby: ['lines', 'nearby places, each "Name | type | km | travel time"; type one of attraction, railway, airport, bus, hospital, atm, shopping, restaurant, beach, waterfall, viewpoint'],
   internal_notes: ['long', 'anything else that does not fit another field (internal remarks)'],
 }

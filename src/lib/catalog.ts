@@ -146,27 +146,22 @@ export const POLICY_FIELDS: [keyof Policies, string, string][] = [
   ['payment', 'Payment terms', 'e.g. 50% advance, balance at check-in'],
 ]
 
+/** Property contact details. Private: only users with "view_property_contacts" (admins by default) see them. */
 export interface Contact {
   person?: string
   phone?: string
-  whatsapp?: string
+  phone2?: string
+  phone3?: string
   email?: string
-  reservation_email?: string
-  website?: string
-  booking_url?: string
-  gstin?: string
   bank_details?: string
 }
 export const CONTACT_FIELDS: [keyof Contact, string][] = [
-  ['person', 'Contact person / manager'],
-  ['phone', 'Phone'],
-  ['whatsapp', 'WhatsApp'],
-  ['email', 'Email'],
-  ['reservation_email', 'Reservations email'],
-  ['website', 'Property website'],
-  ['booking_url', 'Direct booking link'],
-  ['gstin', 'Property GSTIN'],
-  ['bank_details', 'Bank / UPI details for payouts'],
+  ['person', 'Contact person'],
+  ['phone', 'Contact number 1'],
+  ['phone2', 'Contact number 2'],
+  ['phone3', 'Contact number 3'],
+  ['email', 'Email ID'],
+  ['bank_details', 'Account details (bank / UPI)'],
 ]
 
 export const dining = (s: string | null | undefined) => parseJson<Dining>(s, {})

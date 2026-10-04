@@ -32,7 +32,7 @@ export async function daily(env: Env): Promise<void> {
   )
   for (const b of arriving) {
     const map = b.lat && b.lng ? `https://maps.google.com/?q=${b.lat},${b.lng}` : `https://maps.google.com/?q=${encodeURIComponent(b.property_name + ' ' + b.destination)}`
-    const text = fillTemplate(s.whatsapp_templates.checkin, { name: b.guest_name, property: b.property_name, address: b.address ?? b.destination, contact: b.owner_phone ?? s.business.phone, map, time: b.checkin_time, date: fmtDate(tomorrow) })
+    const text = fillTemplate(s.whatsapp_templates.checkin, { name: b.guest_name, property: b.property_name, address: b.address ?? b.destination, contact: s.business.phone, map, time: b.checkin_time, date: fmtDate(tomorrow) })
     await enqueue(env, { type: 'whatsapp', to: b.guest_phone, text })
     await run(env, "INSERT INTO messages (booking_id, sender, channel, body) VALUES (?, 'system', 'whatsapp', ?)", b.id, text)
     await run(env, 'UPDATE bookings SET reminder_sent_at = ? WHERE id = ?', nowIso(), b.id)

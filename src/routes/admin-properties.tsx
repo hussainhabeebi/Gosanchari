@@ -6,13 +6,13 @@ import { Hono, type Context } from 'hono'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Field, LeafletHead, Pill, Select } from '../views/components'
-import { requirePerm } from '../lib/auth'
+import { permissionsFor, requirePerm } from '../lib/auth'
 import { all, enqueue, first, insertId, logActivity, placeholders, run } from '../lib/db'
 import { seoSuggest, writeDescription } from '../lib/assist'
 import { mediaUrl } from '../lib/integrations'
 import { FACILITIES, MEAL_PLANS } from '../lib/search'
 import {
-  CONTACT_FIELDS, contact as readContact, CUISINES, dining as readDining, LANGUAGES, latLngFromMapUrl, legacyType, MENU_TYPES, PHOTO_CATEGORIES,
+  CONTACT_FIELDS, contact as readContact, CUISINES, dining as readDining, latLngFromMapUrl, legacyType, MENU_TYPES, PHOTO_CATEGORIES,
   POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, ROOM_VIEWS, STAY_TYPES, stayType, THEMES, videoEmbedUrl, type Contact, type Dining, type Policies,
 } from '../lib/catalog'
 import type { NearbyPlace, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
@@ -26,7 +26,7 @@ export const propertyEditorRoutes = new Hono<AppEnv>()
 
 const SECTIONS: [string, string][] = [
   ['basics', 'Basics'], ['location', 'Location'], ['description', 'Description'], ['dining', 'Dining'], ['facilities', 'Facilities'],
-  ['policies', 'Policies'], ['contact', 'Contact & booking'], ['nearby', 'Nearby'], ['seo', 'SEO'], ['remarks', 'Remarks'],
+  ['policies', 'Policies'], ['contact', 'Contact details'], ['nearby', 'Nearby'], ['seo', 'SEO'], ['remarks', 'Remarks'],
   ['rooms', 'Room categories'], ['media', 'Photos & videos'], ['tariff', 'Tariff & seasons'],
 ]
 
@@ -55,36 +55,48 @@ function groupSeasons(rows: (SeasonRate & { id: number })[]): SeasonGroup[] {
   return [...map.values()].sort((a, b) => a.start_date.localeCompare(b.start_date))
 }
 
-const RoomFields = ({ r }: { r?: Partial<RoomRow> }) => {
+const RoomFields = ({ r, pf = '', optional }: { r?: Partial<RoomRow>; pf?: string; optional?: boolean }) => {
   const am = parseJson<string[]>(r?.facilities, [])
+  const req = !optional
   return (
     <>
       <div class="row wrap-row">
-        <Field label="Room category name" class="grow"><input name="name" value={r?.name ?? ''} required maxlength={80} placeholder="e.g. Deluxe Valley View" /></Field>
-        <Field label="Inventory (rooms of this type)"><input type="number" name="units" value={r?.units ?? 1} min="0" max="500" class="w-sm" /></Field>
-        <Field label="Max guests"><input type="number" name="capacity" value={r?.capacity ?? 2} min="1" max="40" class="w-sm" /></Field>
-        <Field label="Max adults"><input type="number" name="max_adults" value={r?.max_adults ?? ''} min="1" max="40" class="w-sm" /></Field>
-        <Field label="Max children"><input type="number" name="max_children" value={r?.max_children ?? ''} min="0" max="20" class="w-sm" /></Field>
+        <Field label="Room category name" class="grow"><input name={`${pf}name`} value={r?.name ?? ''} required={req} maxlength={80} placeholder="e.g. Deluxe Valley View" /></Field>
+        <Field label="Inventory (rooms of this type)"><input type="number" name={`${pf}units`} value={r?.units ?? 1} min="0" max="500" class="w-sm" /></Field>
+        <Field label="Max guests"><input type="number" name={`${pf}capacity`} value={r?.capacity ?? 2} min="1" max="40" class="w-sm" /></Field>
+        <Field label="Max adults"><input type="number" name={`${pf}max_adults`} value={r?.max_adults ?? ''} min="1" max="40" class="w-sm" /></Field>
+        <Field label="Max children"><input type="number" name={`${pf}max_children`} value={r?.max_children ?? ''} min="0" max="20" class="w-sm" /></Field>
       </div>
       <div class="row wrap-row">
-        <Field label="Bed type"><input name="bed_type" value={r?.bed_type ?? ''} placeholder="King / 2 singles" class="w-md" /></Field>
-        <Field label="Room size (sq ft)"><input type="number" name="size_sqft" value={r?.size_sqft ?? ''} min="0" class="w-sm" /></Field>
-        <Field label="View"><Select name="room_view" value={r?.room_view ?? ''} options={[['', '—'], ...ROOM_VIEWS.map((v) => [v, v] as [string, string])]} /></Field>
-        <Field label="Weekday rate ₹"><input type="number" name="base_rate" value={r?.base_rate ?? ''} min="0" required class="w-md" /></Field>
-        <Field label="Weekend rate ₹ (Fri/Sat)"><input type="number" name="weekend_rate" value={r?.weekend_rate ?? ''} min="0" class="w-md" /></Field>
-        <Field label="Net rate ₹ (internal)"><input type="number" name="net_rate" value={r?.net_rate ?? ''} min="0" class="w-md" /></Field>
-        <Field label="Min nights"><input type="number" name="min_nights" value={r?.min_nights ?? 1} min="1" class="w-sm" /></Field>
+        <Field label="Bed type"><input name={`${pf}bed_type`} value={r?.bed_type ?? ''} placeholder="King / 2 singles" class="w-md" /></Field>
+        <Field label="Room size (sq ft)"><input type="number" name={`${pf}size_sqft`} value={r?.size_sqft ?? ''} min="0" class="w-sm" /></Field>
+        <Field label="View"><Select name={`${pf}room_view`} value={r?.room_view ?? ''} options={[['', '—'], ...ROOM_VIEWS.map((v) => [v, v] as [string, string])]} /></Field>
+        <Field label="Weekday rate ₹"><input type="number" name={`${pf}base_rate`} value={r?.base_rate ?? ''} min="0" required={req} class="w-md" /></Field>
+        <Field label="Weekend rate ₹ (Fri/Sat)"><input type="number" name={`${pf}weekend_rate`} value={r?.weekend_rate ?? ''} min="0" class="w-md" /></Field>
+        <Field label="Net rate ₹ (internal)"><input type="number" name={`${pf}net_rate`} value={r?.net_rate ?? ''} min="0" class="w-md" /></Field>
+        <Field label="Min nights"><input type="number" name={`${pf}min_nights`} value={r?.min_nights ?? 1} min="1" class="w-sm" /></Field>
       </div>
       <div class="row wrap-row">
-        <label class="check"><input type="checkbox" name="extra_bed" value="1" checked={!!r?.extra_bed} /> Extra bed available</label>
-        <Field label="Extra bed ₹/night"><input type="number" name="extra_bed_rate" value={r?.extra_bed_rate ?? ''} min="0" class="w-md" /></Field>
-        <Field label="Includes" class="grow"><input name="inclusions" value={r?.inclusions ?? ''} placeholder="Breakfast, welcome drink" /></Field>
+        <label class="check"><input type="checkbox" name={`${pf}extra_bed`} value="1" checked={!!r?.extra_bed} /> Extra bed available</label>
+        <Field label="Extra bed ₹/night"><input type="number" name={`${pf}extra_bed_rate`} value={r?.extra_bed_rate ?? ''} min="0" class="w-md" /></Field>
+        <Field label="Includes" class="grow"><input name={`${pf}inclusions`} value={r?.inclusions ?? ''} placeholder="Breakfast, welcome drink" /></Field>
       </div>
-      <Field label="Room description"><textarea name="description" rows={2} maxlength={1500}>{r?.description ?? ''}</textarea></Field>
-      <Field label="Room amenities"><Checks name="amenities" options={Object.entries(ROOM_AMENITIES)} selected={am} /></Field>
+      <Field label="Room description"><textarea name={`${pf}description`} rows={2} maxlength={1500}>{r?.description ?? ''}</textarea></Field>
+      <Field label="Room amenities"><Checks name={`${pf}amenities`} options={Object.entries(ROOM_AMENITIES)} selected={am} /></Field>
     </>
   )
 }
+
+/** A room category block inside the new-property form (fields prefixed nr<idx>_; empty blocks are skipped). */
+const NewRoomBlock = ({ idx }: { idx: string }) => (
+  <fieldset class="room-edit stack new-room" data-idx={idx}>
+    <legend><strong>Room category</strong></legend>
+    <RoomFields pf={`nr${idx}_`} optional />
+    <Field label="Photos of this room category" hint="JPG / PNG / WebP, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept="image/jpeg,image/png,image/webp" multiple /></Field>
+  </fieldset>
+)
+
+const COMMON_SECTIONS = Object.entries(PHOTO_CATEGORIES).filter(([k]) => k !== 'room')
 
 function propertyForm(
   c: Context<AppEnv>,
@@ -94,6 +106,7 @@ function propertyForm(
   seasons: (SeasonRate & { id: number })[],
   otherSeasons: (SeasonRate & { id: number })[],
   dests: string[],
+  showContact: boolean,
 ) {
   const fac = parseJson<string[]>(p.facilities, [])
   const meals = parseJson<string[]>(p.meal_plans, [])
@@ -106,6 +119,8 @@ function propertyForm(
   const groups = groupSeasons(seasons)
   const byCat = Object.keys(PHOTO_CATEGORIES).map((k) => [k, media.filter((m) => m.category === k)] as const).filter(([, list]) => list.length)
   const roomOpts: [string | number, string][] = [['', '— room category —'], ...rooms.map((r) => [r.id, r.name] as [number, string])]
+  const visible = SECTIONS.filter(([k]) => (showContact || k !== 'contact') && (!isNew || k !== 'tariff'))
+  const num = (k: string) => visible.findIndex(([x]) => x === k) + 1
 
   return page(c, { title: isNew ? 'Add property' : `Edit ${p.name}`, area: 'admin', active: 'properties', head: <LeafletHead /> }, (
     <div class="stack-lg prop-editor">
@@ -115,9 +130,9 @@ function propertyForm(
         {!isNew && <div class="row wrap-row"><Pill s={p.status ?? 'draft'} /><a class="btn btn-sm btn-outline" href={`/stay/${p.slug}`} target="_blank">Preview</a></div>}
       </div>
       <nav class="section-nav">
-        {SECTIONS.filter(([k]) => !isNew || !['rooms', 'media', 'tariff'].includes(k)).map(([k, l], i) => <a href={`#${k}`}>{i + 1}. {l}</a>)}
+        {visible.map(([k, l], i) => <a href={`#${k}`}>{i + 1}. {l}</a>)}
       </nav>
-      {isNew && <p class="flash">Fill in the details and save. Room categories, photos & videos and seasonal tariffs open after the first save.</p>}
+      {isNew && <p class="flash">Fill in the details, room categories and photos, then save. Seasonal tariffs and videos can be added after the first save.</p>}
 
       <details class="card ai-box quick-fill" open={isNew}>
         <summary><span class="ai-badge">AI</span> <strong>Quick fill — paste all details in one paragraph</strong></summary>
@@ -133,11 +148,11 @@ function propertyForm(
         </div>
       </details>
 
-      <form method="post" action={isNew ? '/admin/properties/new' : `/admin/properties/${p.id}`} class="stack-lg" id="prop-form">
+      <form method="post" action={isNew ? '/admin/properties/new' : `/admin/properties/${p.id}`} class="stack-lg" id="prop-form" enctype={isNew ? 'multipart/form-data' : undefined}>
         <input type="hidden" name="ai_rooms" id="qf-rooms" value="" />
         <input type="hidden" name="ai_seasons" id="qf-seasons" value="" />
         <section class="card stack" id="basics">
-          <h2>1. Basics</h2>
+          <h2>{num('basics')}. Basics</h2>
           <div class="row wrap-row">
             <Field label="Property name"><input name="name" value={p.name ?? ''} required maxlength={100} /></Field>
             <Field label="Property type"><Select name="type" value={p.id ? stayType(p as PropertyRow) : 'homestay'} options={Object.entries(STAY_TYPES)} /></Field>
@@ -148,12 +163,11 @@ function propertyForm(
             <Field label="Built / renovated (year)"><input type="number" name="built_year" value={p.built_year ?? ''} min="1800" max="2100" class="w-md" /></Field>
           </div>
           <Field label="Best for"><Checks name="themes" options={Object.entries(THEMES)} selected={parseJson<string[]>(p.themes, [])} /></Field>
-          <Field label="Languages spoken"><Checks name="languages" options={LANGUAGES.map((l) => [l, l])} selected={parseJson<string[]>(p.languages, [])} /></Field>
           <Field label="Highlights (one per line, shown as bullet points)"><textarea name="highlights" rows={3}>{parseJson<string[]>(p.highlights, []).join('\n')}</textarea></Field>
         </section>
 
         <section class="card stack" id="location">
-          <h2>2. Location</h2>
+          <h2>{num('location')}. Location</h2>
           <Field label="Complete address"><textarea name="address" rows={2}>{p.address ?? ''}</textarea></Field>
           <Field label="Google Maps link" hint="Paste the share link from Google Maps — the map pin is filled in automatically."><input name="map_url" id="map-url" value={p.map_url ?? ''} placeholder="https://maps.app.goo.gl/… or https://www.google.com/maps/@10.08,77.05,15z" /></Field>
           <div class="row">
@@ -163,11 +177,10 @@ function propertyForm(
           <div id="pin-map" class="map" data-lat={p.lat ?? 10.0889} data-lng={p.lng ?? 77.0595}></div>
           <p class="muted small">Click the map to place the pin exactly (short links like maps.app.goo.gl can't be read automatically).</p>
           <Field label="How to reach"><textarea name="how_to_reach" rows={3} placeholder="From Aluva station: 3.5 hrs by taxi via Kothamangalam. Last 2 km is a steep estate road — 4x4 pickup available.">{p.how_to_reach ?? ''}</textarea></Field>
-          <Field label="Best time to visit"><input name="best_time" value={p.best_time ?? ''} placeholder="September – March; monsoon for mist and waterfalls" /></Field>
         </section>
 
         <section class="card stack" id="description">
-          <h2>3. Description</h2>
+          <h2>{num('description')}. Description</h2>
           <details class="ai-box">
             <summary><span class="ai-badge">AI</span> Write description from points</summary>
             <textarea id="desc-points" rows={3} placeholder="e.g. 3 bedrooms, tea estate views, home-cooked Kerala food, 20 min from Munnar town"></textarea>
@@ -179,7 +192,7 @@ function propertyForm(
         </section>
 
         <section class="card stack" id="dining">
-          <h2>4. Dining & restaurant</h2>
+          <h2>{num('dining')}. Dining & restaurant</h2>
           <div class="row wrap-row">
             <Field label="Restaurant name"><input name="d_restaurant_name" value={d.restaurant_name ?? ''} /></Field>
             <Field label="Breakfast"><input name="d_breakfast" value={d.breakfast ?? ''} placeholder="7:30 – 10:00" class="w-md" /></Field>
@@ -204,7 +217,7 @@ function propertyForm(
         </section>
 
         <section class="card stack" id="facilities">
-          <h2>5. Property facilities</h2>
+          <h2>{num('facilities')}. Property facilities</h2>
           {suggestedTags.length > 0 && (
             <AiNote label="From your photos">
               Suggested: {suggestedTags.map((t) => <label class="check inline-check"><input type="checkbox" name="facilities" value={t} /> {FACILITIES[t] ?? t}</label>)}
@@ -219,7 +232,7 @@ function propertyForm(
         </section>
 
         <section class="card stack" id="policies">
-          <h2>6. Policies</h2>
+          <h2>{num('policies')}. Policies</h2>
           <div class="row wrap-row">
             <Field label="Check-in from"><input type="time" name="checkin_time" value={p.checkin_time ?? '14:00'} /></Field>
             <Field label="Check-out by"><input type="time" name="checkout_time" value={p.checkout_time ?? '11:00'} /></Field>
@@ -232,44 +245,57 @@ function propertyForm(
           <Field label="Other house rules (one per line)"><textarea name="house_rules" rows={3}>{p.house_rules ?? ''}</textarea></Field>
         </section>
 
-        <section class="card stack internal" id="contact">
-          <h2>7. Contact & direct booking <span class="muted small">(staff only — never shown to guests)</span></h2>
-          <div class="row wrap-row">
-            <Field label="Owner name"><input name="owner_name" value={p.owner_name ?? ''} /></Field>
-            <Field label="Owner phone"><input name="owner_phone" value={p.owner_phone ?? ''} /></Field>
-            <Field label="Owner email"><input name="owner_email" value={p.owner_email ?? ''} /></Field>
-          </div>
-          <div class="grid grid-2">
-            {CONTACT_FIELDS.map(([k, label]) => (
-              k === 'bank_details'
-                ? <Field label={label}><textarea name={`con_${k}`} rows={2}>{con[k] ?? ''}</textarea></Field>
-                : <Field label={label}><input name={`con_${k}`} value={con[k] ?? ''} /></Field>
-            ))}
-          </div>
-          <div class="row wrap-row">
-            <label class="check"><input type="checkbox" name="is_partner" value="1" checked={!!p.is_partner} /> Partner property (we pay the owner)</label>
-            <Field label="Commission %"><input type="number" name="commission_pct" value={p.commission_pct ?? 0} min="0" max="100" step="0.5" class="w-sm" /></Field>
-          </div>
-          <Field label="Last-minute availability note"><input name="last_minute_note" value={p.last_minute_note ?? ''} placeholder="e.g. Owner can open the annex for groups" /></Field>
-        </section>
+        {showContact && (
+          <section class="card stack internal" id="contact">
+            <h2>{num('contact')}. Contact details <span class="muted small">(private — only people allowed to see property contacts)</span></h2>
+            <div class="grid grid-2">
+              {CONTACT_FIELDS.map(([k, label]) => (
+                k === 'bank_details'
+                  ? <Field label={label}><textarea name={`con_${k}`} rows={3} placeholder="Account name, number, IFSC, bank / UPI ID">{con[k] ?? ''}</textarea></Field>
+                  : <Field label={label}><input name={`con_${k}`} value={con[k] ?? (k === 'person' ? p.owner_name : k === 'phone' ? p.owner_phone : k === 'email' ? p.owner_email : '') ?? ''} type={k === 'email' ? 'email' : k.startsWith('phone') ? 'tel' : 'text'} /></Field>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section class="card stack" id="nearby">
-          <h2>8. Nearby attractions</h2>
+          <h2>{num('nearby')}. Nearby attractions</h2>
           <Field label="One per line: Name | type | km | travel time" hint="Types: attraction, railway, airport, bus, hospital, atm, shopping, restaurant, beach, waterfall, viewpoint">
             <textarea name="nearby" rows={6} placeholder={'Mattupetty Dam | attraction | 18 | 35 min\nAluva railway station | railway | 110 | 3.5 hrs'}>{nearby.map((n) => [n.name, n.kind, n.km, n.time ?? ''].join(' | ').replace(/ \| $/, '')).join('\n')}</textarea>
           </Field>
         </section>
 
         <section class="card stack" id="seo">
-          <div class="row-between"><h2>9. SEO</h2><button type="button" class="btn btn-sm btn-outline" data-ai-seo="/admin/ai/seo"><span class="ai-badge sm">AI</span> Suggest</button></div>
+          <div class="row-between"><h2>{num('seo')}. SEO</h2><button type="button" class="btn btn-sm btn-outline" data-ai-seo="/admin/ai/seo"><span class="ai-badge sm">AI</span> Suggest</button></div>
           <Field label="Page title"><input name="seo_title" id="seo-title" value={p.seo_title ?? ''} maxlength={70} /></Field>
           <Field label="Meta description"><textarea name="seo_description" id="seo-desc" rows={2} maxlength={170}>{p.seo_description ?? ''}</textarea></Field>
         </section>
 
         <section class="card stack internal" id="remarks">
-          <h2>10. Remarks <span class="muted small">(internal)</span></h2>
+          <h2>{num('remarks')}. Remarks <span class="muted small">(internal)</span></h2>
           <Field label="Remarks for staff"><textarea name="internal_notes" rows={4} placeholder="Agreement details, owner preferences, known issues…">{p.internal_notes ?? ''}</textarea></Field>
         </section>
+
+        {isNew && (
+          <>
+            <section class="card stack" id="rooms">
+              <h2>{num('rooms')}. Room categories & inventory</h2>
+              <p class="muted small">Add each room category with its inventory and rates. Blank ones are skipped. You can edit them and add seasonal rates after saving.</p>
+              <div id="new-rooms" class="stack"><NewRoomBlock idx="0" /></div>
+              <template id="new-room-tpl"><NewRoomBlock idx="__IDX__" /></template>
+              <button type="button" class="btn btn-sm btn-outline" data-add-room>+ Add another room category</button>
+            </section>
+            <section class="card stack" id="media">
+              <h2>{num('media')}. Photos</h2>
+              <p class="muted small">Room photos go with each room category above. Add common area, exterior, pool, view and restaurant photos here. Videos can be added after saving.</p>
+              <div class="upload-box stack">
+                <h3>Common photos</h3>
+                <Field label="Section"><Select name="new_photos_category" options={COMMON_SECTIONS} /></Field>
+                <Field label="Photos" hint="JPG / PNG / WebP, up to 15 MB each."><input type="file" name="new_photos" accept="image/jpeg,image/png,image/webp" multiple /></Field>
+              </div>
+            </section>
+          </>
+        )}
 
         <div class="row wrap-row sticky-actions">
           <Select name="status" value={p.status ?? 'draft'} options={[['draft', 'Draft'], ['live', 'Live (published)'], ['hidden', 'Hidden']]} />
@@ -282,7 +308,7 @@ function propertyForm(
       {!isNew && (
         <>
           <section class="card stack" id="rooms">
-            <h2>11. Room categories & inventory</h2>
+            <h2>{num('rooms')}. Room categories & inventory</h2>
             {rooms.map((r) => (
               <details class="room-edit" open={rooms.length <= 2}>
                 <summary><strong>{r.name}</strong> · {r.units} room{r.units === 1 ? '' : 's'} · sleeps {r.capacity} · {money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''} {!r.active && <span class="pill pill-hidden">inactive</span>}</summary>
@@ -305,16 +331,26 @@ function propertyForm(
           </section>
 
           <section class="card stack" id="media">
-            <h2>12. Photos & videos</h2>
-            <form method="post" action={`/admin/properties/${p.id}/media`} enctype="multipart/form-data" class="upload-box stack">
-              <div class="row wrap-row">
-                <Field label="Section"><Select name="category" options={Object.entries(PHOTO_CATEGORIES)} /></Field>
-                <Field label="Room category (for room photos)"><Select name="room_id" options={roomOpts} /></Field>
+            <h2>{num('media')}. Photos & videos</h2>
+            <div class="grid grid-2">
+              <form method="post" action={`/admin/properties/${p.id}/media`} enctype="multipart/form-data" class="upload-box stack">
+                <h3>Room photos</h3>
+                <input type="hidden" name="category" value="room" />
+                {rooms.length
+                  ? <Field label="Room category"><Select name="room_id" options={roomOpts} required /></Field>
+                  : <p class="muted small">Add a room category first (section above).</p>}
                 <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
-              </div>
-              <Field label="Photos or videos" hint="Photos: JPG/PNG/WebP up to 15 MB each (up to 20 at a time). Videos: MP4/WebM up to 90 MB."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" multiple required /></Field>
-              <button class="btn btn-sm">Upload</button>
-            </form>
+                <Field label="Photos or videos" hint="Photos up to 15 MB each (20 at a time). Videos MP4/WebM up to 90 MB."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <button class="btn btn-sm" disabled={!rooms.length}>Upload room photos</button>
+              </form>
+              <form method="post" action={`/admin/properties/${p.id}/media`} enctype="multipart/form-data" class="upload-box stack">
+                <h3>Common photos</h3>
+                <Field label="Section"><Select name="category" options={COMMON_SECTIONS} /></Field>
+                <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
+                <Field label="Photos or videos" hint="Common areas, exterior, pool, views, restaurant, activities."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <button class="btn btn-sm">Upload common photos</button>
+              </form>
+            </div>
             <form method="post" action={`/admin/properties/${p.id}/video-link`} class="row wrap-row">
               <Field label="Or add a YouTube / Vimeo video link"><input name="url" type="url" placeholder="https://youtu.be/…" required /></Field>
               <Field label="Section"><Select name="category" options={Object.entries(PHOTO_CATEGORIES)} /></Field>
@@ -345,7 +381,7 @@ function propertyForm(
           </section>
 
           <section class="card stack" id="tariff">
-            <h2>13. Tariff & seasonal rates</h2>
+            <h2>{num('tariff')}. Tariff & seasonal rates</h2>
             <p class="muted small">Rates per room per night. Regular rates come from each room category; a season overrides them on its dates. Leave a room blank in a season to keep its regular rate.</p>
             <div class="table-wrap">
               <table class="table tariff-table">
@@ -388,6 +424,11 @@ function propertyForm(
   ))
 }
 
+/** Property contact details are private: only users allowed to see them (admins by default) can view or change them. */
+async function canSeeContacts(c: Context<AppEnv>) {
+  return (await permissionsFor(c.env, c.get('user')!.role)).view_property_contacts
+}
+
 async function loadEditor(c: Context<AppEnv>, id: number) {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', id)
   if (!p) return null
@@ -400,10 +441,10 @@ async function loadEditor(c: Context<AppEnv>, id: number) {
   // Per-room fixed-rate seasons are edited here; percentage and all-property seasons stay on the Rates page.
   const mine = seasonRows.filter((s) => s.property_id === p.id && s.room_id != null && s.rate != null)
   const others = seasonRows.filter((s) => !mine.includes(s))
-  return propertyForm(c, p, rooms, media, mine, others, dests)
+  return propertyForm(c, p, rooms, media, mine, others, dests, await canSeeContacts(c))
 }
 
-propertyEditorRoutes.get('/admin/properties/new', requirePerm('manage_properties'), async (c) => propertyForm(c, {}, [], [], [], [], await destinations(c.env)))
+propertyEditorRoutes.get('/admin/properties/new', requirePerm('manage_properties'), async (c) => propertyForm(c, {}, [], [], [], [], await destinations(c.env), await canSeeContacts(c)))
 
 propertyEditorRoutes.get('/admin/properties/:id', requirePerm('manage_properties'), async (c) => {
   const r = await loadEditor(c, int(c.req.param('id')))
@@ -414,7 +455,7 @@ function lines(s: string | undefined) {
   return (s ?? '').split('\n').map((x) => x.trim()).filter(Boolean)
 }
 
-function propertyValues(f: Form) {
+function propertyValues(f: Form, withContact: boolean) {
   const nearby: NearbyPlace[] = lines(f.nearby)
     .map((l) => l.split('|').map((x) => x.trim()))
     .filter((x) => x[0])
@@ -447,7 +488,11 @@ function propertyValues(f: Form) {
   const policies: Policies = {}
   for (const [k] of POLICY_FIELDS) if (str(f[`pol_${k}`])) policies[k] = str(f[`pol_${k}`], 300)
   const contact: Contact = {}
-  for (const [k] of CONTACT_FIELDS) if (str(f[`con_${k}`])) contact[k] = str(f[`con_${k}`], k === 'bank_details' ? 500 : 200)
+  for (const [k] of CONTACT_FIELDS) if (str(f[`con_${k}`])) contact[k] = str(f[`con_${k}`], k === 'bank_details' ? 800 : k === 'email' ? 120 : 40)
+  // Contact columns are only written by people allowed to see them, so others can't wipe them.
+  const contactCols = withContact
+    ? { contact: JSON.stringify(contact), owner_name: contact.person ?? null, owner_phone: contact.phone ?? null, owner_email: contact.email ?? null }
+    : {}
   const st = f.type in STAY_TYPES ? f.type : 'homestay'
   const star = parseInt(f.star_category, 10)
   const year = parseInt(f.built_year, 10)
@@ -455,19 +500,18 @@ function propertyValues(f: Form) {
     name: str(f.name, 100), stay_type: st, type: legacyType(st), destination: str(f.destination, 60),
     address: str(f.address, 500) || null, map_url: str(f.map_url, 500) || null, lat, lng,
     star_category: star >= 1 && star <= 5 ? star : null, built_year: year > 1800 && year < 2100 ? year : null,
-    themes: JSON.stringify(pick('themes').filter((x) => x in THEMES)), languages: JSON.stringify(pick('languages').filter((x) => LANGUAGES.includes(x))),
-    how_to_reach: str(f.how_to_reach, 2000), best_time: str(f.best_time, 200), good_to_know: str(f.good_to_know, 1500),
-    owner_name: str(f.owner_name, 80) || null, owner_phone: str(f.owner_phone, 20) || null, owner_email: str(f.owner_email, 120) || null,
-    is_partner: f.is_partner ? 1 : 0, commission_pct: Math.max(0, Math.min(100, parseFloat(f.commission_pct) || 0)),
+    themes: JSON.stringify(pick('themes').filter((x) => x in THEMES)),
+    how_to_reach: str(f.how_to_reach, 2000), good_to_know: str(f.good_to_know, 1500),
+    ...contactCols,
     highlights: JSON.stringify(lines(f.highlights).slice(0, 10)),
     description: str(f.description, 8000), description_ml: str(f.description_ml, 12000),
     facilities: JSON.stringify([...new Set(pick('facilities').filter((x) => x in FACILITIES))]),
     meal_plans: JSON.stringify(pick('meal_plans').filter((x) => x in MEAL_PLANS)),
-    dining: JSON.stringify(dining), policies: JSON.stringify(policies), contact: JSON.stringify(contact),
+    dining: JSON.stringify(dining), policies: JSON.stringify(policies),
     checkin_time: /^\d{2}:\d{2}$/.test(f.checkin_time) ? f.checkin_time : '14:00', checkout_time: /^\d{2}:\d{2}$/.test(f.checkout_time) ? f.checkout_time : '11:00',
     cancellation_policy: str(f.cancellation_policy, 2000), house_rules: str(f.house_rules, 2000), id_required: f.id_required ? 1 : 0,
     nearby: JSON.stringify(nearby), pet_friendly: f.pet_friendly ? 1 : 0, family_friendly: f.family_friendly ? 1 : 0,
-    internal_notes: str(f.internal_notes, 4000), last_minute_note: str(f.last_minute_note, 300),
+    internal_notes: str(f.internal_notes, 4000),
     seo_title: str(f.seo_title, 70) || null, seo_description: str(f.seo_description, 170) || null,
     status: ['draft', 'live', 'hidden'].includes(f.status) ? f.status : 'draft', featured: f.featured ? 1 : 0,
   }
@@ -482,17 +526,21 @@ export async function afterPropertySave(c: Context<AppEnv>, id: number) {
 
 propertyEditorRoutes.post('/admin/properties/new', requirePerm('manage_properties'), async (c) => {
   const f = await form(c)
-  const v = propertyValues(f)
+  const v = propertyValues(f, await canSeeContacts(c))
   if (!v.name || !v.destination) return redirectMsg(c, '/admin/properties/new', { err: 'Name and destination are required.' })
   let slug = slugify(`${v.name} ${v.destination}`)
   if (await first(c.env, 'SELECT 1 FROM properties WHERE slug = ?', slug)) slug += '-' + Date.now().toString(36)
   const cols = Object.keys(v)
   const id = await insertId(c.env, `INSERT INTO properties (slug, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, slug, ...(Object.values(v) as (string | number | null)[]))
   await run(c.env, 'INSERT OR IGNORE INTO destinations (name, slug) VALUES (?, ?)', v.destination, slugify(v.destination))
+  const added = await addNewRooms(c, id, f)
   const extra = await applyExtracted(c, id, f)
+  const photos = await uploadNewPropertyPhotos(c, id, added)
   await afterPropertySave(c, id)
-  await logActivity(c.env, c.get('user')!.id, 'property.created', 'property', id, { name: v.name })
-  return redirectMsg(c, `/admin/properties/${id}#rooms`, { ok: `Property created.${extra} Now check room categories, add photos & videos and seasonal rates below.` })
+  await logActivity(c.env, c.get('user')!.id, 'property.created', 'property', id, { name: v.name, rooms: added.size, photos: photos.n })
+  const parts = [added.size && `${added.size} room categor${added.size === 1 ? 'y' : 'ies'}`, photos.n && `${photos.n} photo${photos.n === 1 ? '' : 's'}`].filter(Boolean)
+  const msg = `Property created${parts.length ? ` with ${parts.join(' and ')}` : ''}.${extra} Add seasonal rates and videos below.`
+  return redirectMsg(c, `/admin/properties/${id}#rooms`, photos.skipped.length ? { ok: msg, err: `Skipped (wrong type or too large): ${photos.skipped.join(', ').slice(0, 150)}` } : { ok: msg })
 })
 
 propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_properties'), async (c) => {
@@ -500,7 +548,7 @@ propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_propertie
   const before = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', id)
   if (!before) return c.notFound()
   const f = await form(c)
-  const v = propertyValues(f)
+  const v = propertyValues(f, await canSeeContacts(c))
   const cols = Object.keys(v)
   await run(c.env, `UPDATE properties SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...(Object.values(v) as (string | number | null)[]), nowIso(), id)
   await run(c.env, 'UPDATE property_photos SET tags_confirmed = 1 WHERE property_id = ?', id)
@@ -594,19 +642,46 @@ async function applyExtracted(c: Context<AppEnv>, propertyId: number, f: Form): 
   return parts.length ? ` Added ${parts.join(' and ')} from quick fill — please check them.` : ''
 }
 
+/** Room category blocks on the new-property form (nr0_…, nr1_…). Returns block index → new room id. */
+async function addNewRooms(c: Context<AppEnv>, propertyId: number, f: Form): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const idxs = [...new Set(Object.keys(f).map((k) => k.match(/^nr(\d{1,2})_name$/)?.[1]).filter((x): x is string => !!x))]
+  for (const idx of idxs.slice(0, 30)) {
+    const pf = `nr${idx}_`
+    const fake = Object.assign(
+      Object.fromEntries(Object.entries(f).filter(([k]) => k.startsWith(pf)).map(([k, v]) => [k.slice(pf.length), v])),
+      { __all: { amenities: f.__all[`${pf}amenities`] ?? [] } },
+    ) as Form
+    const v = roomValues(fake)
+    if (!v.name) continue
+    const cols = Object.keys(v)
+    out.set(idx, await insertId(c.env, `INSERT INTO rooms (property_id, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, propertyId, ...(Object.values(v) as (string | number | null)[])))
+  }
+  return out
+}
+
+async function uploadNewPropertyPhotos(c: Context<AppEnv>, propertyId: number, rooms: Map<string, number>) {
+  const body = await c.req.parseBody({ all: true })
+  const filesOf = (k: string) => (Array.isArray(body[k]) ? (body[k] as unknown[]) : [body[k]]).filter((x): x is File => x instanceof File && x.size > 0)
+  const cat = String(body.new_photos_category ?? 'common')
+  const common = await storeMedia(c, propertyId, filesOf('new_photos'), cat in PHOTO_CATEGORIES && cat !== 'room' ? cat : 'common', null, null)
+  let n = common.n
+  const skipped = [...common.skipped]
+  for (const [idx, roomId] of rooms) {
+    const r = await storeMedia(c, propertyId, filesOf(`nr${idx}_photos`), 'room', roomId, null)
+    n += r.n
+    skipped.push(...r.skipped)
+  }
+  return { n, skipped }
+}
+
 // ---- Photos & videos ----
 const IMAGE_TYPES = /^image\/(jpeg|png|webp)$/
 const VIDEO_TYPES = /^video\/(mp4|webm|quicktime)$/
 
-propertyEditorRoutes.post('/admin/properties/:id/media', requirePerm('manage_properties'), async (c) => {
-  const id = int(c.req.param('id'))
-  if (!(await first(c.env, 'SELECT 1 FROM properties WHERE id = ?', id))) return c.notFound()
-  const body = await c.req.parseBody({ all: true })
-  const files = (Array.isArray(body.files) ? body.files : [body.files]).filter((f): f is File => f instanceof File && f.size > 0)
-  const category = String(body.category ?? 'common') in PHOTO_CATEGORIES ? String(body.category) : 'common'
-  const roomId = int(body.room_id as string) || null
-  const caption = str(body.caption as string, 120) || null
-  const maxSort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', id))?.m ?? 0
+/** Save uploaded photos/videos to R2 and the gallery. Images get AI tag suggestions in the background. */
+async function storeMedia(c: Context<AppEnv>, propertyId: number, files: File[], category: string, roomId: number | null, caption: string | null) {
+  const maxSort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', propertyId))?.m ?? 0
   let n = 0
   const skipped: string[] = []
   for (const f of files.slice(0, 20)) {
@@ -617,16 +692,28 @@ propertyEditorRoutes.post('/admin/properties/:id/media', requirePerm('manage_pro
       continue
     }
     const ext = f.type === 'video/quicktime' ? 'mov' : f.type.split('/')[1]
-    const key = `properties/${id}/${category}/${crypto.randomUUID()}.${ext}`
+    const key = `properties/${propertyId}/${category}/${crypto.randomUUID()}.${ext}`
     await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: f.type } })
     const pid = await insertId(
       c.env,
       'INSERT INTO property_photos (property_id, r2_key, caption, sort, category, room_id, media_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      id, key, caption, maxSort + ++n, category, category === 'room' ? roomId : null, isVideo ? 'video' : 'image',
+      propertyId, key, caption, maxSort + ++n, category, category === 'room' ? roomId : null, isVideo ? 'video' : 'image',
     )
     if (isImage) await enqueue(c.env, { type: 'photo_tags', photoId: pid })
   }
-  await logActivity(c.env, c.get('user')!.id, 'media.uploaded', 'property', id, { count: n, category })
+  if (n) await logActivity(c.env, c.get('user')!.id, 'media.uploaded', 'property', propertyId, { count: n, category })
+  return { n, skipped }
+}
+
+propertyEditorRoutes.post('/admin/properties/:id/media', requirePerm('manage_properties'), async (c) => {
+  const id = int(c.req.param('id'))
+  if (!(await first(c.env, 'SELECT 1 FROM properties WHERE id = ?', id))) return c.notFound()
+  const body = await c.req.parseBody({ all: true })
+  const files = (Array.isArray(body.files) ? body.files : [body.files]).filter((f): f is File => f instanceof File && f.size > 0)
+  const category = String(body.category ?? 'common') in PHOTO_CATEGORIES ? String(body.category) : 'common'
+  const roomId = int(body.room_id as string) || null
+  const { n, skipped } = await storeMedia(c, id, files, category, roomId, str(body.caption as string, 120) || null)
+  await afterPropertySave(c, id)
   if (category === 'room' && !roomId && n) return redirectMsg(c, `/admin/properties/${id}#media`, { err: `${n} file(s) uploaded, but no room category was chosen — pick one on each photo below.` })
   return redirectMsg(c, `/admin/properties/${id}#media`, skipped.length ? { err: `${n} uploaded; skipped (wrong type or too large): ${skipped.join(', ').slice(0, 150)}` } : { ok: `${n} file(s) added to ${PHOTO_CATEGORIES[category]}.` })
 })

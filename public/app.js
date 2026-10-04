@@ -250,23 +250,18 @@
       if (r.error) { st.textContent = r.error; return }
       $$('.qf-filled', f).forEach(function (el) { el.classList.remove('qf-filled') })
       var n = 0
-      Object.keys(r.fields || {}).forEach(function (k) {
-        var v = r.fields[k], els = $$('[name="' + k + '"]', f)
-        if (!els.length) return
-        var touched = false
-        els.forEach(function (el) {
-          if (el.type === 'checkbox') {
-            if (Array.isArray(v)) { if (v.indexOf(el.value) >= 0 && !el.checked) { el.checked = true; touched = true; mark(el) } }
-            else if (typeof v === 'boolean' && el.checked !== v) { el.checked = v; touched = true; mark(el) }
-          } else if (el.tagName === 'SELECT') {
-            if ($$('option', el).some(function (o) { return o.value === String(v) })) { el.value = String(v); touched = true; mark(el) }
-          } else if (typeof v === 'string' && v) { el.value = v; touched = true; mark(el) }
-          if (touched) { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
-        })
-        if (touched) n++
-      })
+      Object.keys(r.fields || {}).forEach(function (k) { if (fillField(f, k, r.fields[k])) n++ })
       var rooms = r.rooms || [], seasons = r.seasons || []
-      $('#qf-rooms').value = rooms.length ? JSON.stringify(rooms) : ''
+      // New property: put rooms straight into the room category blocks; otherwise they are added on save.
+      var blocks = $('#new-rooms')
+      if (blocks && rooms.length) {
+        rooms.forEach(function (room, i) {
+          var b = $$('.new-room', blocks)[i] || addRoomBlock()
+          var idx = b.dataset.idx
+          Object.keys(room).forEach(function (k) { fillField(f, 'nr' + idx + '_' + k, room[k]) })
+        })
+        $('#qf-rooms').value = ''
+      } else $('#qf-rooms').value = rooms.length ? JSON.stringify(rooms) : ''
       $('#qf-seasons').value = seasons.length ? JSON.stringify(seasons) : ''
       var box = $('#qf-extra'), list = $('#qf-extra-list')
       if (rooms.length || seasons.length) {
@@ -280,8 +275,33 @@
       st.textContent = (n ? 'Filled ' + n + ' field(s) — highlighted in yellow. Please check them, then press Save.' : 'Could not find details to fill. Try adding more information.') + (r.warning ? ' ' + r.warning : '')
       var first = $('.qf-filled', f); if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }).catch(function () { qfBtn.disabled = false; qfBtn.textContent = old; st.textContent = 'Something went wrong. Please try again.' })
-    function mark(el) { (el.closest('.field') || el.closest('label') || el).classList.add('qf-filled') }
   })
+  function markFilled(el) { (el.closest('.field') || el.closest('label') || el).classList.add('qf-filled') }
+  function fillField(f, k, v) {
+    var els = $$('[name="' + k + '"]', f), touched = false
+    els.forEach(function (el) {
+      var hit = false
+      if (el.type === 'file' || el.type === 'hidden') return
+      if (el.type === 'checkbox') {
+        if (Array.isArray(v)) { if (v.indexOf(el.value) >= 0 && !el.checked) { el.checked = true; hit = true } }
+        else if (typeof v === 'boolean' && el.checked !== v) { el.checked = v; hit = true }
+      } else if (el.tagName === 'SELECT') {
+        if ($$('option', el).some(function (o) { return o.value === String(v) })) { el.value = String(v); hit = true }
+      } else if ((typeof v === 'string' || typeof v === 'number') && v !== '') { el.value = String(v); hit = true }
+      if (hit) { touched = true; markFilled(el); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
+    })
+    return touched
+  }
+  // New property: add more room category blocks
+  var roomTpl = document.getElementById('new-room-tpl')
+  function addRoomBlock() {
+    var list = $('#new-rooms'), next = 0
+    $$('.new-room', list).forEach(function (b) { next = Math.max(next, +b.dataset.idx + 1) })
+    list.insertAdjacentHTML('beforeend', roomTpl.innerHTML.replace(/__IDX__/g, String(next)))
+    return $$('.new-room', list).pop()
+  }
+  var addRoomBtn = $('[data-add-room]')
+  if (addRoomBtn && roomTpl) addRoomBtn.addEventListener('click', function () { var b = addRoomBlock(); var i = $('input', b); if (i) i.focus() })
   var seoBtn = $('[data-ai-seo]')
   if (seoBtn) seoBtn.addEventListener('click', function () {
     var f = $('#prop-form'); seoBtn.disabled = true

@@ -129,6 +129,7 @@ guestRoutes.get('/my/bookings/:id', async (c) => {
   const u = c.get('user')!
   const b = await first<BookingView & { room_name: string }>(c.env, `${BOOKING_SELECT.replace('SELECT b.*', 'SELECT b.*, (SELECT name FROM rooms WHERE id = b.room_id) AS room_name')} WHERE b.id = ? AND b.user_id = ?`, int(c.req.param('id')), u.id)
   if (!b) return c.notFound()
+  const helpPhone = (await getSettings(c.env)).business.phone
   const [msgs, payments] = await Promise.all([
     all<MessageRow>(c.env, "SELECT * FROM messages WHERE (booking_id = ? OR (enquiry_id = ? AND enquiry_id IS NOT NULL)) AND channel != 'note' ORDER BY id", b.id, b.enquiry_id ?? -1),
     all<{ amount: number; status: string; created_at: string; gateway_payment_id: string | null }>(c.env, 'SELECT amount, status, created_at, gateway_payment_id FROM payments WHERE booking_id = ? ORDER BY id', b.id),
@@ -161,8 +162,7 @@ guestRoutes.get('/my/bookings/:id', async (c) => {
           <h3>Getting there</h3>
           <p>{b.address ?? b.destination}</p>
           <a class="btn btn-sm" href={mapsLink(b)} target="_blank" rel="noopener">Open in Maps</a>
-          <p class="muted small mt-sm">Property contact details are shared on WhatsApp one day before check-in.</p>
-          {b.check_in <= new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) && b.owner_phone && b.status === 'confirmed' && <p>Property contact: <a href={`tel:${b.owner_phone}`}>{b.owner_phone}</a></p>}
+          <p class="muted small mt-sm">Need help on the way or at the property? Call us on <a href={`tel:${helpPhone}`}>{helpPhone}</a>.</p>
         </div>
       </div>
       {canChange && (

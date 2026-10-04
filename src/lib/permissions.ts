@@ -14,6 +14,7 @@ export interface Permissions {
   manage_bookings: boolean
   approve_cancellations: boolean
   manage_properties: boolean
+  view_property_contacts: boolean
   manage_rates: boolean
   manage_offers: boolean
   manage_payments: boolean
@@ -32,7 +33,7 @@ export interface Permissions {
 export type PermissionKey = keyof Permissions
 
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
-  view_net_rates: 'See net rates, commission and owner contacts',
+  view_net_rates: 'See net rates and commission',
   max_discount_pct: 'Maximum discount on a quote (%)',
   view_all_enquiries: 'See every enquiry (not only their own)',
   manage_enquiries: 'Work on enquiries',
@@ -41,6 +42,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   manage_bookings: 'Manage bookings',
   approve_cancellations: 'Approve cancellations and date changes',
   manage_properties: 'Add and edit properties',
+  view_property_contacts: 'See and edit property contact details (contact person, numbers, email, account details)',
   manage_rates: 'Change rates and availability',
   manage_offers: 'Manage offers and coupons',
   manage_payments: 'See payments and payouts',
@@ -66,6 +68,7 @@ const none: Permissions = {
   manage_bookings: false,
   approve_cancellations: false,
   manage_properties: false,
+  view_property_contacts: false,
   manage_rates: false,
   manage_offers: false,
   manage_payments: false,

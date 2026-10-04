@@ -268,7 +268,6 @@ export async function propertyDoc(env: Env, p: PropertyRow): Promise<string> {
   const d = readDining(p.dining)
   const pol = readPolicies(p.policies)
   const themes = parseJson<string[]>(p.themes, []).map((t) => THEMES[t] ?? t)
-  const langs = parseJson<string[]>(p.languages, [])
   const roomLine = (r: RoomRow) => {
     const am = parseJson<string[]>(r.facilities, []).map((k) => ROOM_AMENITIES[k] ?? FACILITIES[k] ?? k)
     return `- ${r.name}: ${r.units} room(s) of this type, sleeps up to ${r.capacity}${r.max_adults ? ` (max ${r.max_adults} adults${r.max_children != null ? `, ${r.max_children} children` : ''})` : ''}` +
@@ -280,7 +279,7 @@ export async function propertyDoc(env: Env, p: PropertyRow): Promise<string> {
   return `# ${p.name}
 
 Type: ${stayTypeLabel(p)}${p.star_category ? `, ${p.star_category}-star` : ''}. Location: ${p.destination}, Kerala. ${p.address ?? ''}
-${themes.length ? `Best for: ${themes.join(', ')}.` : ''} ${langs.length ? `Languages spoken: ${langs.join(', ')}.` : ''} ${p.built_year ? `Built/renovated: ${p.built_year}.` : ''}
+${themes.length ? `Best for: ${themes.join(', ')}.` : ''} ${p.built_year ? `Built/renovated: ${p.built_year}.` : ''}
 
 ## Highlights
 ${parseJson<string[]>(p.highlights, []).map((h) => `- ${h}`).join('\n')}
@@ -317,7 +316,6 @@ ${p.cancellation_policy || 'Standard Go Sanchari cancellation policy applies.'}
 
 ## Location and how to reach
 ${p.address ?? ''} ${p.how_to_reach ?? ''}
-${p.best_time ? `Best time to visit: ${p.best_time}.` : ''}
 
 ## Nearby
 ${near.map((n) => `- ${n.name} (${n.kind}): ${n.km} km${n.time ? `, about ${n.time}` : ''}`).join('\n') || 'Not listed'}
