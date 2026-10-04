@@ -19,7 +19,7 @@ import type { NearbyPlace, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, fmtDateTime, int, isDate, money, nowIso, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg, type Form } from './helpers'
 import { destinations } from '../lib/properties'
-import type { SeasonRate } from '../lib/pricing'
+import { SEASON_KINDS, seasonKindLabel, type SeasonRate } from '../lib/pricing'
 import { extractProperty, type ExtractedRoom, type ExtractedSeason } from '../lib/propextract'
 
 export const propertyEditorRoutes = new Hono<AppEnv>()
@@ -40,15 +40,20 @@ interface SeasonGroup {
   start_date: string
   end_date: string
   min_nights: number | null
+  kind: string
   rates: Record<number, number>
+  staff: Record<number, number>
+  net: Record<number, number>
 }
 
 function groupSeasons(rows: (SeasonRate & { id: number })[]): SeasonGroup[] {
   const map = new Map<string, SeasonGroup>()
   for (const r of rows) {
     const key = `${r.name}|${r.start_date}|${r.end_date}`
-    const g = map.get(key) ?? { key, name: r.name, start_date: r.start_date, end_date: r.end_date, min_nights: r.min_nights, rates: {} }
+    const g = map.get(key) ?? { key, name: r.name, start_date: r.start_date, end_date: r.end_date, min_nights: r.min_nights, kind: r.kind ?? 'season', rates: {}, staff: {}, net: {} }
     if (r.room_id && r.rate) g.rates[r.room_id] = r.rate
+    if (r.room_id && r.staff_rate) g.staff[r.room_id] = r.staff_rate
+    if (r.room_id && r.net_rate) g.net[r.room_id] = r.net_rate
     if (r.min_nights) g.min_nights = r.min_nights
     map.set(key, g)
   }
@@ -92,6 +97,10 @@ const RoomFields = ({ r, pf = '', optional, showNet }: { r?: Partial<RoomRow>; p
     </>
   )
 }
+
+const RateSub = ({ staff, net }: { staff?: number | null; net?: number | null }) => (
+  (staff || net) ? <div class="muted small">{staff ? `staff ${money(staff)}` : ''}{staff && net ? ' · ' : ''}{net ? `net ${money(net)}` : ''}</div> : <></>
+)
 
 /** A room category block inside the new-property form (fields prefixed nr<idx>_; empty blocks are skipped). */
 const NewRoomBlock = ({ idx, showNet }: { idx: string; showNet: boolean }) => (
@@ -146,6 +155,7 @@ function propertyForm(
         <summary><span class="ai-badge">AI</span> <strong>Quick fill — paste all details in one paragraph</strong></summary>
         <p class="muted small">Paste everything you have — owner's WhatsApp message, brochure text, your notes (English or Malayalam). AI puts each detail into the right field below, plus room categories and seasonal rates. Nothing is saved until you check and press Save.</p>
         <textarea id="qf-text" rows={8} maxlength={12000} placeholder={'e.g. Misty Hills Resort, Chithirapuram, Munnar. 3 star resort built 2018. 12 rooms: 8 Deluxe Valley View (king bed, AC, balcony, kettle) ₹4,500 weekdays ₹5,500 weekends, 4 Family Suites for 4 guests ₹7,000. Christmas–New Year 20 Dec–5 Jan Deluxe 7,500, Suite 10,000, min 2 nights. Pool, parking, free Wi-Fi, restaurant (Kerala, North Indian) breakfast 7:30–10. Check-in 2 pm, check-out 11 am. No pets. 50% advance. 30% refund if cancelled 7 days before. Owner Joseph 98470 12345. 18 km from Mattupetty Dam…'}></textarea>
+        <Field label="Or attach a fact sheet / brochure (PDF or Word)"><input type="file" id="qf-doc" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" /></Field>
         <div class="row wrap-row">
           <button type="button" class="btn btn-sm" data-ai-extract="/admin/ai/extract-property">Fill the form with AI</button>
           <span class="muted small" id="qf-status"></span>
@@ -390,14 +400,26 @@ function propertyForm(
 
           <section class="card stack" id="tariff">
             <h2>{num('tariff')}. Tariff & seasonal rates</h2>
-            <p class="muted small">Rates per room per night. Regular rates come from each room category; a season overrides them on its dates. Leave a room blank in a season to keep its regular rate.</p>
+            <p class="muted small">Rates per room per night. Regular rates come from each room category; a season overrides them on its dates. Types: <strong>Peak season</strong>, <strong>Off-season</strong> and <strong>Special / holiday</strong> (Christmas, New Year, Onam…). When dates overlap, special wins over season, and season over off-season. Leave a room blank to keep its regular rate.</p>
+            {showNet && (
+              <form method="post" action={`/admin/properties/${p.id}/ratesheet`} enctype="multipart/form-data" class="upload-box stack" id="ratesheet">
+                <h3><span class="ai-badge">AI</span> Import a B2B rate sheet (PDF or Word)</h3>
+                <p class="small muted">Attach the resort's rate sheet. AI reads the room categories, seasons and net rates; you check everything on the next screen before it is saved.</p>
+                <div class="row wrap-row">
+                  <Field label="Rate sheet"><input type="file" name="sheet" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></Field>
+                  <Field label="Staff rate = net +" hint="% markup"><input type="number" name="staff_markup" value="15" min="0" max="300" step="0.5" class="w-sm" /></Field>
+                  <Field label="Guest rate = net +" hint="% markup"><input type="number" name="guest_markup" value="35" min="0" max="500" step="0.5" class="w-sm" /></Field>
+                </div>
+                <button class="btn btn-sm">Read rate sheet</button>
+              </form>
+            )}
             <div class="table-wrap">
               <table class="table tariff-table">
-                <thead><tr><th>Season</th><th>Dates</th><th>Min nights</th>{rooms.map((r) => <th>{r.name}</th>)}</tr></thead>
+                <thead><tr><th>Season</th><th>Type</th><th>Dates</th><th>Min nights</th>{rooms.map((r) => <th>{r.name}</th>)}</tr></thead>
                 <tbody>
-                  <tr class="muted"><td>Regular (weekday)</td><td>All year</td><td>—</td>{rooms.map((r) => <td>{money(r.base_rate)}</td>)}</tr>
-                  <tr class="muted"><td>Regular (Fri & Sat)</td><td>All year</td><td>—</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>
-                  {groups.map((g) => <tr><td><strong>{g.name}</strong></td><td class="nowrap">{fmtDate(g.start_date)} – {fmtDate(g.end_date)}</td><td>{g.min_nights ?? '—'}</td>{rooms.map((r) => <td>{g.rates[r.id] ? money(g.rates[r.id]) : <span class="muted">regular</span>}</td>)}</tr>)}
+                  <tr class="muted"><td>Regular (weekday)</td><td>—</td><td>All year</td><td>—</td>{rooms.map((r) => <td>{money(r.base_rate)}<RateSub staff={r.staff_rate} net={showNet ? r.net_rate : null} /></td>)}</tr>
+                  <tr class="muted"><td>Regular (Fri & Sat)</td><td>—</td><td>All year</td><td>—</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>
+                  {groups.map((g) => <tr><td><strong>{g.name}</strong></td><td><span class={`pill pill-kind-${g.kind}`}>{seasonKindLabel(g.kind)}</span></td><td class="nowrap">{fmtDate(g.start_date)} – {fmtDate(g.end_date)}</td><td>{g.min_nights ?? '—'}</td>{rooms.map((r) => <td>{g.rates[r.id] ? <>{money(g.rates[r.id])}<RateSub staff={g.staff[r.id]} net={showNet ? g.net[r.id] : null} /></> : <span class="muted">regular</span>}</td>)}</tr>)}
                 </tbody>
               </table>
             </div>
@@ -408,13 +430,19 @@ function propertyForm(
                   {g && <input type="hidden" name="orig_key" value={g.key} />}
                   <div class="row wrap-row">
                     <Field label="Season name" class="grow"><input name="name" value={g?.name ?? ''} required placeholder="Onam / Christmas & New Year / Summer / Monsoon" /></Field>
+                    <Field label="Type"><Select name="kind" value={g?.kind ?? 'season'} options={Object.entries(SEASON_KINDS)} /></Field>
                     <Field label="From"><input type="date" name="start_date" value={g?.start_date ?? ''} required /></Field>
                     <Field label="To (last night)"><input type="date" name="end_date" value={g?.end_date ?? ''} required /></Field>
                     <Field label="Min nights"><input type="number" name="min_nights" value={g?.min_nights ?? ''} min="1" class="w-sm" /></Field>
                   </div>
-                  <div class="row wrap-row">
-                    {rooms.map((r) => <Field label={`${r.name} ₹/night`}><input type="number" name={`rate_${r.id}`} value={g?.rates[r.id] ?? ''} min="0" class="w-md" placeholder={String(r.base_rate)} /></Field>)}
-                  </div>
+                  {rooms.map((r) => (
+                    <div class="row wrap-row season-room">
+                      <strong class="small season-room-name">{r.name}</strong>
+                      {showNet && <Field label="B2B / Net ₹" class="internal"><input type="number" name={`net_${r.id}`} value={g?.net[r.id] ?? ''} min="0" class="w-md" /></Field>}
+                      <Field label="Staff rate ₹"><input type="number" name={`staff_${r.id}`} value={g?.staff[r.id] ?? ''} min="0" class="w-md" placeholder={r.staff_rate ? String(r.staff_rate) : ''} /></Field>
+                      <Field label="Guest rate ₹"><input type="number" name={`rate_${r.id}`} value={g?.rates[r.id] ?? ''} min="0" class="w-md" placeholder={String(r.base_rate)} /></Field>
+                    </div>
+                  ))}
                   <div class="row">
                     <button class="btn btn-sm">{g ? 'Save season' : 'Add season'}</button>
                     {g && <button class="btn btn-sm btn-danger" formaction={`/admin/properties/${p.id}/seasons/delete`} formnovalidate>Delete season</button>}
@@ -775,16 +803,25 @@ propertyEditorRoutes.post('/admin/properties/:id/seasons', requirePerm('manage_p
   if (!name || !isDate(f.start_date) || !isDate(f.end_date) || f.end_date < f.start_date) return redirectMsg(c, `/admin/properties/${id}#tariff`, { err: 'Enter a season name and valid dates.' })
   const rooms = await all<RoomRow>(c.env, 'SELECT id, name FROM rooms WHERE property_id = ?', id)
   const minNights = int(f.min_nights) || null
+  const kind = f.kind in SEASON_KINDS ? f.kind : 'season'
+  const withNet = await canSeeNet(c)
   const stmts: D1PreparedStatement[] = []
+  // Net rates are only edited by management; keep the old ones when someone else saves the season.
+  const keptNet = new Map<number, number | null>()
   if (f.orig_key) {
     const [on, os, oe] = f.orig_key.split('|')
+    if (!withNet) {
+      for (const r of await all<{ room_id: number; net_rate: number | null }>(c.env, 'SELECT room_id, net_rate FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND name = ? AND start_date = ? AND end_date = ?', id, on, os, oe)) keptNet.set(r.room_id, r.net_rate)
+    }
     stmts.push(c.env.DB.prepare('DELETE FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND rate IS NOT NULL AND name = ? AND start_date = ? AND end_date = ?').bind(id, on, os, oe))
   }
   let n = 0
   for (const r of rooms) {
     const rate = int(f[`rate_${r.id}`])
     if (rate > 0) {
-      stmts.push(c.env.DB.prepare('INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, r.id, name, f.start_date, f.end_date, rate, minNights, c.get('user')!.id))
+      const staff = int(f[`staff_${r.id}`]) || null
+      const net = withNet ? int(f[`net_${r.id}`]) || null : keptNet.get(r.id) ?? null
+      stmts.push(c.env.DB.prepare('INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights, created_by, kind, staff_rate, net_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, r.id, name, f.start_date, f.end_date, rate, minNights, c.get('user')!.id, kind, staff, net))
       n++
     }
   }
@@ -820,6 +857,9 @@ propertyEditorRoutes.post('/admin/ai/seo', requirePerm('manage_properties'), asy
 propertyEditorRoutes.post('/admin/ai/extract-property', requirePerm('manage_properties'), async (c) => {
   const f = await form(c)
   const text = str(f.text, 12000)
-  if (text.length < 20) return c.json({ error: 'Paste a few lines about the property first.' })
-  return c.json(await extractProperty(c.env, text))
+  const body = await c.req.parseBody()
+  const file = body.doc instanceof File && body.doc.size > 0 ? body.doc : null
+  if (text.length < 20 && !file) return c.json({ error: 'Paste a few lines about the property, or attach a PDF / Word file.' })
+  const doc = file ? { name: file.name, type: file.type, data: await file.arrayBuffer() } : null
+  return c.json(await extractProperty(c.env, text, doc))
 })

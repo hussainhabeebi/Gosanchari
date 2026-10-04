@@ -244,10 +244,11 @@
   // Property quick fill: paste one paragraph, AI fills the editor fields (staff review, then save).
   var qfBtn = $('[data-ai-extract]')
   if (qfBtn) qfBtn.addEventListener('click', function () {
-    var f = $('#prop-form'), st = $('#qf-status'), text = $('#qf-text').value.trim()
-    if (text.length < 20) { st.textContent = 'Paste a few lines about the property first.'; return }
+    var f = $('#prop-form'), st = $('#qf-status'), text = $('#qf-text').value.trim(), docIn = $('#qf-doc'), doc = docIn && docIn.files[0]
+    if (text.length < 20 && !doc) { st.textContent = 'Paste a few lines about the property, or attach a PDF / Word file.'; return }
     var old = qfBtn.textContent; qfBtn.disabled = true; qfBtn.textContent = 'Reading… (up to a minute)'; st.textContent = ''
-    post(qfBtn.dataset.aiExtract, { text: text }).then(function (r) {
+    var fd = new FormData(); fd.append('text', text); if (doc) fd.append('doc', doc)
+    fetch(qfBtn.dataset.aiExtract, { method: 'POST', body: fd, headers: { Accept: 'application/json' }, credentials: 'same-origin' }).then(function (res) { return res.json() }).then(function (r) {
       qfBtn.disabled = false; qfBtn.textContent = old
       if (r.error) { st.textContent = r.error; return }
       $$('.qf-filled', f).forEach(function (el) { el.classList.remove('qf-filled') })
@@ -294,6 +295,73 @@
     })
     return touched
   }
+  // ---------- Staff AI assistant ----------
+  var asBox = $('[data-assistant]')
+  if (asBox) (function () {
+    var log = $('#as-log'), formEl = $('#as-form'), q = $('#as-q'), KEY = 'gs-assistant'
+    var state = { history: [], need: null, turns: [] }
+    try { state = JSON.parse(sessionStorage.getItem(KEY)) || state } catch (e) {}
+    var save = function () { try { sessionStorage.setItem(KEY, JSON.stringify(state)) } catch (e) {} }
+    var fmt = function (t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/^\s*[-*•]\s+/gm, '• ') }
+    function card(o, d) {
+      var qs = function (l) { return new URLSearchParams({ property: o.id, room: l.roomId, checkIn: d.checkIn, checkOut: d.checkOut, guests: l.count * l.capacity }).toString() }
+      var main = o.lines.slice().sort(function (a, b) { return b.count * b.capacity - a.count * a.capacity })[0]
+      return '<div class="card as-card' + (o.fits ? '' : ' as-nofit') + '">' +
+        '<div class="row-between"><strong><a href="/staff/rooms/' + o.id + '">' + esc(o.name) + '</a></strong><span class="muted small">' + esc(o.type) + ' · ' + esc(o.destination) + (o.rating ? ' · ★ ' + o.rating.toFixed(1) : '') + '</span></div>' +
+        (o.fits ? '<ul class="small as-lines">' + o.lines.map(function (l) {
+          return '<li>' + l.count + ' × ' + esc(l.room) + ' <span class="muted">(sleeps ' + l.capacity + ')</span> — guest ' + money(l.guestPerNight) + '/night' +
+            (l.staffPerNight ? ' · <span class="internal">staff ' + money(l.staffPerNight) + '</span>' : '') +
+            (l.netPerNight ? ' · <span class="internal">net ' + money(l.netPerNight) + '</span>' : '') +
+            (l.seasons.length ? ' <span class="pill pill-kind-special">' + esc(l.seasons.join(', ')) + '</span>' : '') + '</li>'
+        }).join('') + '</ul>' : '<p class="small err">Not enough for the whole group — up to ' + o.maxSleeps + ' guests with the ' + o.freeRooms + ' free rooms.</p>') +
+        (o.fits ? '<div class="as-totals"><span>Guest total <strong>' + money(o.guestTotal) + '</strong> <span class="muted small">incl. GST ' + money(o.gst) + '</span></span>' +
+          (o.staffTotal ? '<span class="internal">Staff total ' + money(o.staffTotal) + '</span>' : '') +
+          (o.netTotal ? '<span class="internal">Net total ' + money(o.netTotal) + '</span>' : '') + '</div>' : '') +
+        (o.minNightsIssue ? '<p class="small err">' + esc(o.minNightsIssue) + '</p>' : '') +
+        '<div class="row wrap-row">' + (o.fits && main ? '<a class="btn btn-sm" href="/staff/quotes/new?' + qs(main) + '">Start quote</a>' : '') +
+        '<a class="btn btn-sm btn-outline" href="/staff/rooms/' + o.id + '">Rooms & photos</a><a class="btn btn-sm btn-outline" href="/stay/' + esc(o.slug) + '" target="_blank" rel="noopener">Guest page</a></div></div>'
+    }
+    function render(turn) {
+      var h = '<div class="msg msg-staff">' + esc(turn.q) + '</div>'
+      if (turn.error) return h + '<div class="msg msg-bot err">' + esc(turn.error) + '</div>'
+      h += '<div class="msg msg-bot"><div class="as-answer">' + fmt(turn.answer || '') + '</div>'
+      if (turn.dates) h += '<div class="muted small">' + turn.dates.guests + ' guests · ' + turn.dates.nights + ' night(s) · ' + turn.dates.checkIn + ' → ' + turn.dates.checkOut + (turn.dates.assumed ? ' (dates assumed)' : '') + '</div>'
+      if (turn.options && turn.options.length) h += '<div class="as-cards">' + turn.options.map(function (o) { return card(o, turn.dates) }).join('') + '</div>'
+      return h + '</div>'
+    }
+    function draw() {
+      var hint = $('.as-hint', log)
+      $$('.msg', log).forEach(function (m) { m.remove() })
+      if (hint) hint.hidden = state.turns.length > 0
+      log.insertAdjacentHTML('beforeend', state.turns.map(render).join(''))
+      log.scrollTop = log.scrollHeight
+    }
+    function ask(text) {
+      var btn = $('button', formEl); btn.disabled = true; btn.textContent = 'Thinking…'
+      var pending = { q: text, answer: 'Searching our properties and calculating prices…' }
+      state.turns.push(pending); draw()
+      fetch(asBox.dataset.assistant, { method: 'POST', headers: { 'content-type': 'application/json', Accept: 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ q: text, history: state.history, need: state.need }) })
+        .then(function (r) { return r.json() })
+        .then(function (r) {
+          state.turns.pop()
+          if (r.error) state.turns.push({ q: text, error: r.error })
+          else {
+            state.turns.push({ q: text, answer: r.answer, dates: r.dates, options: r.options })
+            state.history.push({ role: 'user', content: text }, { role: 'assistant', content: r.answer })
+            state.history = state.history.slice(-8); state.need = r.need
+          }
+          state.turns = state.turns.slice(-12); save(); draw()
+        })
+        .catch(function () { state.turns.pop(); state.turns.push({ q: text, error: 'Something went wrong. Please try again.' }); draw() })
+        .then(function () { btn.disabled = false; btn.textContent = 'Ask' })
+    }
+    formEl.addEventListener('submit', function (e) { e.preventDefault(); var t = q.value.trim(); if (!t) return; q.value = ''; ask(t) })
+    q.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); formEl.requestSubmit() } })
+    $$('[data-example]').forEach(function (b) { b.addEventListener('click', function () { ask(b.dataset.example) }) })
+    $('[data-assistant-reset]').addEventListener('click', function () { state = { history: [], need: null, turns: [] }; save(); draw(); q.focus() })
+    draw()
+  })()
+
   // Share a link: phone share sheet when available, otherwise copy to clipboard
   $$('[data-share]').forEach(function (b) {
     b.addEventListener('click', function () {

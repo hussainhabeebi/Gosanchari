@@ -154,7 +154,13 @@ All AI calls go through `src/lib/ai.ts`. Each call is checked against its on/off
 | Review check, reply draft, daily summary, problem alerts | Workers AI | Queue / Cron | Rule checks (links, phones), plain-number summary |
 | Follow-up drafts | Workers AI | Cron (daily) + Queue | Template text |
 | Description writer (EN + ML), photo tags, SEO | Workers AI (llava for photos) | On click / photo upload | Manual |
-| Property quick fill (paste one paragraph → fields, room categories, seasons) | Workers AI (large model) | On click; staff review, nothing saved until Save | Fill fields by hand |
+| Property quick fill (paste a paragraph or attach PDF / Word → fields, room categories, seasons) | Gemini if a key is saved, else Workers AI | On click; staff review, nothing saved until Save | Fill fields by hand |
+| Staff AI assistant (/staff/assistant): client need → matching properties, free rooms, cheapest room mix for groups, exact prices for the dates | Rules + Gemini / Workers AI for wording; prices from the pricing engine | On question | Calculated options without the written summary |
+| B2B rate sheet import (PDF / Word → net, staff and guest rates, seasons) | Gemini reads PDFs directly; without it Word is read in the Worker and PDFs via Workers AI toMarkdown | On upload (management only); review screen before saving | Enter rates by hand |
+
+**Gemini:** Admin → Settings → AI → paste a key from aistudio.google.com/apikey (tested on save, stored in KV, never shown again). Or set the Worker secret `GEMINI_API_KEY`. Every text AI call then tries Gemini first and falls back to Workers AI.
+
+**Season types:** each season is *Peak season*, *Off-season* or *Special / holiday*. On overlapping dates special beats season beats off-season. Seasons can carry their own staff and net rates.
 | Ask AI | Workers AI → SQL guard → read-only views | On question; cached 1 hour | Disabled message |
 
 Ask AI safety:

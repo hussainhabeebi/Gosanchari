@@ -106,7 +106,7 @@ async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters)
   const ph = placeholders(ids.length)
   const [rooms, seasons, avail] = await Promise.all([
     all<RoomRow>(env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${ph})`, ...ids),
-    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date < ?`, ...ids, f.checkIn!, f.checkOut!),
+    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date < ?`, ...ids, f.checkIn!, f.checkOut!),
     roomAvailability(env, ids, f.checkIn!, f.checkOut!),
   ])
   const nights = nightsBetween(f.checkIn!, f.checkOut!)

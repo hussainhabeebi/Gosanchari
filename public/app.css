@@ -471,3 +471,25 @@ code { overflow-wrap: anywhere; }
 .rate-strip { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 8px 10px; background: var(--green-soft); border-radius: 8px; }
 .pill-red { background: var(--red-soft); color: #b42318; }
 .rate-tiers { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; }
+.pill-kind-special { background: #fdecec; color: #b42318; }
+.pill-kind-season { background: var(--amber-soft); color: var(--amber); }
+.pill-kind-off_season { background: #e8f0fe; color: #1a56c4; }
+.season-room { align-items: flex-end; border-top: 1px dashed var(--line); padding-top: 8px; }
+.season-room-name { flex: 1 1 100%; }
+.review-table input, .review-table select { min-width: 90px; padding: 6px 8px; }
+.review-table td:first-child input { min-width: 160px; }
+
+/* Staff AI assistant */
+.assistant .chat-log { max-height: none; min-height: 200px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.assistant .msg-staff { align-self: flex-end; }
+.assistant .msg-bot { align-self: stretch; max-width: 100%; background: #f7f8f7; white-space: normal; }
+.as-answer { white-space: pre-line; margin-bottom: 8px; }
+.as-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin-top: 8px; }
+.as-card { padding: 12px; display: flex; flex-direction: column; gap: 8px; white-space: normal; }
+.as-nofit { opacity: .7; }
+.as-lines { margin: 0; padding-left: 18px; }
+.as-totals { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.chat-form { display: flex; gap: 8px; align-items: flex-end; position: sticky; bottom: 0; background: var(--bg); padding: 8px 0; }
+.chat-form textarea { flex: 1; }
+.err { color: #b42318; }
+.as-hint .chip { cursor: pointer; border: 1px solid var(--line); background: #fff; font: inherit; font-size: .85rem; text-align: left; }

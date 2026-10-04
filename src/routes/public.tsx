@@ -2,7 +2,7 @@
 
 import { Hono, type Context } from 'hono'
 import { COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
-import { seasonRates, type SeasonRate } from '../lib/pricing'
+import { seasonKindLabel, seasonRates, type SeasonRate } from '../lib/pricing'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
@@ -268,7 +268,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
     all<ReviewRow>(c.env, "SELECT * FROM reviews WHERE property_id = ? AND status = 'approved' ORDER BY id DESC LIMIT 20", p.id),
     similarProperties(c.env, p.id, 4),
     savedIds(c),
-    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
+    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
   const photos = media.filter((m) => m.media_type !== 'video' && m.r2_key).sort((a, b) => COVER_ORDER.indexOf(a.category) - COVER_ORDER.indexOf(b.category) || a.sort - b.sort)
   const videos = media.filter((m) => m.media_type === 'video')
@@ -434,7 +434,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                   <tbody>
                     <tr><td>Regular</td><td>Sun – Thu nights</td>{rooms.map((r) => <td>{money(r.base_rate)}</td>)}</tr>
                     {rooms.some((r) => r.weekend_rate && r.weekend_rate !== r.base_rate) && <tr><td>Weekend</td><td>Fri & Sat nights</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>}
-                    {seasonTable.map((s) => <tr><td>{s.name}{s.minNights ? <div class="muted small">min {s.minNights} nights</div> : null}</td><td class="nowrap">{fmtShortDate(s.start)} – {fmtShortDate(s.end)}</td>{rooms.map((r) => <td>{money(s.rates[r.id])}</td>)}</tr>)}
+                    {seasonTable.map((s) => <tr><td>{s.name} <span class={`pill pill-kind-${s.kind}`}>{seasonKindLabel(s.kind)}</span>{s.minNights ? <div class="muted small">min {s.minNights} nights</div> : null}</td><td class="nowrap">{fmtShortDate(s.start)} – {fmtShortDate(s.end)}</td>{rooms.map((r) => <td>{money(s.rates[r.id])}</td>)}</tr>)}
                   </tbody>
                 </table>
               </div>

@@ -199,12 +199,13 @@ for pid, dd in DETAILS.items():
     sets = ', '.join(f"{k} = {q(v)}" for k, v in dd.items() if v is not None)
     out.append(f"UPDATE properties SET {sets} WHERE id = {pid};")
 # Per-room seasonal tariff for Misty Tea Bungalow
-for name, start, end, mult, mn in [('Onam', '-08-25', '-09-10', 1.15, 2), ('Christmas & New Year', '-12-20', '-12-31', 1.4, 3), ('Summer holidays', '-04-01', '-05-31', 1.2, None)]:
+for name, kind, start, end, mult, mn in [('Onam', 'special', '-08-25', '-09-10', 1.15, 2), ('Christmas & New Year', 'special', '-12-20', '-12-31', 1.4, 3), ('Summer holidays', 'season', '-04-01', '-05-31', 1.2, None), ('Monsoon', 'off_season', '-06-01', '-08-15', 0.8, None)]:
     for rid, base in zip(room_ids[1], [3800, 6500]):
-        out.append(f"INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights) VALUES (1, {rid}, {q(name)}, strftime('%Y', 'now') || '{start}', strftime('%Y', 'now') || '{end}', {int(round(base * mult, -2))}, {mn if mn else 'NULL'});")
+        out.append(f"INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights, kind, staff_rate) VALUES (1, {rid}, {q(name)}, strftime('%Y', 'now') || '{start}', strftime('%Y', 'now') || '{end}', {int(round(base * mult, -2))}, {mn if mn else 'NULL'}, '{kind}', {int(round(base * mult * 0.87, -2))});")
 
 # Seasons: Christmas/New Year (+25% everywhere, 3-night minimum) and Onam style fixed example.
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, pct_adjust, min_nights) VALUES (NULL, NULL, 'Christmas & New Year', strftime('%Y', 'now') || '-12-20', strftime('%Y', 'now') || '-12-31', 25, 2);")
+out.append("UPDATE season_rates SET kind = 'special' WHERE name = 'Christmas & New Year';")
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights) VALUES (5, NULL, 'Houseboat peak', strftime('%Y', 'now') || '-12-15', strftime('%Y', 'now') || '-12-31', 13500, NULL);")
 
 out.append(f"INSERT INTO coupons (code, title, description, discount_type, discount_value, max_discount, min_amount, valid_from, valid_to, property_ids, usage_limit) VALUES ('WELCOME10', 'Welcome offer', '10% off your first stay — mention the code in your enquiry', 'pct', 10, 2000, 3000, {d(-30)}, {d(120)}, NULL, 500);")

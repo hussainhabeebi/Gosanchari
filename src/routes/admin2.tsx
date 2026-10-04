@@ -15,6 +15,7 @@ import type { ReviewRow } from '../lib/types'
 import { addDays, fmtDate, fmtDateTime, int, isDate, money, normalizePhone, parseJson, slugify, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
 import { destinations } from '../lib/properties'
+import { geminiKey, maskKey, setGeminiKey, testGeminiKey } from '../lib/gemini'
 
 export const admin2Routes = new Hono<AppEnv>()
 admin2Routes.use('/admin/*', requireStaff)
@@ -436,6 +437,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
   const since = new Date(Date.now() - 30 * 86400_000).toISOString()
   const usage = await all<{ feature: string; n: number; failed: number; avg_ms: number }>(c.env, 'SELECT feature, COUNT(*) AS n, SUM(ok = 0) AS failed, AVG(ms) AS avg_ms FROM ai_usage WHERE created_at >= ? GROUP BY feature ORDER BY n DESC', since)
   const today = parseInt((await c.env.KV.get(`ai:count:${todayIST()}`)) ?? '0', 10)
+  const gkey = await geminiKey(c.env)
   const events = Object.keys(s.notifications) as (keyof Settings['notifications'])[]
   const eventLabel: Record<string, string> = { new_enquiry: 'New enquiry', booking: 'New booking', quote_accepted: 'Quote accepted by guest', refund_request: 'Refund request', low_review: 'Low-rated review', daily_summary: 'Daily summary' }
   return page(c, { title: 'Settings', area: 'admin', active: 'settings' }, (
@@ -502,6 +504,17 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
           <Stat label="AI calls (30 days)" value={usage.reduce((a, u) => a + u.n, 0)} />
         </div>
         <p class="small">Cost, cache hits and hard rate limits are in the AI Gateway “{c.env.AI_GATEWAY_ID}” dashboard (Cloudflare → AI → AI Gateway).</p>
+        <div class="upload-box stack" id="gemini">
+          <h3>Google Gemini (recommended for the staff assistant and reading PDF / Word rate sheets)</h3>
+          <p class="small muted">Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and paste it here. The key is stored privately and never shown again in full.</p>
+          {gkey ? <p class="small ok">✓ Gemini key saved ({maskKey(gkey)}).</p> : <p class="small">No Gemini key yet — Workers AI is used.</p>}
+          <div class="row wrap-row">
+            <Field label={gkey ? 'Replace Gemini API key' : 'Gemini API key'}><input type="password" name="gemini_key" autocomplete="off" placeholder={gkey ? 'Leave blank to keep the saved key' : 'AIza…'} /></Field>
+            <Field label="Gemini model"><input name="model_gemini" value={s.ai.models.gemini} placeholder={DEFAULT_SETTINGS.ai.models.gemini} /></Field>
+            <Field label="Use for AI text"><Select name="ai_provider" value={s.ai.provider} options={[['auto', 'Gemini when a key is saved (fallback: Workers AI)'], ['workers', 'Always Workers AI']]} /></Field>
+          </div>
+          {gkey && <label class="check small"><input type="checkbox" name="gemini_remove" value="1" /> Remove the saved key</label>}
+        </div>
         <h3>Features</h3>
         <div class="facility-grid">{(Object.keys(AI_FEATURES) as AiFeature[]).map((k) => <label class="check"><input type="checkbox" name="ai_features" value={k} checked={s.ai.features[k] !== false} /> {AI_FEATURES[k]}</label>)}</div>
         <Field label="Chat assistant welcome message"><textarea name="ai_welcome" rows={2}>{s.ai.assistant_welcome}</textarea></Field>
@@ -510,7 +523,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
         <Field label="Daily AI call limit"><input type="number" name="ai_limit" value={s.ai.daily_limit} min="0" /></Field>
         <details>
           <summary>Models</summary>
-          {(Object.keys(s.ai.models) as (keyof Settings['ai']['models'])[]).map((k) => <Field label={k}><input name={`model_${k}`} value={s.ai.models[k]} placeholder={DEFAULT_SETTINGS.ai.models[k]} /></Field>)}
+          {(Object.keys(s.ai.models) as (keyof Settings['ai']['models'])[]).filter((k) => k !== 'gemini').map((k) => <Field label={k}><input name={`model_${k}`} value={s.ai.models[k]} placeholder={DEFAULT_SETTINGS.ai.models[k]} /></Field>)}
         </details>
         <h3>Usage by feature (30 days)</h3>
         <Table head={['Feature', 'Calls', 'Failed', 'Avg time']}>{usage.map((u) => <tr><td>{AI_FEATURES[u.feature as AiFeature] ?? u.feature}</td><td>{u.n}</td><td>{u.failed}</td><td>{Math.round(u.avg_ms ?? 0)} ms</td></tr>)}</Table>
@@ -548,11 +561,24 @@ admin2Routes.post('/admin/settings', requirePerm('manage_settings'), async (c) =
   await saveSetting(c.env, 'ai', {
     features, assistant_welcome: str(f.ai_welcome, 500), assistant_tone: str(f.ai_tone, 100),
     handoff_topics: (f.ai_handoff ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
-    daily_limit: Math.max(0, int(f.ai_limit, 2000)), models,
+    daily_limit: Math.max(0, int(f.ai_limit, 2000)), models, provider: f.ai_provider === 'workers' ? 'workers' : 'auto',
   })
+  let keyMsg = ''
+  const newKey = str(f.gemini_key, 200)
+  if (f.gemini_remove) {
+    await setGeminiKey(c.env, null)
+    keyMsg = ' Gemini key removed.'
+    await logActivity(c.env, c.get('user')!.id, 'settings.gemini_key_removed', 'settings', null)
+  } else if (newKey) {
+    const problem = await testGeminiKey(newKey, models.gemini)
+    if (problem) return redirectMsg(c, '/admin/settings#gemini', { err: `Other settings saved, but the Gemini key did not work: ${problem.slice(0, 160)}` })
+    await setGeminiKey(c.env, newKey)
+    keyMsg = ' Gemini key saved and tested ✓.'
+    await logActivity(c.env, c.get('user')!.id, 'settings.gemini_key_set', 'settings', null, { key: maskKey(newKey) })
+  }
   const off = (Object.keys(features) as AiFeature[]).filter((k) => !features[k])
   await logActivity(c.env, c.get('user')!.id, 'settings.updated', 'settings', null, { aiOff: off, taxSlabs: slabs })
-  return redirectMsg(c, '/admin/settings', { ok: 'Settings saved.' })
+  return redirectMsg(c, '/admin/settings', { ok: `Settings saved.${keyMsg}` })
 })
 
 // ---------- 47. Activity log ----------

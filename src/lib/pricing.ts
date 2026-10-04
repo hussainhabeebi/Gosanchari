@@ -11,6 +11,7 @@ export interface RoomRates {
   min_nights: number
   capacity: number
   units: number
+  staff_rate?: number | null
 }
 
 export interface SeasonRate {
@@ -23,7 +24,21 @@ export interface SeasonRate {
   rate: number | null
   pct_adjust: number | null
   min_nights: number | null
+  /** 'season' (peak), 'off_season' (low) or 'special' (holiday / event). */
+  kind?: string | null
+  /** Internal staff rate and B2B net rate for this season (room-specific seasons only). */
+  staff_rate?: number | null
+  net_rate?: number | null
 }
+
+/** Season types, in the order they win when dates overlap (special first). */
+export const SEASON_KINDS: Record<string, string> = {
+  special: 'Special / holiday',
+  season: 'Peak season',
+  off_season: 'Off-season',
+}
+const KIND_RANK: Record<string, number> = { special: 3, season: 2, off_season: 1 }
+export const seasonKindLabel = (k: string | null | undefined) => SEASON_KINDS[k ?? 'season'] ?? 'Season'
 
 export interface TaxSlab {
   upto: number | null // per room per night tariff; null = no upper limit
@@ -97,9 +112,11 @@ function seasonFor(room: RoomRates, seasons: SeasonRate[], date: string): Season
       date <= s.end_date &&
       (s.room_id === room.id || (s.room_id == null && (s.property_id == null || s.property_id === room.property_id))),
   )
-  // Room-specific beats property-wide, property-wide beats global; then the most recent start wins.
+  // Special / holiday beats season beats off-season; then room-specific beats property-wide beats global;
+  // then the most recent start wins.
+  const kind = (s: SeasonRate) => KIND_RANK[s.kind ?? 'season'] ?? 2
   const rank = (s: SeasonRate) => (s.room_id != null ? 2 : s.property_id != null ? 1 : 0)
-  matching.sort((a, b) => rank(b) - rank(a) || b.start_date.localeCompare(a.start_date))
+  matching.sort((a, b) => kind(b) - kind(a) || rank(b) - rank(a) || b.start_date.localeCompare(a.start_date))
   return matching[0]
 }
 
@@ -113,6 +130,20 @@ export function nightlyRate(room: RoomRates, seasons: SeasonRate[], date: string
     if (s.pct_adjust != null) return { date, rate: Math.round(regular * (1 + s.pct_adjust / 100)), label: s.name }
   }
   return { date, rate: regular, label: isWeekendNight && room.weekend_rate ? 'Weekend' : 'Standard' }
+}
+
+/** Average internal staff rate per room-night for a stay (a season's staff rate overrides the room's). */
+export function staffRateForStay(room: RoomRates, seasons: SeasonRate[], checkIn: string, checkOut: string): number | null {
+  const nights = eachNight(checkIn, checkOut)
+  if (!nights.length) return room.staff_rate ?? null
+  let sum = 0
+  for (const d of nights) {
+    const s = seasonFor(room, seasons, d)
+    const v = (s?.staff_rate ?? null) || room.staff_rate || null
+    if (!v) return null
+    sum += v
+  }
+  return Math.round(sum / nights.length)
 }
 
 export function taxRateFor(perRoomNight: number, slabs: TaxSlab[] = DEFAULT_TAX_SLABS): number {
@@ -211,10 +242,10 @@ export function discountPercent(subtotal: number, discount: number): number {
 
 /** Season rows → per-room nightly rate for each upcoming season (room-specific beats property-wide beats all-property). */
 export function seasonRates(rooms: Pick<RoomRow, 'id' | 'base_rate'>[], rows: SeasonRate[]) {
-  const groups = new Map<string, { name: string; start: string; end: string; minNights: number | null; rates: Record<number, number> }>()
+  const groups = new Map<string, { name: string; kind: string; start: string; end: string; minNights: number | null; rates: Record<number, number>; staffRates: Record<number, number> }>()
   for (const s of rows) {
     const key = `${s.name}|${s.start_date}|${s.end_date}`
-    if (!groups.has(key)) groups.set(key, { name: s.name, start: s.start_date, end: s.end_date, minNights: s.min_nights, rates: {} })
+    if (!groups.has(key)) groups.set(key, { name: s.name, kind: s.kind ?? 'season', start: s.start_date, end: s.end_date, minNights: s.min_nights, rates: {}, staffRates: {} })
   }
   for (const g of groups.values()) {
     const inGroup = rows.filter((s) => s.name === g.name && s.start_date === g.start && s.end_date === g.end)
@@ -222,6 +253,7 @@ export function seasonRates(rooms: Pick<RoomRow, 'id' | 'base_rate'>[], rows: Se
       const s = inGroup.find((x) => x.room_id === r.id) ?? inGroup.find((x) => x.room_id == null && x.property_id != null) ?? inGroup.find((x) => x.property_id == null)
       if (!s) { g.rates[r.id] = r.base_rate; continue }
       g.rates[r.id] = s.rate ?? Math.round(r.base_rate * (1 + (s.pct_adjust ?? 0) / 100))
+      if (s.staff_rate) g.staffRates[r.id] = s.staff_rate
       if (s.min_nights) g.minNights = Math.max(g.minNights ?? 0, s.min_nights)
     }
   }

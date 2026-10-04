@@ -2,7 +2,8 @@
 // WhatsApp message, a brochure), AI sorts it into the editor's fields. Nothing is saved until staff review and save.
 
 import type { Env } from '../env'
-import { aiEnabled, aiJson } from './ai'
+import { aiEnabled, aiJson, geminiActive } from './ai'
+import { aiJsonFromDocument, type DocInput } from './docs'
 import { CONTACT_FIELDS, CUISINES, MENU_TYPES, POLICY_FIELDS, ROOM_AMENITIES, ROOM_VIEWS, STAY_TYPES, THEMES } from './catalog'
 import { FACILITIES, MEAL_PLANS } from './search'
 import { todayIST } from './util'
@@ -255,14 +256,26 @@ export function normalizeExtract(raw: unknown): Extracted {
 export type ExtractResult = (Extracted & { warning?: string }) | { error: string }
 
 /** Two smaller AI calls in parallel (fields; rooms + seasons): faster, and less chance of a cut-off reply. */
-export async function extractProperty(env: Env, text: string): Promise<ExtractResult> {
-  if (!env.AI) return { error: 'Workers AI is not connected to this site (the [ai] binding is missing).' }
+export async function extractProperty(env: Env, text: string, doc?: DocInput | null): Promise<ExtractResult> {
+  if (!env.AI && !(await geminiActive(env))) return { error: 'No AI is connected. Add a Gemini API key in Admin → Settings → AI, or enable Workers AI.' }
   if (!(await aiEnabled(env, 'property_extract'))) return { error: 'Quick fill is switched off in Admin → AI settings.' }
   const notes = tidyNotes(text)
-  const [a, b] = await Promise.all([
-    aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: fieldsPrompt(notes), maxTokens: 2500 }),
-    aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: roomsPrompt(notes), maxTokens: 2000 }),
-  ])
+  let a: unknown, b: unknown
+  if (doc) {
+    const withPaste = (n: string) => (notes ? `${notes}\n\n${n}` : n)
+    const [ra, rb] = await Promise.all([
+      aiJsonFromDocument<unknown>(env, 'property_extract', doc, (n) => fieldsPrompt(withPaste(n)), { size: 'large', maxTokens: 2500 }),
+      aiJsonFromDocument<unknown>(env, 'property_extract', doc, (n) => roomsPrompt(withPaste(n)), { size: 'large', maxTokens: 2000 }),
+    ])
+    if (!ra.data && !rb.data) return { error: ra.error ?? rb.error ?? 'Could not read the document.' }
+    a = ra.data
+    b = rb.data
+  } else {
+    ;[a, b] = await Promise.all([
+      aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: fieldsPrompt(notes), maxTokens: 2500 }),
+      aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: roomsPrompt(notes), maxTokens: 2000 }),
+    ])
+  }
   if (!a && !b) return { error: 'The AI service did not answer (or the daily AI limit was reached). Please try again in a minute.' }
   const r = normalizeExtract({ fields: a ?? {}, ...(b && typeof b === 'object' ? b : {}) })
   const warning = !a ? 'Room categories were read, but the other details could not be — please fill them by hand.'

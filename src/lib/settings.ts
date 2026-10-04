@@ -28,6 +28,8 @@ export const AI_FEATURES = {
   review_insights: 'Review problem alerts and reply drafts',
   description_writer: 'Property description writer',
   property_extract: 'Property quick fill (paste details, AI fills the form)',
+  rate_sheet: 'Read B2B rate sheets (PDF / Word) into room and season rates',
+  staff_assistant: 'Staff AI assistant (find properties and exact prices for a client)',
   photo_tags: 'Photo tag suggestions',
   seo_suggest: 'SEO title & description suggestions',
 } as const
@@ -62,7 +64,9 @@ export interface Settings {
     assistant_tone: string
     handoff_topics: string[]
     daily_limit: number
-    models: { small: string; large: string; embed: string; whisper: string; translate: string; vision: string; fallback: string }
+    models: { small: string; large: string; embed: string; whisper: string; translate: string; vision: string; fallback: string; gemini: string }
+    /** 'auto' = Gemini for text when an API key is saved, else Workers AI; 'workers' = always Workers AI. */
+    provider: 'auto' | 'workers'
   }
   role_permissions: Partial<Record<Role, Partial<Permissions>>>
   images_transform: boolean
@@ -116,7 +120,9 @@ export const DEFAULT_SETTINGS: Settings = {
       translate: '@cf/meta/m2m100-1.2b',
       vision: '@cf/llava-hf/llava-1.5-7b-hf',
       fallback: '@cf/meta/llama-3.1-8b-instruct-fast',
+      gemini: 'gemini-2.5-flash',
     },
+    provider: 'auto',
   },
   role_permissions: {},
   images_transform: false,

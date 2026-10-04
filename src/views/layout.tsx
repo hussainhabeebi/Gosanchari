@@ -31,6 +31,7 @@ interface LayoutProps extends PageOpts {
 
 const STAFF_NAV: { key: string; href: string; label: string; perm?: keyof Permissions }[] = [
   { key: 'dashboard', href: '/staff', label: 'Dashboard' },
+  { key: 'assistant', href: '/staff/assistant', label: 'AI assistant', perm: 'manage_quotes' },
   { key: 'inbox', href: '/staff/enquiries', label: 'Enquiries', perm: 'manage_enquiries' },
   { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
   { key: 'rooms', href: '/staff/rooms', label: 'Rooms & photos' },

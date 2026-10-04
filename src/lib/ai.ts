@@ -8,6 +8,7 @@
 import type { Env } from '../env'
 import { getSettings, type AiFeature, type Settings } from './settings'
 import { parseJson, todayIST } from './util'
+import { geminiGenerate, geminiKey, type GeminiFile } from './gemini'
 
 type ModelSize = 'small' | 'large'
 
@@ -18,7 +19,13 @@ export interface ChatMessage {
 
 export async function aiEnabled(env: Env, feature: AiFeature, settings?: Settings): Promise<boolean> {
   const s = settings ?? (await getSettings(env))
-  return !!env.AI && s.ai.features[feature] !== false
+  if (s.ai.features[feature] === false) return false
+  return !!env.AI || !!(await geminiKey(env))
+}
+
+/** Gemini key when text calls should go to Gemini (key saved and provider not forced to Workers AI). */
+async function geminiFor(env: Env, s: Settings): Promise<string | null> {
+  return s.ai.provider === 'workers' ? null : geminiKey(env)
 }
 
 async function underDailyLimit(env: Env, s: Settings): Promise<boolean> {
@@ -114,6 +121,10 @@ export interface TextOptions {
   temperature?: number
   /** Seconds to cache identical requests in AI Gateway (repeat questions hit AI once). */
   cacheTtl?: number
+  /** Ask for a JSON reply (Gemini JSON mode). */
+  json?: boolean
+  /** Files for the model to read (Gemini only; PDF, images). */
+  files?: GeminiFile[]
 }
 
 export async function aiText(env: Env, feature: AiFeature, o: TextOptions): Promise<string | null> {
@@ -124,7 +135,14 @@ export async function aiText(env: Env, feature: AiFeature, o: TextOptions): Prom
     ...(o.messages ?? []),
     ...(o.prompt ? [{ role: 'user' as const, content: o.prompt }] : []),
   ]
-  const out = await guarded(env, feature, [primary, s.ai.models.fallback], async (model) => {
+  const gkey = await geminiFor(env, s)
+  const models = [...(gkey ? [`gemini:${s.ai.models.gemini}`] : []), ...(env.AI && !o.files?.length ? [primary, s.ai.models.fallback] : [])]
+  const out = await guarded(env, feature, models, async (model) => {
+    if (model.startsWith('gemini:')) {
+      const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
+      const chat = messages.filter((m) => m.role !== 'system') as { role: 'user' | 'assistant'; content: string }[]
+      return geminiGenerate(gkey!, model.slice(7), { system, messages: chat, files: o.files, json: o.json, maxTokens: Math.max(o.maxTokens ?? 512, 1024), temperature: o.temperature })
+    }
     const r = await callModel(env, model, { messages, max_tokens: o.maxTokens ?? 512, temperature: o.temperature ?? 0.3 }, o.cacheTtl)
     const t = textOf(r).trim()
     if (!t) throw new Error('empty AI response')
@@ -187,8 +205,13 @@ export function repairJson(s: string): string {
 }
 
 export async function aiJson<T>(env: Env, feature: AiFeature, o: TextOptions): Promise<T | null> {
-  const t = await aiText(env, feature, { ...o, temperature: o.temperature ?? 0 })
+  const t = await aiText(env, feature, { ...o, temperature: o.temperature ?? 0, json: true })
   return extractJson<T>(t)
+}
+
+/** True when Gemini will handle text calls (so attached PDFs can be read directly). */
+export async function geminiActive(env: Env): Promise<boolean> {
+  return !!(await geminiFor(env, await getSettings(env)))
 }
 
 /** Embeddings (bge-m3: multilingual, so Malayalam and English land in the same space). */

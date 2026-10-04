@@ -10,7 +10,7 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { cancelBooking, processRefund } from '../lib/bookings'
 import { mediaUrl } from '../lib/integrations'
-import { nightlyRate, type SeasonRate } from '../lib/pricing'
+import { nightlyRate, type SeasonRate, SEASON_KINDS, seasonKindLabel } from '../lib/pricing'
 import type { PropertyRow, RoomRow } from '../lib/types'
 import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShort, nowIso, parseJson, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
@@ -226,7 +226,10 @@ adminRoutes.get('/admin/rates', requirePerm('manage_rates'), async (c) => {
       <div class="grid grid-2">
         <form method="post" action="/admin/rates/season" class="card stack">
           <h3>Add season or special rate</h3>
-          <Field label="Name"><input name="name" placeholder="Onam, Christmas, Summer…" required /></Field>
+          <div class="row wrap-row">
+            <Field label="Name"><input name="name" placeholder="Onam, Christmas, Summer…" required /></Field>
+            <Field label="Type"><Select name="kind" options={Object.entries(SEASON_KINDS)} /></Field>
+          </div>
           <div class="row">
             <Field label="From"><input type="date" name="start_date" required /></Field>
             <Field label="To (last night)"><input type="date" name="end_date" required /></Field>
@@ -257,10 +260,10 @@ adminRoutes.get('/admin/rates', requirePerm('manage_rates'), async (c) => {
       </div>
       <section class="card">
         <h3>Season and special rates</h3>
-        <Table head={['Name', 'Dates', 'Applies to', 'Rate', 'Min nights', '']}>
+        <Table head={['Name', 'Type', 'Dates', 'Applies to', 'Rate', 'Min nights', '']}>
           {seasons.map((s) => (
             <tr>
-              <td>{s.name}</td><td>{fmtDate(s.start_date)} – {fmtDate(s.end_date)}</td>
+              <td>{s.name}</td><td><span class={`pill pill-kind-${s.kind ?? 'season'}`}>{seasonKindLabel(s.kind)}</span></td><td>{fmtDate(s.start_date)} – {fmtDate(s.end_date)}</td>
               <td>{s.room_name ? `${s.property_name} · ${s.room_name}` : s.property_name ?? 'All properties'}</td>
               <td>{s.rate ? money(s.rate) : `${(s.pct_adjust ?? 0) > 0 ? '+' : ''}${s.pct_adjust}%`}</td><td>{s.min_nights ?? '—'}</td>
               <td><form method="post" action={`/admin/rates/season/${s.id}/delete`} class="inline"><button class="linklike small">Delete</button></form></td>
@@ -285,7 +288,7 @@ adminRoutes.post('/admin/rates/season', requirePerm('manage_rates'), async (c) =
     roomId = int(f.scope.slice(1))
     propertyId = (await first<{ property_id: number }>(c.env, 'SELECT property_id FROM rooms WHERE id = ?', roomId))?.property_id ?? null
   }
-  const id = await insertId(c.env, 'INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', propertyId, roomId, str(f.name, 60), f.start_date, f.end_date, rate, rate ? null : pct, int(f.min_nights) || null, c.get('user')!.id)
+  const id = await insertId(c.env, 'INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, created_by, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', propertyId, roomId, str(f.name, 60), f.start_date, f.end_date, rate, rate ? null : pct, int(f.min_nights) || null, c.get('user')!.id, f.kind in SEASON_KINDS ? f.kind : 'season')
   await logActivity(c.env, c.get('user')!.id, 'price.season_added', 'season_rate', id, { scope: f.scope, rate, pct, from: f.start_date, to: f.end_date })
   return redirectMsg(c, `/admin/rates?property=${f.property}&month=${f.start_date.slice(0, 7)}`, { ok: 'Rate added.' })
 })

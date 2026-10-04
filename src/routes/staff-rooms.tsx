@@ -10,7 +10,7 @@ import { all, first } from '../lib/db'
 import { mediaUrl } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
 import { ROOM_AMENITIES, stayTypeLabel } from '../lib/catalog'
-import { seasonRates, type SeasonRate } from '../lib/pricing'
+import { seasonKindLabel, seasonRates, type SeasonRate } from '../lib/pricing'
 import type { EnquiryRow, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, int, money, normalizePhone, parseJson, str, todayIST } from '../lib/util'
 import { canSeeEnquiry } from './staff'
@@ -77,7 +77,7 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
   const [rooms, photos, seasonRows] = await Promise.all([
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id),
     all<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND media_type = 'image' AND r2_key != '' ORDER BY sort, id", p.id),
-    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
+    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
   const seasons = seasonRates(rooms, seasonRows)
   const t = settings.images_transform
@@ -126,7 +126,7 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
                   {r.weekend_rate && r.weekend_rate !== r.base_rate && <li>Guest rate, Fri & Sat: <strong>{money(r.weekend_rate)}</strong></li>}
                   {r.extra_bed ? <li>Extra bed: {r.extra_bed_rate ? money(r.extra_bed_rate) : 'available'}</li> : null}
                   {r.min_nights > 1 && <li>Minimum {r.min_nights} nights</li>}
-                  {seasons.filter((s) => s.rates[r.id] && s.rates[r.id] !== r.base_rate).map((s) => <li>{s.name} ({fmtDate(s.start)} – {fmtDate(s.end)}): <strong>{money(s.rates[r.id])}</strong>{s.minNights ? `, min ${s.minNights} nights` : ''}</li>)}
+                  {seasons.filter((s) => s.rates[r.id] && s.rates[r.id] !== r.base_rate).map((s) => <li>{seasonKindLabel(s.kind)} · {s.name} ({fmtDate(s.start)} – {fmtDate(s.end)}): guest <strong>{money(s.rates[r.id])}</strong>{s.staffRates[r.id] ? <span class="internal"> · staff {money(s.staffRates[r.id])}</span> : null}{s.minNights ? `, min ${s.minNights} nights` : ''}</li>)}
                 </ul>
                 {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
               </div>

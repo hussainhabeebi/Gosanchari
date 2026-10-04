@@ -9,7 +9,7 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
-import { calculatePrice, discountPercent } from '../lib/pricing'
+import { calculatePrice, discountPercent, staffRateForStay } from '../lib/pricing'
 import { quoteFillFromEnquiry, quoteMessageDraft } from '../lib/assist'
 import { cancelBooking, confirmBooking, createBooking, PAYMENT_METHODS, priceStay, recordPayment, storeInvoice } from '../lib/bookings'
 import { fillTemplate, mediaUrl, sendEmail, sendWhatsApp } from '../lib/integrations'
@@ -160,6 +160,12 @@ async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: s
   return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount_pct, extraCharges: o.extra_charges })
 }
 
+/** Staff rate benchmark for an option's room and dates (season staff rates apply). */
+async function optionStaffRate(c: Context<AppEnv>, o: Pick<QuoteOptionRow, 'room_id' | 'check_in' | 'check_out'>) {
+  const pr = await loadPricing(c.env, o.room_id)
+  return pr ? staffRateForStay(pr.room, pr.seasons, o.check_in, o.check_out) : null
+}
+
 /** Per-night price the guest actually pays for the room (after discount, before extras and GST). */
 function effectiveNightly(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'check_in' | 'check_out' | 'rooms_count'>) {
   const n = Math.max(1, nightsBetween(o.check_in, o.check_out)) * Math.max(1, o.rooms_count)
@@ -231,6 +237,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
     all<{ id: number; name: string; destination: string }>(c.env, "SELECT id, name, destination FROM properties WHERE status = 'live' ORDER BY destination, name"),
     q.enquiry_id ? first<EnquiryRow>(c.env, 'SELECT * FROM enquiries WHERE id = ?', q.enquiry_id) : Promise.resolve(null),
   ])
+  for (const o of options) o.staff_rate = await optionStaffRate(c, o)
   const allRooms = options.length ? await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(options.length)})`, ...options.map((o) => o.property_id)) : []
   const editable = ['draft', 'pending_approval', 'changes_requested'].includes(q.status)
   const needsApproval = options.some((o) => !o.discount_approved_by && optionNeedsApproval(o, o.staff_rate, perms.max_discount_pct))
@@ -369,7 +376,8 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       const p = await priceOption(c, next)
       if (!p) continue
       // Approval is needed for a discount above the limit or a price below the staff rate; any price change asks again.
-      const staffRate = (await first<{ staff_rate: number | null }>(c.env, 'SELECT staff_rate FROM rooms WHERE id = ?', next.room_id))?.staff_rate ?? null
+      const pr = await loadPricing(c.env, next.room_id)
+      const staffRate = pr ? staffRateForStay(pr.room, pr.seasons, checkIn, checkOut) : null
       const needs = optionNeedsApproval({ ...next, subtotal: p.subtotal, discount: p.discount }, staffRate, perms.max_discount_pct)
       const changed = disc !== o.discount_pct || grate !== o.guest_rate || next.room_id !== o.room_id
       const approved = !needs ? null : !changed ? o.discount_approved_by : perms.approve_discounts ? u.id : null
@@ -470,7 +478,8 @@ opsRoutes.post('/staff/quotes/:id/send', requirePerm('manage_quotes'), async (c)
   if (!q) return c.notFound()
   const f = await saveQuote(c, q)
   q = (await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE id = ?', q.id))!
-  const opts = await all<QuoteOptionRow & { staff_rate: number | null }>(c.env, 'SELECT o.*, r.staff_rate FROM quotation_options o JOIN rooms r ON r.id = o.room_id WHERE o.quotation_id = ?', q.id)
+  const opts = await all<QuoteOptionRow & { staff_rate: number | null }>(c.env, 'SELECT o.* FROM quotation_options o WHERE o.quotation_id = ?', q.id)
+  for (const o of opts) o.staff_rate = await optionStaffRate(c, o)
   if (!opts.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Add at least one option.' })
   if (opts.some((o) => !o.discount_approved_by && optionNeedsApproval(o, o.staff_rate, perms.max_discount_pct))) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'This quote needs approval first (discount above your limit or price below the staff rate).' })
   const s = await getSettings(c.env)
