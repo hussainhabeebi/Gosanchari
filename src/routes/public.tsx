@@ -780,7 +780,7 @@ publicRoutes.get('/about', async (c) => {
   const [content, s] = await Promise.all([getContent(c.env), getSettings(c.env)])
   return page(c, { title: 'About us', description: `About ${s.business.name}` }, (
     <div class="wrap narrow section prose">
-      <img src="/brand/logo.webp" alt={s.business.name} width="220" height="220" style="border-radius:50%;margin:0 auto 16px;box-shadow:0 4px 18px rgba(0,0,0,.15)" />
+      <img src="/brand/logo-wide.webp" alt={s.business.name} width="302" height="80" style="display:block;margin:0 auto 16px;height:auto;max-width:100%" />
       <h1>About {s.business.name}</h1>
       {(content.about || 'We are a Kerala-based team that personally checks every stay we list.').split(/\n{2,}/).map((p) => <p>{p}</p>)}
       <p><a class="btn" href="/contact">Contact us</a></p>

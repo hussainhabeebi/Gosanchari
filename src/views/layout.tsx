@@ -73,7 +73,7 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, se
   <header class="topbar">
     <div class="wrap topbar-in">
       <a href="/" class="logo" aria-label={settings.business.name}>
-        <img src="/brand/logo-200.webp" alt={settings.business.name} width="72" height="72" class="logo-img" />
+        <img src="/brand/logo-wide.webp" alt={settings.business.name} width="181" height="48" class="logo-img" />
       </a>
       <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
       <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
@@ -106,7 +106,7 @@ const Footer: FC<{ settings: Settings }> = ({ settings }) => (
   <footer class="footer">
     <div class="wrap footer-grid">
       <div>
-        <img src="/brand/logo.webp" alt={settings.business.name} width="120" height="120" class="footer-logo" loading="lazy" />
+        <img src="/brand/logo-wide-light.webp" alt={settings.business.name} width="211" height="56" class="footer-logo" loading="lazy" />
         <p class="muted">{settings.business.tagline}</p>
       </div>
       <div>
