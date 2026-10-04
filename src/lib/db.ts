@@ -104,7 +104,7 @@ export async function monthOccupancy(env: Env, propertyId: number, from: string,
 }
 
 export async function loadPricing(env: Env, roomId: number): Promise<{ room: RoomRates & { name: string; capacity: number }; seasons: SeasonRate[] } | null> {
-  const room = await first<RoomRates & { name: string }>(env, 'SELECT id, property_id, name, base_rate, weekend_rate, min_nights, capacity, units, staff_rate FROM rooms WHERE id = ? AND active = 1', roomId)
+  const room = await first<RoomRates & { name: string }>(env, 'SELECT id, property_id, name, base_rate, weekend_rate, min_nights, capacity, units, staff_rate, base_guests, extra_adult_rate, extra_child_rate FROM rooms WHERE id = ? AND active = 1', roomId)
   if (!room) return null
   const seasons = await all<SeasonRate>(
     env,

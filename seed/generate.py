@@ -206,6 +206,9 @@ for name, kind, start, end, mult, mn in [('Onam', 'special', '-08-25', '-09-10',
 # Seasons: Christmas/New Year (+25% everywhere, 3-night minimum) and Onam style fixed example.
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, pct_adjust, min_nights) VALUES (NULL, NULL, 'Christmas & New Year', strftime('%Y', 'now') || '-12-20', strftime('%Y', 'now') || '-12-31', 25, 2);")
 out.append("UPDATE season_rates SET kind = 'special' WHERE name = 'Christmas & New Year';")
+# Occupancy examples: double-style room (rate for 2, max 3) and a group villa (rate for 6, max 8).
+out.append("UPDATE rooms SET base_guests = 2, extra_adult_rate = 1000, extra_child_rate = 600 WHERE name = 'Estate View Room';")
+out.append("UPDATE rooms SET base_guests = 6, extra_adult_rate = 1500 WHERE name = 'Entire villa (3 bedrooms)';")
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights) VALUES (5, NULL, 'Houseboat peak', strftime('%Y', 'now') || '-12-15', strftime('%Y', 'now') || '-12-31', 13500, NULL);")
 
 out.append(f"INSERT INTO coupons (code, title, description, discount_type, discount_value, max_discount, min_amount, valid_from, valid_to, property_ids, usage_limit) VALUES ('WELCOME10', 'Welcome offer', '10% off your first stay — mention the code in your enquiry', 'pct', 10, 2000, 3000, {d(-30)}, {d(120)}, NULL, 500);")

@@ -12,6 +12,38 @@ export interface RoomRates {
   capacity: number
   units: number
   staff_rate?: number | null
+  /** Guests included in the room rate; null = all `capacity` guests are included. */
+  base_guests?: number | null
+  /** Charge per extra adult / child per night above base_guests (child falls back to adult). */
+  extra_adult_rate?: number | null
+  extra_child_rate?: number | null
+}
+
+export interface Occupancy {
+  /** Guests included in the rate for all rooms together. */
+  included: number
+  max: number
+  extraAdults: number
+  extraChildren: number
+  /** Extra-guest charge per night (all rooms). */
+  perNight: number
+  /** Extra-guest charge for the whole stay. */
+  total: number
+}
+
+/** Guests covered by the rate, extra guests and their charge for `roomsCount` rooms of this category. */
+export function occupancy(room: RoomRates, roomsCount: number, adults: number, children: number, nights: number): Occupancy {
+  const rooms = Math.max(1, roomsCount)
+  const base = Math.max(1, Math.min(room.base_guests ?? room.capacity, room.capacity))
+  const included = base * rooms
+  const max = Math.max(base, room.capacity) * rooms
+  // Adults fill the included places first; children take what is left.
+  const extraAdults = Math.max(0, adults - included)
+  const extraChildren = Math.max(0, children - Math.max(0, included - adults))
+  const adultRate = room.extra_adult_rate ?? 0
+  const childRate = room.extra_child_rate ?? adultRate
+  const perNight = extraAdults * adultRate + extraChildren * childRate
+  return { included, max, extraAdults, extraChildren, perNight, total: perNight * Math.max(0, nights) }
 }
 
 export interface SeasonRate {
@@ -82,6 +114,9 @@ export interface PriceInput {
   taxSlabs?: TaxSlab[]
   coupon?: Coupon | null
   today?: string
+  /** Guests staying (for extra-guest charges and the max-guest check). Leave out to price the rooms only. */
+  adults?: number
+  children?: number
   /** Staff discount as a percent of the room subtotal (quotes only). */
   discountPct?: number
   /** Flat staff discount in rupees (quotes only). */
@@ -93,6 +128,10 @@ export interface PriceResult {
   nights: number
   roomsCount: number
   lines: NightLine[]
+  /** Extra guests above what the rate includes (when guests were given). */
+  extraGuests: Occupancy | null
+  /** Room rates only (before extra-guest charges). */
+  roomCharges: number
   subtotal: number
   discount: number
   discountLabel: string | null
@@ -174,7 +213,7 @@ export function calculatePrice(input: PriceInput): PriceResult {
   const errors: string[] = []
   const nights = nightsBetween(checkIn, checkOut)
   const empty: PriceResult = {
-    nights: Math.max(0, nights), roomsCount, lines: [], subtotal: 0, discount: 0, discountLabel: null,
+    nights: Math.max(0, nights), roomsCount, lines: [], extraGuests: null, roomCharges: 0, subtotal: 0, discount: 0, discountLabel: null,
     extraCharges: 0, taxable: 0, taxRate: 0, taxes: 0, total: 0, minNights: room.min_nights, errors,
   }
   if (!(nights > 0)) {
@@ -195,7 +234,15 @@ export function calculatePrice(input: PriceInput): PriceResult {
   }
   if (nights < minNights) errors.push(`Minimum stay for these dates is ${minNights} nights.`)
 
-  const subtotal = lines.reduce((a, l) => a + l.rate, 0) * roomsCount
+  const roomCharges = lines.reduce((a, l) => a + l.rate, 0) * roomsCount
+  let extraGuests: Occupancy | null = null
+  if (input.adults != null || input.children != null) {
+    extraGuests = occupancy(room, roomsCount, Math.max(0, input.adults ?? 0), Math.max(0, input.children ?? 0), nights)
+    const guests = (input.adults ?? 0) + (input.children ?? 0)
+    if (guests > extraGuests.max) errors.push(`${roomsCount} room${roomsCount > 1 ? 's' : ''} of this type sleep${roomsCount > 1 ? '' : 's'} at most ${extraGuests.max} guests. Please add a room.`)
+  }
+  // Extra-guest charges are part of the room tariff (GST applies to them too).
+  const subtotal = roomCharges + (extraGuests?.total ?? 0)
 
   let discount = 0
   let discountLabel: string | null = null
@@ -224,7 +271,7 @@ export function calculatePrice(input: PriceInput): PriceResult {
   const taxes = Math.round((taxable * taxRate) / 100)
 
   return {
-    nights, roomsCount, lines, subtotal, discount, discountLabel, extraCharges, taxable, taxRate, taxes,
+    nights, roomsCount, lines, extraGuests, roomCharges, subtotal, discount, discountLabel, extraCharges, taxable, taxRate, taxes,
     total: taxable + taxes, minNights, errors,
   }
 }

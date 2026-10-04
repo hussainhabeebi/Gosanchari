@@ -1,7 +1,7 @@
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
 import { Hono, type Context } from 'hono'
-import { contact as readContact, STAY_TYPES, stayTypeLabel } from '../lib/catalog'
+import { contact as readContact, guestsText, STAY_TYPES, stayTypeLabel } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, Field, Pager, Pill, Select, Table, Tabs } from '../views/components'
@@ -9,7 +9,7 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
-import { calculatePrice, discountPercent, staffRateForStay } from '../lib/pricing'
+import { calculatePrice, discountPercent, occupancy, staffRateForStay } from '../lib/pricing'
 import { quoteFillFromEnquiry, quoteMessageDraft } from '../lib/assist'
 import { cancelBooking, confirmBooking, createBooking, PAYMENT_METHODS, priceStay, recordPayment, storeInvoice } from '../lib/bookings'
 import { fillTemplate, mediaUrl, sendEmail, sendWhatsApp } from '../lib/integrations'
@@ -92,10 +92,10 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
                     {perms.view_net_rates && i.internal_notes ? <div>Remarks: {i.internal_notes}</div> : null}
                   </div>
                 )}
-                <Table head={['Room', 'Sleeps', 'Staff rate', 'Guest rate', ...(perms.view_net_rates ? ['B2B / Net'] : []), ...(avail ? ['Free'] : []), '']}>
+                <Table head={['Room', 'Guests', 'Staff rate', 'Guest rate', ...(perms.view_net_rates ? ['B2B / Net'] : []), ...(avail ? ['Free'] : []), '']}>
                   {prs.map((r) => (
                     <tr>
-                      <td><a href={`/staff/rooms/${p.id}${enquiryId ? `?enquiry=${enquiryId}` : ''}#room-${r.id}`}>{r.name}</a></td><td>{r.capacity}</td><td class="internal">{r.staff_rate ? money(r.staff_rate) : '—'}</td><td>{money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''}</td>
+                      <td><a href={`/staff/rooms/${p.id}${enquiryId ? `?enquiry=${enquiryId}` : ''}#room-${r.id}`}>{r.name}</a></td><td class="small">{guestsText(r)}</td><td class="internal">{r.staff_rate ? money(r.staff_rate) : '—'}</td><td>{money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''}</td>
                       {perms.view_net_rates && <td>{r.net_rate ? money(r.net_rate) : '—'}</td>}
                       {avail && <td>{avail.get(r.id)?.free ?? 0} / {r.units}</td>}
                       <td><a class="btn btn-sm" href={addHref(p.id, r.id)}>Add to quotation</a></td>
@@ -150,14 +150,14 @@ async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   return q
 }
 
-async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; extra_charges: number; guest_rate?: number | null }) {
+async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; extra_charges: number; guest_rate?: number | null; adults?: number; children?: number }) {
   const pr = await loadPricing(c.env, o.room_id)
   if (!pr) return null
   const s = await getSettings(c.env)
   // A guest rate set by staff replaces the website price (weekday, weekend and seasons) for every night.
   const room = o.guest_rate ? { ...pr.room, base_rate: o.guest_rate, weekend_rate: o.guest_rate } : pr.room
   const seasons = o.guest_rate ? [] : pr.seasons
-  return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount_pct, extraCharges: o.extra_charges })
+  return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount_pct, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0 })
 }
 
 /** Staff rate benchmark for an option's room and dates (season staff rates apply). */
@@ -184,7 +184,7 @@ async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number
   const ci = checkIn && isDate(checkIn) ? checkIn : addDays(todayIST(), 14)
   const co = checkOut && isDate(checkOut) && checkOut > ci ? checkOut : addDays(ci, 2)
   const roomsCount = Math.max(1, Math.ceil((adults + children) / room.capacity))
-  const p = await priceOption(c, { room_id: room.id, check_in: ci, check_out: co, rooms_count: roomsCount, discount_pct: 0, extra_charges: 0 })
+  const p = await priceOption(c, { room_id: room.id, check_in: ci, check_out: co, rooms_count: roomsCount, discount_pct: 0, extra_charges: 0, adults, children })
   const meals = parseJson<string[]>((await first<{ meal_plans: string }>(c.env, 'SELECT meal_plans FROM properties WHERE id = ?', propertyId))?.meal_plans, [])
   await run(
     c.env,
@@ -274,7 +274,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
               <div class="row-between"><h3>Option {i + 1}: {o.property_name}</h3>{editable && <button class="linklike small" formaction={`/staff/quotes/${q.id}/options/${o.id}/delete`} formnovalidate>Remove</button>}</div>
               <input type="hidden" name="opt_id" value={o.id} />
               <div class="row wrap-row">
-                <Field label="Room"><Select name={`room_${o.id}`} value={o.room_id} options={rooms.map((r) => [r.id, `${r.name} (sleeps ${r.capacity})`])} /></Field>
+                <Field label="Room"><Select name={`room_${o.id}`} value={o.room_id} options={rooms.map((r) => [r.id, `${r.name} (${guestsText(r)})`])} /></Field>
                 <Field label="Check-in"><input type="date" name={`in_${o.id}`} value={o.check_in} required /></Field>
                 <Field label="Check-out"><input type="date" name={`out_${o.id}`} value={o.check_out} required /></Field>
                 <Field label="Rooms"><input type="number" name={`rooms_${o.id}`} value={o.rooms_count} min="1" /></Field>
@@ -294,7 +294,18 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 {o.staff_rate && effectiveNightly(o) < o.staff_rate && <span class="pill pill-red">Below staff rate{o.discount_approved_by ? ' — approved' : ' — needs approval'}</span>}
               </div>
               <table class="breakdown narrow-table">
-                <tr><td>Room charges ({nightsBetween(o.check_in, o.check_out)} nights × {o.rooms_count})</td><td>{money(o.subtotal)}</td></tr>
+                {(() => {
+                  const room = rooms.find((r) => r.id === o.room_id)
+                  const n = nightsBetween(o.check_in, o.check_out)
+                  const occ = room ? occupancy(room, o.rooms_count, o.adults, o.children, n) : null
+                  return (
+                    <>
+                      <tr><td>Room charges ({n} nights × {o.rooms_count} room{o.rooms_count > 1 ? 's' : ''}{occ && occ.included < occ.max ? `, rate covers ${occ.included} guests` : ''})</td><td>{money(o.subtotal - (occ?.total ?? 0))}</td></tr>
+                      {occ && occ.total > 0 && <tr><td>Extra guests ({[occ.extraAdults && `${occ.extraAdults} adult${occ.extraAdults > 1 ? 's' : ''}`, occ.extraChildren && `${occ.extraChildren} child${occ.extraChildren > 1 ? 'ren' : ''}`].filter(Boolean).join(' + ')} × {n} nights)</td><td>{money(occ.total)}</td></tr>}
+                      {occ && o.adults + o.children > occ.max && <tr class="row-red"><td colSpan={2}>⚠ {o.adults + o.children} guests is more than {o.rooms_count} room{o.rooms_count > 1 ? 's' : ''} can take (max {occ.max}). Add a room.</td></tr>}
+                    </>
+                  )
+                })()}
                 {o.discount > 0 && <tr><td>Discount ({discountPercent(o.subtotal, o.discount)}%){o.discount_approved_by ? ' ✓ approved' : ''}</td><td>− {money(o.discount)}</td></tr>}
                 {o.extra_charges > 0 && <tr><td>{o.extra_label || 'Extras'}</td><td>{money(o.extra_charges)}</td></tr>}
                 <tr><td>GST</td><td>{money(o.taxes)}</td></tr>
@@ -372,6 +383,7 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       const next = {
         room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
         discount_pct: disc, extra_charges: Math.max(0, int(f[`extra_${oid}`])), guest_rate: grate,
+        adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
       }
       const p = await priceOption(c, next)
       if (!p) continue
@@ -917,7 +929,7 @@ export async function applyDateChange(c: Context<AppEnv>, b: BookingRow, roomId:
   // Availability excluding this booking itself.
   const avail = await roomAvailability(c.env, [b.property_id], checkIn, checkOut, undefined, b.id)
   if ((avail.get(roomId)?.free ?? 0) < b.rooms_count) return redirectMsg(c, `/staff/bookings/${b.id}`, { err: 'Not available for those dates.' })
-  const p = await priceStay(c.env, roomId, checkIn, checkOut, b.rooms_count, null)
+  const p = await priceStay(c.env, roomId, checkIn, checkOut, b.rooms_count, null, { adults: b.adults, children: b.children })
   if (p.errors.length) return redirectMsg(c, `/staff/bookings/${b.id}`, { err: p.errors[0] })
   // Keep the original discount share; price itself comes from the rules.
   const discount = Math.min(p.subtotal, b.discount)

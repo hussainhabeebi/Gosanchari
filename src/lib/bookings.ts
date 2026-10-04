@@ -37,19 +37,19 @@ export async function findCoupon(env: Env, code: string | null | undefined): Pro
   return first<Coupon>(env, 'SELECT * FROM coupons WHERE code = ? COLLATE NOCASE', code.trim().toUpperCase())
 }
 
-export async function priceStay(env: Env, roomId: number, checkIn: string, checkOut: string, roomsCount: number, couponCode?: string | null): Promise<PriceResult> {
+export async function priceStay(env: Env, roomId: number, checkIn: string, checkOut: string, roomsCount: number, couponCode?: string | null, guests?: { adults: number; children: number }): Promise<PriceResult> {
   const pr = await loadPricing(env, roomId)
-  if (!pr) return { nights: 0, roomsCount, lines: [], subtotal: 0, discount: 0, discountLabel: null, extraCharges: 0, taxable: 0, taxRate: 0, taxes: 0, total: 0, minNights: 1, errors: ['Room not found'] }
+  if (!pr) return { nights: 0, roomsCount, lines: [], extraGuests: null, roomCharges: 0, subtotal: 0, discount: 0, discountLabel: null, extraCharges: 0, taxable: 0, taxRate: 0, taxes: 0, total: 0, minNights: 1, errors: ['Room not found'] }
   const s = await getSettings(env)
   const coupon = await findCoupon(env, couponCode)
-  if (couponCode && !coupon) return { ...calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn, checkOut, roomsCount, taxSlabs: s.tax_slabs }), errors: ['Coupon code not found.'] }
-  return calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn, checkOut, roomsCount, taxSlabs: s.tax_slabs, coupon, today: todayIST() })
+  if (couponCode && !coupon) return { ...calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn, checkOut, roomsCount, taxSlabs: s.tax_slabs, ...guests }), errors: ['Coupon code not found.'] }
+  return calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn, checkOut, roomsCount, taxSlabs: s.tax_slabs, coupon, today: todayIST(), ...guests })
 }
 
 export async function createBooking(env: Env, b: NewBooking): Promise<{ id: number; code: string } | { error: string }> {
   const pr = await loadPricing(env, b.roomId)
   if (!pr) return { error: 'Room not found.' }
-  if (b.adults + b.children > pr.room.capacity * b.roomsCount) return { error: `This room sleeps ${pr.room.capacity}; please add rooms for your group.` }
+  if (b.adults + b.children > pr.room.capacity * b.roomsCount) return { error: `This room sleeps at most ${pr.room.capacity}; please add rooms for your group.` }
   if (b.checkIn < todayIST()) return { error: 'Check-in date is in the past.' }
 
   const avail = await roomAvailability(env, [pr.room.property_id], b.checkIn, b.checkOut, b.quotationId ?? undefined)
@@ -59,7 +59,7 @@ export async function createBooking(env: Env, b: NewBooking): Promise<{ id: numb
   if (b.fixedPrice) {
     price = { ...b.fixedPrice, nights: Math.round((Date.parse(b.checkOut) - Date.parse(b.checkIn)) / 86400000) }
   } else {
-    const p = await priceStay(env, b.roomId, b.checkIn, b.checkOut, b.roomsCount, b.couponCode)
+    const p = await priceStay(env, b.roomId, b.checkIn, b.checkOut, b.roomsCount, b.couponCode, { adults: b.adults, children: b.children })
     if (p.errors.length) return { error: p.errors[0] }
     price = p
   }

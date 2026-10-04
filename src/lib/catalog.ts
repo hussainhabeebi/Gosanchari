@@ -1,7 +1,7 @@
 // Lists of options for property details (types, photo sections, amenities, dining, policies) and helpers
 // to read the JSON detail columns safely.
 
-import { parseJson } from './util'
+import { money, parseJson } from './util'
 
 /** Stay types shown to guests. Stored in properties.stay_type. */
 export const STAY_TYPES: Record<string, string> = {
@@ -204,3 +204,12 @@ export function videoEmbedUrl(url: string | null | undefined): string | null {
 /** SQL for a property's cover image (images only; facade first). Use inside a query aliasing properties as `p`. */
 export const COVER_PHOTO_SQL = `(SELECT ph.r2_key FROM property_photos ph WHERE ph.property_id = p.id AND ph.media_type = 'image' AND ph.r2_key != ''
   ORDER BY CASE ph.category WHEN 'facade' THEN 0 WHEN 'common' THEN 1 WHEN 'pool' THEN 2 WHEN 'view' THEN 3 WHEN 'room' THEN 4 ELSE 5 END, ph.sort, ph.id LIMIT 1)`
+
+/** Who a room's rate covers: "sleeps 3" or "2 guests incl., max 4 (+₹1,000/adult, ₹500/child per night)". */
+export function guestsText(r: { capacity: number; base_guests?: number | null; extra_adult_rate?: number | null; extra_child_rate?: number | null }) {
+  const base = Math.min(r.base_guests ?? r.capacity, r.capacity)
+  if (base >= r.capacity) return `sleeps ${r.capacity}`
+  const child = r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''
+  const extra = r.extra_adult_rate ? ` (+${money(r.extra_adult_rate)}/adult${child} per night)` : ''
+  return `${base} guests incl., max ${r.capacity}${extra}`
+}

@@ -13,7 +13,7 @@ import { mediaUrl } from '../lib/integrations'
 import { FACILITIES, MEAL_PLANS } from '../lib/search'
 import {
   CONTACT_FIELDS, contact as readContact, CUISINES, dining as readDining, latLngFromMapUrl, legacyType, MENU_TYPES, PHOTO_CATEGORIES,
-  POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, ROOM_CATEGORY_NAMES, ROOM_VIEWS, STAY_TYPES, stayType, THEMES, videoEmbedUrl, type Contact, type Dining, type Policies,
+  POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, ROOM_CATEGORY_NAMES, guestsText, ROOM_VIEWS, STAY_TYPES, stayType, THEMES, videoEmbedUrl, type Contact, type Dining, type Policies,
 } from '../lib/catalog'
 import type { NearbyPlace, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, fmtDateTime, int, isDate, money, nowIso, parseJson, slugify, str } from '../lib/util'
@@ -68,9 +68,17 @@ const RoomFields = ({ r, pf = '', optional, showNet }: { r?: Partial<RoomRow>; p
       <div class="row wrap-row">
         <Field label="Room category name" class="grow"><input name={`${pf}name`} value={r?.name ?? ''} required={req} maxlength={80} list="room-cat-names" placeholder="Standard / Deluxe / Suite…" /></Field>
         <Field label="Inventory (rooms of this type)"><input type="number" name={`${pf}units`} value={r?.units ?? 1} min="0" max="500" class="w-sm" /></Field>
-        <Field label="Max guests"><input type="number" name={`${pf}capacity`} value={r?.capacity ?? 2} min="1" max="40" class="w-sm" /></Field>
-        <Field label="Max adults"><input type="number" name={`${pf}max_adults`} value={r?.max_adults ?? ''} min="1" max="40" class="w-sm" /></Field>
-        <Field label="Max children"><input type="number" name={`${pf}max_children`} value={r?.max_children ?? ''} min="0" max="20" class="w-sm" /></Field>
+      </div>
+      <div class="occupancy stack-sm">
+        <strong class="small">Guests per room</strong>
+        <div class="row wrap-row">
+          <Field label="Guests included in rate" hint="e.g. 2 for a double, 8 for a big cottage"><input type="number" name={`${pf}base_guests`} value={r?.base_guests ?? r?.capacity ?? 2} min="1" max="60" class="w-sm" /></Field>
+          <Field label="Max guests" hint="Including extra guests"><input type="number" name={`${pf}capacity`} value={r?.capacity ?? 2} min="1" max="60" class="w-sm" /></Field>
+          <Field label="Extra adult ₹/night" hint="Each guest above the included number"><input type="number" name={`${pf}extra_adult_rate`} value={r?.extra_adult_rate ?? r?.extra_bed_rate ?? ''} min="0" class="w-md" /></Field>
+          <Field label="Extra child ₹/night" hint="Blank = same as adult"><input type="number" name={`${pf}extra_child_rate`} value={r?.extra_child_rate ?? ''} min="0" class="w-md" /></Field>
+          <Field label="Max adults" hint="Optional"><input type="number" name={`${pf}max_adults`} value={r?.max_adults ?? ''} min="1" max="60" class="w-sm" /></Field>
+          <Field label="Max children" hint="Optional"><input type="number" name={`${pf}max_children`} value={r?.max_children ?? ''} min="0" max="30" class="w-sm" /></Field>
+        </div>
       </div>
       <div class="row wrap-row">
         <Field label="Bed type"><input name={`${pf}bed_type`} value={r?.bed_type ?? ''} placeholder="King / 2 singles" class="w-md" /></Field>
@@ -88,8 +96,6 @@ const RoomFields = ({ r, pf = '', optional, showNet }: { r?: Partial<RoomRow>; p
         </div>
       </div>
       <div class="row wrap-row">
-        <label class="check"><input type="checkbox" name={`${pf}extra_bed`} value="1" checked={!!r?.extra_bed} /> Extra bed available</label>
-        <Field label="Extra bed ₹/night"><input type="number" name={`${pf}extra_bed_rate`} value={r?.extra_bed_rate ?? ''} min="0" class="w-md" /></Field>
         <Field label="Includes" class="grow"><input name={`${pf}inclusions`} value={r?.inclusions ?? ''} placeholder="Breakfast, welcome drink" /></Field>
       </div>
       <Field label="Room description"><textarea name={`${pf}description`} rows={2} maxlength={1500}>{r?.description ?? ''}</textarea></Field>
@@ -329,7 +335,7 @@ function propertyForm(
             <h2>{num('rooms')}. Room categories & inventory</h2>
             {rooms.map((r) => (
               <details class="room-edit" open={rooms.length <= 2}>
-                <summary><strong>{r.name}</strong> · {r.units} room{r.units === 1 ? '' : 's'} · sleeps {r.capacity} · {money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''} {!r.active && <span class="pill pill-hidden">inactive</span>}</summary>
+                <summary><strong>{r.name}</strong> · {r.units} room{r.units === 1 ? '' : 's'} · {guestsText(r)} · {money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''} {!r.active && <span class="pill pill-hidden">inactive</span>}</summary>
                 <form method="post" action={`/admin/rooms/${r.id}`} class="stack">
                   <RoomFields r={r} showNet={showNet} />
                   <div class="row wrap-row">
@@ -605,14 +611,18 @@ propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_propertie
 function roomValues(f: Form, withNet: boolean) {
   const optInt = (v: string | undefined) => (v && Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : null)
   return {
-    name: str(f.name, 80), capacity: Math.max(1, int(f.capacity, 2)), bed_type: str(f.bed_type, 60) || null, units: Math.max(0, int(f.units, 1)),
+    name: str(f.name, 80), capacity: Math.max(1, int(f.capacity, 2), int(f.base_guests)),
+    // Guests included in the rate can't be more than the maximum.
+    base_guests: Math.max(1, Math.min(int(f.base_guests) || int(f.capacity, 2), Math.max(1, int(f.capacity, 2), int(f.base_guests)))),
+    extra_adult_rate: optInt(f.extra_adult_rate) || null, extra_child_rate: f.extra_child_rate === '' || f.extra_child_rate == null ? null : optInt(f.extra_child_rate), bed_type: str(f.bed_type, 60) || null, units: Math.max(0, int(f.units, 1)),
     base_rate: Math.max(0, int(f.base_rate)), weekend_rate: optInt(f.weekend_rate) || null, staff_rate: optInt(f.staff_rate) || null,
     // Only management may set the net rate; others leave it unchanged.
     ...(withNet ? { net_rate: optInt(f.net_rate) || null } : {}),
     min_nights: Math.max(1, int(f.min_nights, 1)), inclusions: str(f.inclusions, 200), description: str(f.description, 1500),
     facilities: JSON.stringify((f.__all.amenities ?? []).filter((x) => x in ROOM_AMENITIES)),
     size_sqft: optInt(f.size_sqft), room_view: str(f.room_view, 40) || null, max_adults: optInt(f.max_adults), max_children: optInt(f.max_children),
-    extra_bed: f.extra_bed ? 1 : 0, extra_bed_rate: optInt(f.extra_bed_rate),
+    // Kept in step for older screens: an extra-person charge means an extra bed / mattress is possible.
+    extra_bed: optInt(f.extra_adult_rate) ? 1 : 0, extra_bed_rate: optInt(f.extra_adult_rate),
   }
 }
 

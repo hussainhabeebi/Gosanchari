@@ -120,7 +120,7 @@ async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters)
       const free = avail.get(r.id)?.free ?? 0
       const need = roomsNeeded(guests, r.capacity)
       if (free < need) continue
-      const p = calculatePrice({ room: r, seasons, checkIn: f.checkIn!, checkOut: f.checkOut!, roomsCount: need })
+      const p = calculatePrice({ room: r, seasons, checkIn: f.checkIn!, checkOut: f.checkOut!, roomsCount: need, adults: guests })
       if (p.errors.length) continue
       const perNight = Math.round(p.subtotal / nights)
       if (!best || perNight < best.perNight) best = { perNight, total: p.total }
@@ -363,7 +363,7 @@ export async function bestRoomFor(env: Env, propertyId: number, guests: number, 
     const need = roomsNeeded(guests, r.capacity)
     if ((avail.get(r.id)?.free ?? 0) >= need) {
       const pr = await loadPricing(env, r.id)
-      const price = pr ? calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn, checkOut, roomsCount: need }) : null
+      const price = pr ? calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn, checkOut, roomsCount: need, adults: guests }) : null
       return { room: r, roomsCount: need, price }
     }
   }

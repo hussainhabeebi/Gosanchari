@@ -137,9 +137,10 @@
           enq.href = u.pathname + u.search
         }
         if (!fd.get('check_in') || !fd.get('check_out')) return
-        post(bf.dataset.priceUrl, { room: fd.get('room'), checkIn: fd.get('check_in'), checkOut: fd.get('check_out'), rooms: fd.get('rooms') }).then(function (p) {
+        post(bf.dataset.priceUrl, { room: fd.get('room'), checkIn: fd.get('check_in'), checkOut: fd.get('check_out'), rooms: fd.get('rooms'), adults: fd.get('adults'), children: fd.get('children') }).then(function (p) {
           if (p.errors && p.errors.length) { box2.innerHTML = '<span class="error small">' + esc(p.errors[0]) + '</span>'; return }
-          box2.innerHTML = '<div class="muted small">Estimated price (confirmed in your quote)</div><table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + money(p.subtotal) + '</td></tr>' +
+          box2.innerHTML = '<div class="muted small">Estimated price (confirmed in your quote)</div><table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + money(p.roomCharges != null ? p.roomCharges : p.subtotal) + '</td></tr>' +
+            (p.extraGuests && p.extraGuests.total ? '<tr><td>Extra guests (' + [p.extraGuests.extraAdults ? p.extraGuests.extraAdults + ' adult' + (p.extraGuests.extraAdults > 1 ? 's' : '') : '', p.extraGuests.extraChildren ? p.extraGuests.extraChildren + ' child' + (p.extraGuests.extraChildren > 1 ? 'ren' : '') : ''].filter(Boolean).join(' + ') + ')</td><td>' + money(p.extraGuests.total) + '</td></tr>' : '') +
             (p.discount ? '<tr><td>Discount</td><td>− ' + money(p.discount) + '</td></tr>' : '') +
             '<tr><td>GST (' + p.taxRate + '%)</td><td>' + money(p.taxes) + '</td></tr><tr class="total"><td>Total</td><td>' + money(p.total) + '</td></tr></table>'
         }).catch(function () { box2.textContent = '' })
@@ -330,7 +331,8 @@
       return '<div class="card as-card' + (o.fits ? '' : ' as-nofit') + (best ? ' as-best' : '') + '">' + (best ? '<span class="pill pill-best">Best match</span>' : '') +
         '<div class="row-between"><strong><a href="/staff/rooms/' + o.id + '">' + esc(o.name) + '</a></strong><span class="muted small">' + esc(o.type) + ' · ' + esc(o.destination) + (o.rating ? ' · ★ ' + o.rating.toFixed(1) : '') + '</span></div>' +
         (o.fits ? '<ul class="small as-lines">' + o.lines.map(function (l) {
-          return '<li>' + l.count + ' × ' + esc(l.room) + ' <span class="muted">(sleeps ' + l.capacity + ')</span> — guest ' + money(l.guestPerNight) + '/night' +
+          return '<li>' + l.count + ' × ' + esc(l.room) + ' <span class="muted">(' + l.guests + ' guests' + (l.includedGuests < l.capacity ? '; rate covers ' + l.includedGuests + ', max ' + l.capacity + ' each' : '') + ')</span> — guest ' + money(l.guestPerNight) + '/night' +
+            (l.extraGuests ? ' + <strong>' + l.extraGuests + ' extra guest' + (l.extraGuests > 1 ? 's' : '') + ' ' + money(l.extraCharge) + '</strong>' : '') +
             (l.staffPerNight ? ' · <span class="internal">staff ' + money(l.staffPerNight) + '</span>' : '') +
             (l.netPerNight ? ' · <span class="internal">net ' + money(l.netPerNight) + '</span>' : '') +
             (l.seasons.length ? ' <span class="pill pill-kind-special">' + esc(l.seasons.join(', ')) + '</span>' : '') + '</li>'

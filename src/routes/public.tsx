@@ -430,7 +430,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                       <h3>{r.name}</h3>
                       {rp.length > 0 && <div class="room-photos" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 300, settings.images_transform)} alt={m.caption ?? r.name} loading="lazy" /></a>)}</div>}
                       <div class="room-meta">
-                        <span>👥 Up to {r.capacity} guests{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
+                        <span>👥 {(r.base_guests ?? r.capacity) < r.capacity ? `Rate for ${r.base_guests} guests · up to ${r.capacity}` : `Up to ${r.capacity} guests`}{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
                         {r.bed_type && <span>🛏 {r.bed_type}</span>}
                         {r.size_sqft && <span>📐 {r.size_sqft} sq ft</span>}
                         {r.room_view && <span>🪟 {r.room_view} view</span>}
@@ -438,7 +438,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                       </div>
                       {r.description && <p class="small mt-sm">{r.description}</p>}
                       {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
-                      {r.extra_bed ? <div class="small">Extra bed available{r.extra_bed_rate ? ` · ${money(r.extra_bed_rate)}/night` : ''}</div> : null}
+                      {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
                       <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>
                     </div>
                     <div class="room-price">
@@ -617,7 +617,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
               <Field label="WhatsApp number"><input name="phone" required inputmode="tel" maxlength={20} value={user?.phone ?? ''} autocomplete="tel" /></Field>
             </div>
             <Field label="Room (optional)">
-              <Select name="room" id="room-select" value={rooms[0]?.id} options={[['', 'Any room'], ...rooms.map((r) => [r.id, `${r.name} (sleeps ${r.capacity})`] as [number, string])]} />
+              <Select name="room" id="room-select" value={rooms[0]?.id} options={[['', 'Any room'], ...rooms.map((r) => [r.id, `${r.name} (${(r.base_guests ?? r.capacity) < r.capacity ? `${r.base_guests} incl., max ${r.capacity}` : `sleeps ${r.capacity}`})`] as [number, string])]} />
             </Field>
             <div class="row">
               <Field label="Check-in"><input type="date" name="check_in" value={checkIn} min={todayIST()} /></Field>
@@ -662,7 +662,7 @@ publicRoutes.post('/stay/:slug/price', async (c) => {
     const r = await first<{ id: number }>(c.env, "SELECT r.id FROM rooms r JOIN properties p ON p.id = r.property_id WHERE p.slug = ? AND r.active = 1 ORDER BY r.base_rate LIMIT 1", c.req.param('slug'))
     roomId = r?.id ?? 0
   }
-  const p = await priceStay(c.env, roomId, f.checkIn, f.checkOut, Math.max(1, int(f.rooms, 1)), null)
+  const p = await priceStay(c.env, roomId, f.checkIn, f.checkOut, Math.max(1, int(f.rooms, 1)), null, { adults: Math.max(1, int(f.adults, 2)), children: Math.max(0, int(f.children)) })
   return c.json(p)
 })
 
@@ -1076,14 +1076,14 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         : <p class="muted">Photos of this room are coming soon.</p>}
       <div class="card stack">
         <div class="room-meta">
-          <span>👥 Up to {r.capacity} guests{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
+          <span>👥 {(r.base_guests ?? r.capacity) < r.capacity ? `Rate for ${r.base_guests} guests · up to ${r.capacity}` : `Up to ${r.capacity} guests`}{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
           {r.bed_type && <span>🛏 {r.bed_type}</span>}
           {r.size_sqft && <span>📐 {r.size_sqft} sq ft</span>}
           {r.room_view && <span>🪟 {r.room_view} view</span>}
         </div>
         {r.description && <p>{r.description}</p>}
         {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
-        {r.extra_bed ? <div class="small">Extra bed available{r.extra_bed_rate ? ` · ${money(r.extra_bed_rate)}/night` : ''}</div> : null}
+        {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
         {am.length > 0 && <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>}
         <div class="row wrap-row">
           <a class="btn" href={`/stay/${p.slug}?room=${r.id}`}>Enquire about this room</a>

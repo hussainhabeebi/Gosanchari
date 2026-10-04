@@ -8,6 +8,7 @@ export interface SheetRoom {
   net_rate: number | null
   net_weekend_rate: number | null
   capacity: number | null
+  base_guests: number | null
   extra_bed_rate: number | null
   notes: string
 }
@@ -37,7 +38,7 @@ Extract the rates as JSON:
 {
   "meal_plan": "plan the rates include, e.g. EP, CP (breakfast), MAP, AP",
   "valid_from": "YYYY-MM-DD or null", "valid_to": "YYYY-MM-DD or null",
-  "rooms": [{"name": "room category", "net_rate": regular per room per night, "net_weekend_rate": number or null, "capacity": max guests or null, "extra_bed_rate": number or null, "notes": "short"}],
+  "rooms": [{"name": "room category", "net_rate": regular per room per night, "net_weekend_rate": number or null, "base_guests": guests the rate includes (e.g. 2, or 8 for a group cottage) or null, "capacity": max guests or null, "extra_bed_rate": charge per extra person / extra bed per night or null, "notes": "short"}],
   "seasons": [{"name": "e.g. Peak season, Christmas & New Year, Off season", "kind": "season" | "off_season" | "special", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD (last night)", "min_nights": number or null, "rates": {"<room name exactly as in rooms>": net rate}}],
   "notes": "other terms: child policy, supplements, blackout dates, taxes included or not"
 }
@@ -67,7 +68,7 @@ export function normalizeRateSheet(raw: unknown): RateSheet {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const rooms: SheetRoom[] = (Array.isArray(r.rooms) ? r.rooms : [])
     .map((x) => (x && typeof x === 'object' ? x : {}) as Record<string, unknown>)
-    .map((x) => ({ name: text(x.name, 80), net_rate: num(x.net_rate), net_weekend_rate: num(x.net_weekend_rate), capacity: num(x.capacity), extra_bed_rate: num(x.extra_bed_rate), notes: text(x.notes) }))
+    .map((x) => ({ name: text(x.name, 80), net_rate: num(x.net_rate), net_weekend_rate: num(x.net_weekend_rate), capacity: num(x.capacity), base_guests: num(x.base_guests), extra_bed_rate: num(x.extra_bed_rate), notes: text(x.notes) }))
     .filter((x) => x.name)
     .slice(0, 30)
   const seasons: SheetSeason[] = []
@@ -84,7 +85,7 @@ export function normalizeRateSheet(raw: unknown): RateSheet {
   }
   // Rooms that only appear inside seasons still need a row.
   for (const s of seasons) for (const name of Object.keys(s.rates)) {
-    if (!rooms.some((x) => key(x.name) === key(name))) rooms.push({ name, net_rate: null, net_weekend_rate: null, capacity: null, extra_bed_rate: null, notes: '' })
+    if (!rooms.some((x) => key(x.name) === key(name))) rooms.push({ name, net_rate: null, net_weekend_rate: null, capacity: null, base_guests: null, extra_bed_rate: null, notes: '' })
   }
   return {
     meal_plan: text(r.meal_plan, 40), valid_from: isDate(r.valid_from) ? r.valid_from : null, valid_to: isDate(r.valid_to) ? r.valid_to : null,

@@ -30,8 +30,15 @@ export interface AllocLine {
   roomId: number
   room: string
   capacity: number
+  /** Guests the rate covers per room, guests placed in these rooms, and extra guests above the rate. */
+  includedGuests: number
+  guests: number
+  extraGuests: number
+  /** Extra-person charge for the whole stay (all rooms of this line) and the per-night rate used. */
+  extraCharge: number
+  extraAdultRate: number | null
   count: number
-  /** Guest price for this many rooms for the whole stay, before GST. */
+  /** Guest price for this many rooms for the whole stay incl. extra-person charges, before GST. */
   guestSubtotal: number
   guestPerNight: number
   staffPerNight: number | null
@@ -179,33 +186,43 @@ export async function readNeed(env: Env, question: string, prev: Need | null): P
   return out
 }
 
-interface PricedRoom { roomId: number; room: string; capacity: number; free: number; guestStay: number; staffNight: number | null; netNight: number | null; seasons: string[]; minNights: number }
+interface PricedRoom { roomId: number; room: string; capacity: number; base: number; extraStay: number; extraAdultRate: number | null; free: number; guestStay: number; staffNight: number | null; netNight: number | null; seasons: string[]; minNights: number }
 
 /**
- * Cheapest mix of room categories that sleeps the whole group, using only free rooms (0/1 knapsack over room units,
- * covering at least `guests` beds). Returns null when even all free rooms are not enough.
+ * Cheapest way to sleep the whole group in free rooms. Each room unit can take 1…capacity guests: its rate covers
+ * `base` guests and every guest above that costs `extraStay` (extra-person charge for the whole stay).
+ * Returns rooms used per category with guests placed and extra charges, or null when free rooms are not enough.
  */
-export function allocateRooms<T extends { capacity: number; free: number; guestStay: number }>(rooms: T[], guests: number): { room: T; count: number }[] | null {
+export function allocateRooms<T extends { capacity: number; free: number; guestStay: number; base?: number; extraStay?: number }>(rooms: T[], guests: number): { room: T; count: number; guests: number; extra: number }[] | null {
   const units: T[] = []
   for (const r of rooms) for (let i = 0; i < Math.min(r.free, 60); i++) units.push(r)
   if (!units.length || guests < 1) return null
   const G = guests
-  // best[c] = cheapest cost to sleep at least c guests (c capped at G), with the chosen unit list.
-  let best: { cost: number; pick: number[] }[] = Array.from({ length: G + 1 }, (_, c) => (c === 0 ? { cost: 0, pick: [] } : { cost: Infinity, pick: [] }))
+  type Cell = { cost: number; pick: [number, number][] } // [unit index, guests in it]
+  let best: Cell[] = Array.from({ length: G + 1 }, (_, c) => (c === 0 ? { cost: 0, pick: [] } : { cost: Infinity, pick: [] }))
   units.forEach((u, idx) => {
-    const next = best.map((b) => ({ ...b }))
-    for (let c = 0; c <= G; c++) {
+    const next = best.map((x) => ({ ...x }))
+    const base = Math.min(u.base ?? u.capacity, u.capacity)
+    for (let c = 0; c < G; c++) {
       if (!Number.isFinite(best[c].cost)) continue
-      const to = Math.min(G, c + u.capacity)
-      const cost = best[c].cost + u.guestStay
-      if (cost < next[to].cost) next[to] = { cost, pick: [...best[c].pick, idx] }
+      for (let k = 1; k <= u.capacity && c + k <= G; k++) {
+        const cost = best[c].cost + u.guestStay + Math.max(0, k - base) * (u.extraStay ?? 0)
+        if (cost < next[c + k].cost) next[c + k] = { cost, pick: [...best[c].pick, [idx, k]] }
+      }
     }
     best = next
   })
   if (!Number.isFinite(best[G].cost)) return null
-  const counts = new Map<T, number>()
-  for (const i of best[G].pick) counts.set(units[i], (counts.get(units[i]) ?? 0) + 1)
-  return [...counts.entries()].map(([room, count]) => ({ room, count }))
+  const out = new Map<T, { room: T; count: number; guests: number; extra: number }>()
+  for (const [i, k] of best[G].pick) {
+    const u = units[i]
+    const o = out.get(u) ?? { room: u, count: 0, guests: 0, extra: 0 }
+    o.count++
+    o.guests += k
+    o.extra += Math.max(0, k - Math.min(u.base ?? u.capacity, u.capacity)) * (u.extraStay ?? 0)
+    out.set(u, o)
+  }
+  return [...out.values()]
 }
 
 /** Search + availability + exact prices for the need. */
@@ -254,12 +271,13 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
         return hit ? `${l} (${seasonKindLabel(hit.kind)})` : l
       })
       const netNight = showNet ? avgNet(r, ss, checkIn, checkOut) : null
-      priced.push({ roomId: r.id, room: r.name, capacity: r.capacity, free: avail.get(r.id)?.free ?? 0, guestStay: price.subtotal, staffNight: staffRateForStay(r, ss, checkIn, checkOut), netNight, seasons: kinds, minNights: price.minNights })
+      priced.push({ roomId: r.id, room: r.name, capacity: r.capacity, base: Math.min(r.base_guests ?? r.capacity, r.capacity), extraStay: (r.extra_adult_rate ?? 0) * nights, extraAdultRate: r.extra_adult_rate, free: avail.get(r.id)?.free ?? 0, guestStay: price.subtotal, staffNight: staffRateForStay(r, ss, checkIn, checkOut), netNight, seasons: kinds, minNights: price.minNights })
     }
     if (!priced.length) continue
     const alloc = allocateRooms(priced, guests)
-    const lines: AllocLine[] = (alloc ?? []).map(({ room, count }) => ({
-      roomId: room.roomId, room: room.room, capacity: room.capacity, count, guestSubtotal: room.guestStay * count,
+    const lines: AllocLine[] = (alloc ?? []).map(({ room, count, guests: placed, extra }) => ({
+      roomId: room.roomId, room: room.room, capacity: room.capacity, includedGuests: room.base, guests: placed, extraGuests: Math.max(0, placed - room.base * count), extraCharge: extra, extraAdultRate: room.extraAdultRate,
+      count, guestSubtotal: room.guestStay * count + extra,
       guestPerNight: Math.round(room.guestStay / nights), staffPerNight: room.staffNight, ...(showNet ? { netPerNight: room.netNight } : {}), seasons: room.seasons,
     }))
     const guestSubtotal = lines.reduce((a, l) => a + l.guestSubtotal, 0)
@@ -343,7 +361,7 @@ export async function writeAnswer(env: Env, question: string, history: { role: '
 function compact(o: PropertyOption) {
   return {
     name: o.name, type: o.type, destination: o.destination, rating: o.rating || undefined, fits_group: o.fits, free_rooms: o.freeRooms, max_guests_with_free_rooms: o.maxSleeps,
-    rooms: o.lines.map((l) => ({ room: l.room, count: l.count, sleeps_each: l.capacity, guest_per_room_night: l.guestPerNight, staff_per_room_night: l.staffPerNight, ...(l.netPerNight !== undefined ? { net_per_room_night: l.netPerNight } : {}), season: l.seasons.join(', ') || undefined })),
+    rooms: o.lines.map((l) => ({ room: l.room, count: l.count, rate_covers_guests_each: l.includedGuests, max_guests_each: l.capacity, guests_placed: l.guests, extra_guests: l.extraGuests || undefined, extra_person_charge_total: l.extraCharge || undefined, guest_per_room_night: l.guestPerNight, staff_per_room_night: l.staffPerNight, ...(l.netPerNight !== undefined ? { net_per_room_night: l.netPerNight } : {}), season: l.seasons.join(', ') || undefined })),
     guest_subtotal: o.guestSubtotal, gst: o.gst, guest_total_incl_gst: o.guestTotal, staff_total: o.staffTotal, ...(o.netTotal !== undefined ? { net_total: o.netTotal } : {}),
     min_stay_issue: o.minNightsIssue || undefined, meal_plans: o.mealPlans, facilities: o.facilities, about: o.highlights,
   }

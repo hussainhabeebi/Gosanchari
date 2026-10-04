@@ -117,3 +117,46 @@ describe('rate sheets', () => {
     expect(markup(null, 10)).toBeNull()
   })
 })
+
+describe('guests included in the rate and extra-guest charges', () => {
+  const double: RoomRates = { id: 7, property_id: 1, base_rate: 4000, weekend_rate: null, min_nights: 1, capacity: 4, units: 5, base_guests: 2, extra_adult_rate: 1000, extra_child_rate: 500 }
+  const cottage: RoomRates = { id: 8, property_id: 1, base_rate: 20000, weekend_rate: null, min_nights: 1, capacity: 10, units: 1, base_guests: 8, extra_adult_rate: 1500, extra_child_rate: null }
+
+  it('charges each guest above the included number, per night', () => {
+    const p = calculatePrice({ room: double, seasons: [], checkIn: '2026-11-02', checkOut: '2026-11-04', adults: 3, children: 1 })
+    expect(p.roomCharges).toBe(8000)
+    expect(p.extraGuests).toMatchObject({ included: 2, max: 4, extraAdults: 1, extraChildren: 1, perNight: 1500, total: 3000 })
+    expect(p.subtotal).toBe(11000)
+    expect(p.errors).toEqual([])
+  })
+
+  it('no extra charge within the included guests; children fill included places after adults', () => {
+    expect(calculatePrice({ room: double, seasons: [], checkIn: '2026-11-02', checkOut: '2026-11-03', adults: 1, children: 1 }).extraGuests!.total).toBe(0)
+    expect(calculatePrice({ room: double, seasons: [], checkIn: '2026-11-02', checkOut: '2026-11-03', adults: 2, children: 2 }).extraGuests!.total).toBe(1000)
+  })
+
+  it('large cottage: rate for 8, max 10, 2 extra adults pay', () => {
+    const p = calculatePrice({ room: cottage, seasons: [], checkIn: '2026-11-02', checkOut: '2026-11-03', adults: 10 })
+    expect(p.extraGuests!.total).toBe(3000)
+    expect(p.subtotal).toBe(23000)
+    expect(calculatePrice({ room: cottage, seasons: [], checkIn: '2026-11-02', checkOut: '2026-11-03', adults: 11 }).errors[0]).toMatch(/at most 10 guests/)
+  })
+
+  it('counts included guests per room when several rooms are booked', () => {
+    const p = calculatePrice({ room: double, seasons: [], checkIn: '2026-11-02', checkOut: '2026-11-03', roomsCount: 2, adults: 5 })
+    expect(p.extraGuests).toMatchObject({ included: 4, max: 8, extraAdults: 1, total: 1000 })
+  })
+
+  it('without guest numbers, rooms are priced alone (old behaviour)', () => {
+    const p = calculatePrice({ room: double, seasons: [], checkIn: '2026-11-02', checkOut: '2026-11-03' })
+    expect(p.extraGuests).toBeNull()
+    expect(p.subtotal).toBe(4000)
+  })
+
+  it('group allocation uses extra beds when cheaper than another room', () => {
+    const a = allocateRooms([{ capacity: 4, base: 2, free: 5, guestStay: 4000, extraStay: 1000 }], 6)!
+    expect(a[0].count).toBe(2)
+    expect(a[0].guests).toBe(6)
+    expect(a[0].extra).toBe(2000)
+  })
+})

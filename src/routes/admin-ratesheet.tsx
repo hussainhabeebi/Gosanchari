@@ -61,7 +61,7 @@ function reviewPage(c: Context<AppEnv>, p: PropertyRow, rooms: RoomRow[], sheet:
         <input type="hidden" name="rooms_n" value={sheet.rooms.length} />
         <div class="table-wrap">
           <table class="table review-table">
-            <thead><tr><th>On the sheet</th><th>Save as</th><th class="internal">B2B / Net ₹</th><th>Staff rate ₹</th><th>Guest rate ₹ (weekdays)</th><th>Guest ₹ (Fri/Sat)</th><th>Max guests</th><th>Extra bed ₹ (guest)</th></tr></thead>
+            <thead><tr><th>On the sheet</th><th>Save as</th><th class="internal">B2B / Net ₹</th><th>Staff rate ₹</th><th>Guest rate ₹ (weekdays)</th><th>Guest ₹ (Fri/Sat)</th><th>Guests incl.</th><th>Max guests</th><th>Extra adult ₹/night (guest)</th></tr></thead>
             <tbody>
               {sheet.rooms.map((r, i) => {
                 const match = matchRoom(r.name, rooms)
@@ -73,7 +73,8 @@ function reviewPage(c: Context<AppEnv>, p: PropertyRow, rooms: RoomRow[], sheet:
                     <td><input type="number" name={`r${i}_staff`} value={markup(r.net_rate, staffPct) ?? ''} min="0" /></td>
                     <td><input type="number" name={`r${i}_guest`} value={markup(r.net_rate, guestPct) ?? ''} min="0" /></td>
                     <td><input type="number" name={`r${i}_wknd`} value={markup(r.net_weekend_rate, guestPct) ?? ''} min="0" /></td>
-                    <td><input type="number" name={`r${i}_cap`} value={r.capacity ?? ''} min="1" max="40" /></td>
+                    <td><input type="number" name={`r${i}_base`} value={r.base_guests ?? ''} min="1" max="60" /></td>
+                    <td><input type="number" name={`r${i}_cap`} value={r.capacity ?? ''} min="1" max="60" /></td>
                     <td><input type="number" name={`r${i}_xbed`} value={markup(r.extra_bed_rate, guestPct) ?? ''} min="0" /></td>
                   </tr>
                 )
@@ -144,14 +145,14 @@ rateSheetRoutes.post('/admin/properties/:id/ratesheet/apply', requirePerm('manag
   for (let i = 0; i < Math.min(30, int(f.rooms_n)); i++) {
     const map = f[`r${i}_map`]
     if (!map || map === 'skip') continue
-    const net = pos(`r${i}_net`), staff = pos(`r${i}_staff`), guest = pos(`r${i}_guest`), wknd = pos(`r${i}_wknd`), cap = pos(`r${i}_cap`), xbed = pos(`r${i}_xbed`)
+    const net = pos(`r${i}_net`), staff = pos(`r${i}_staff`), guest = pos(`r${i}_guest`), wknd = pos(`r${i}_wknd`), cap = pos(`r${i}_cap`), xbed = pos(`r${i}_xbed`), base = pos(`r${i}_base`)
     if (map === 'new') {
       const name = str(f[`r${i}_name`], 80)
       if (!name || !guest) continue
       const rid = await insertId(
         c.env,
-        'INSERT INTO rooms (property_id, name, capacity, units, base_rate, weekend_rate, net_rate, staff_rate, extra_bed, extra_bed_rate) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)',
-        id, name, cap ?? 2, guest, wknd, net, staff, xbed ? 1 : 0, xbed,
+        'INSERT INTO rooms (property_id, name, capacity, base_guests, units, base_rate, weekend_rate, net_rate, staff_rate, extra_bed, extra_bed_rate, extra_adult_rate) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)',
+        id, name, Math.max(cap ?? 2, base ?? 0), base ?? cap ?? 2, guest, wknd, net, staff, xbed ? 1 : 0, xbed, xbed,
       )
       roomIdx.set(i, rid)
       created++
@@ -163,8 +164,9 @@ rateSheetRoutes.post('/admin/properties/:id/ratesheet/apply', requirePerm('manag
       if (staff) set.staff_rate = staff
       if (guest) set.base_rate = guest
       if (wknd) set.weekend_rate = wknd
-      if (cap) set.capacity = cap
-      if (xbed) { set.extra_bed_rate = xbed; set.extra_bed = 1 }
+      if (cap) set.capacity = Math.max(cap, base ?? 0)
+      if (base) set.base_guests = base
+      if (xbed) { set.extra_adult_rate = xbed; set.extra_bed_rate = xbed; set.extra_bed = 1 }
       const cols = Object.keys(set)
       if (cols.length) {
         await run(c.env, `UPDATE rooms SET ${cols.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...Object.values(set), r.id)

@@ -68,6 +68,9 @@ export interface RoomRow {
   net_rate: number | null
   /** Internal benchmark rate for staff (between net and guest rate). */
   staff_rate: number | null
+  base_guests: number | null
+  extra_adult_rate: number | null
+  extra_child_rate: number | null
   min_nights: number
   active: number
   description: string

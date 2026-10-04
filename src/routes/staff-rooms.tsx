@@ -9,7 +9,7 @@ import { permissionsFor, requireStaff } from '../lib/auth'
 import { all, first } from '../lib/db'
 import { mediaUrl } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
-import { ROOM_AMENITIES, stayTypeLabel } from '../lib/catalog'
+import { guestsText, ROOM_AMENITIES, stayTypeLabel } from '../lib/catalog'
 import { seasonKindLabel, seasonRates, type SeasonRate } from '../lib/pricing'
 import type { EnquiryRow, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, int, money, normalizePhone, parseJson, str, todayIST } from '../lib/util'
@@ -111,7 +111,7 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
           <section class="share-room stack" id={`room-${r.id}`}>
             <div class="row-between">
               <h2>{r.name}</h2>
-              <span class="muted small">{r.units} room{r.units === 1 ? '' : 's'} · sleeps {r.capacity}{r.bed_type ? ` · ${r.bed_type}` : ''}{r.room_view ? ` · ${r.room_view} view` : ''}</span>
+              <span class="muted small">{r.units} room{r.units === 1 ? '' : 's'} · {guestsText(r)}{r.bed_type ? ` · ${r.bed_type}` : ''}{r.room_view ? ` · ${r.room_view} view` : ''}</span>
             </div>
             {rp.length > 0
               ? <div class="share-thumbs" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, t)} data-full><img src={mediaUrl(m.r2_key, 300, t)} alt={m.caption ?? r.name} loading="lazy" /></a>)}</div>
@@ -124,7 +124,7 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
                   <li class="internal">Internal staff rate: <strong>{r.staff_rate ? money(r.staff_rate) : 'not set'}</strong></li>
                   <li>Guest rate, weekdays: <strong>{money(r.base_rate)}</strong></li>
                   {r.weekend_rate && r.weekend_rate !== r.base_rate && <li>Guest rate, Fri & Sat: <strong>{money(r.weekend_rate)}</strong></li>}
-                  {r.extra_bed ? <li>Extra bed: {r.extra_bed_rate ? money(r.extra_bed_rate) : 'available'}</li> : null}
+                  {(r.base_guests ?? r.capacity) < r.capacity && <li>Rate covers <strong>{r.base_guests}</strong> guests, max {r.capacity}. Extra adult: <strong>{r.extra_adult_rate ? money(r.extra_adult_rate) : 'not set'}</strong>{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? <>, extra child: <strong>{r.extra_child_rate ? money(r.extra_child_rate) : 'free'}</strong></> : null} per night</li>}
                   {r.min_nights > 1 && <li>Minimum {r.min_nights} nights</li>}
                   {seasons.filter((s) => s.rates[r.id] && s.rates[r.id] !== r.base_rate).map((s) => <li>{seasonKindLabel(s.kind)} · {s.name} ({fmtDate(s.start)} – {fmtDate(s.end)}): guest <strong>{money(s.rates[r.id])}</strong>{s.staffRates[r.id] ? <span class="internal"> · staff {money(s.staffRates[r.id])}</span> : null}{s.minNights ? `, min ${s.minNights} nights` : ''}</li>)}
                 </ul>
