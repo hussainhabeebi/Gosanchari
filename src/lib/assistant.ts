@@ -111,6 +111,27 @@ function dayMonth(day: number, mon: string, today: string): string | undefined {
   return mk()
 }
 
+/** A need edited directly by staff in the need bar (no AI needed). Only known fields, sane values. */
+export function needFromForm(raw: unknown, dests: string[]): Need {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const today = todayIST()
+  const out: Need = { intent: 'find' }
+  const d = typeof r.destination === 'string' ? dests.find((x) => x.toLowerCase() === (r.destination as string).toLowerCase()) : undefined
+  if (d) out.destination = d
+  if (isDate(r.checkIn) && r.checkIn >= today) out.checkIn = r.checkIn
+  if (isDate(r.checkOut) && out.checkIn && r.checkOut > out.checkIn) out.checkOut = r.checkOut
+  const adults = clampInt(r.adults, 1, 300)
+  const children = clampInt(r.children, 0, 100) ?? 0
+  if (adults) { out.adults = adults; out.children = children; out.guests = adults + children }
+  const pm = clampInt(r.priceMax, 300, 1_000_000)
+  if (pm) out.priceMax = pm
+  if (Array.isArray(r.types)) out.types = r.types.map(String).filter((t) => PROPERTY_TYPES.includes(t))
+  if (Array.isArray(r.facilities)) out.facilities = r.facilities.map(String).filter((t) => t in FACILITIES)
+  if (typeof r.mealPlan === 'string' && r.mealPlan in MEAL_PLANS) out.mealPlan = r.mealPlan
+  if (r.pet === true) out.pet = true
+  return out
+}
+
 /** Read what the client needs: rules first, AI on top when available. */
 export async function readNeed(env: Env, question: string, prev: Need | null): Promise<Need> {
   const today = todayIST()
@@ -299,7 +320,13 @@ Rules:
 - For groups, say how the rooms are split (e.g. "4 × Deluxe (3 each) + 1 × Family Suite").
 - Point out sold-out / does-not-fit options, minimum-stay rules and special/peak dates. If no single property fits the group, suggest splitting it across properties using max_guests_with_free_rooms.
 - If dates were assumed, say so and ask for the real dates.
-- Format: a one-line summary, then a short bulleted list per option (name, rooms, guest total incl. GST, staff total), then one suggested next step. No tables.`
+- The agent already sees a card per option with every price, so do NOT list all options or repeat all numbers.
+- Format (max 4 short lines, no tables, no headings):
+  1. "Best pick: <name> — <room split>, <guest total incl. GST>" and why in a few words.
+  2. A runner-up or cheaper alternative, if any.
+  3. One warning if needed (min stay, special-date pricing, not enough rooms, assumed dates).
+  4. One next step (e.g. "Start the quote" or "Ask the guest for dates").
+- For property questions, answer the question directly in 2–4 lines.`
 
 /** Write the reply from computed data (rule-based text when AI is off). */
 export async function writeAnswer(env: Env, question: string, history: { role: 'user' | 'assistant'; content: string }[], r: AssistantResult): Promise<string> {
@@ -327,10 +354,15 @@ const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
 export function fallbackAnswer(r: AssistantResult): string {
   if (r.info) return `Here are the details for ${String(r.info.name)} (AI is off, so showing the raw facts).`
   if (!r.options.length) return `No live properties match this${r.need.destination ? ` in ${r.need.destination}` : ''}. Try another destination or fewer filters.`
-  const head = `${r.options.filter((o) => o.fits).length} option(s) for ${r.guests} guests, ${r.nights} night(s) from ${r.checkIn}${r.assumedDates ? ' (dates assumed — tell me the real dates)' : ''}:`
-  const lines = r.options.map((o) => `• ${o.name} (${o.destination}) — ${o.fits ? o.lines.map((l) => `${l.count} × ${l.room}`).join(' + ') + `, guest total ${inr(o.guestTotal)} incl. GST${o.staffTotal ? `, staff total ${inr(o.staffTotal)}` : ''}` : `can take up to ${o.maxSleeps} guests (${o.freeRooms} rooms free)`}${o.minNightsIssue ? ` — ${o.minNightsIssue}` : ''}`)
+  const fits = r.options.filter((o) => o.fits)
+  const best = fits.find((o) => !o.minNightsIssue) ?? fits[0]
+  const out: string[] = []
+  if (best) out.push(`Best pick: ${best.name} — ${best.lines.map((l) => `${l.count} × ${l.room}`).join(' + ')}, ${inr(best.guestTotal)} incl. GST${best.staffTotal ? ` (staff ${inr(best.staffTotal)})` : ''}.`)
+  if (fits.length > 1) out.push(`${fits.length - 1} more option${fits.length > 2 ? 's' : ''} below.`)
   const nofit = r.options.filter((o) => !o.fits)
-  const split = !r.options.some((o) => o.fits) && nofit.reduce((a, o) => a + o.maxSleeps, 0) >= r.guests
-    ? [`No single property can take all ${r.guests} guests, but together they can — consider splitting the group (${nofit.map((o) => `${o.name}: up to ${o.maxSleeps}`).join(', ')}).`] : []
-  return [head, ...lines, ...split].join('\n')
+  if (!best && nofit.reduce((a, o) => a + o.maxSleeps, 0) >= r.guests) out.push(`No single property takes all ${r.guests} guests — split the group: ${nofit.map((o) => `${o.name} up to ${o.maxSleeps}`).join(', ')}.`)
+  else if (!best) out.push(`Not enough free rooms for ${r.guests} guests on these dates. Try other dates or a nearby destination.`)
+  if (best?.minNightsIssue) out.push(`Note: ${best.minNightsIssue}.`)
+  if (r.assumedDates) out.push(`Dates assumed (${r.checkIn}, ${r.nights} night${r.nights === 1 ? '' : 's'}) — set the real dates above for exact prices.`)
+  return out.join('\n')
 }

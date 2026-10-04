@@ -303,10 +303,31 @@
     try { state = JSON.parse(sessionStorage.getItem(KEY)) || state } catch (e) {}
     var save = function () { try { sessionStorage.setItem(KEY, JSON.stringify(state)) } catch (e) {} }
     var fmt = function (t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/^\s*[-*•]\s+/gm, '• ') }
-    function card(o, d) {
+    var needForm = $('#as-need')
+    function fillNeed() {
+      var n = state.need
+      if (!needForm || !n || n.intent === 'property_info') { if (needForm) needForm.hidden = true; return }
+      needForm.hidden = false
+      needForm.elements.destination.value = n.destination || ''
+      needForm.elements.checkIn.value = n.checkIn || ''
+      needForm.elements.checkOut.value = n.checkOut || ''
+      needForm.elements.adults.value = n.adults || n.guests || ''
+      needForm.elements.children.value = n.children || ''
+      needForm.elements.priceMax.value = n.priceMax || ''
+    }
+    if (needForm) needForm.addEventListener('submit', function (e) {
+      e.preventDefault()
+      var el = needForm.elements, n = Object.assign({}, state.need || {}, {
+        destination: el.destination.value, checkIn: el.checkIn.value, checkOut: el.checkOut.value,
+        adults: +el.adults.value || undefined, children: +el.children.value || 0, priceMax: +el.priceMax.value || undefined,
+      })
+      var label = [n.destination || 'Any destination', n.checkIn && n.checkOut ? n.checkIn + ' → ' + n.checkOut : '', n.adults ? (n.adults + (n.children || 0)) + ' guests' : '', n.priceMax ? 'max ' + money(n.priceMax) + '/room' : ''].filter(Boolean).join(' · ')
+      ask('Updated: ' + label, n)
+    })
+    function card(o, d, best) {
       var qs = function (l) { return new URLSearchParams({ property: o.id, room: l.roomId, checkIn: d.checkIn, checkOut: d.checkOut, guests: l.count * l.capacity }).toString() }
       var main = o.lines.slice().sort(function (a, b) { return b.count * b.capacity - a.count * a.capacity })[0]
-      return '<div class="card as-card' + (o.fits ? '' : ' as-nofit') + '">' +
+      return '<div class="card as-card' + (o.fits ? '' : ' as-nofit') + (best ? ' as-best' : '') + '">' + (best ? '<span class="pill pill-best">Best match</span>' : '') +
         '<div class="row-between"><strong><a href="/staff/rooms/' + o.id + '">' + esc(o.name) + '</a></strong><span class="muted small">' + esc(o.type) + ' · ' + esc(o.destination) + (o.rating ? ' · ★ ' + o.rating.toFixed(1) : '') + '</span></div>' +
         (o.fits ? '<ul class="small as-lines">' + o.lines.map(function (l) {
           return '<li>' + l.count + ' × ' + esc(l.room) + ' <span class="muted">(sleeps ' + l.capacity + ')</span> — guest ' + money(l.guestPerNight) + '/night' +
@@ -326,7 +347,11 @@
       if (turn.error) return h + '<div class="msg msg-bot err">' + esc(turn.error) + '</div>'
       h += '<div class="msg msg-bot"><div class="as-answer">' + fmt(turn.answer || '') + '</div>'
       if (turn.dates) h += '<div class="muted small">' + turn.dates.guests + ' guests · ' + turn.dates.nights + ' night(s) · ' + turn.dates.checkIn + ' → ' + turn.dates.checkOut + (turn.dates.assumed ? ' (dates assumed)' : '') + '</div>'
-      if (turn.options && turn.options.length) h += '<div class="as-cards">' + turn.options.map(function (o) { return card(o, turn.dates) }).join('') + '</div>'
+      if (turn.options && turn.options.length) {
+        var bestIdx = turn.options.findIndex(function (o) { return o.fits && !o.minNightsIssue })
+        if (bestIdx < 0) bestIdx = turn.options.findIndex(function (o) { return o.fits })
+        h += '<div class="as-cards">' + turn.options.map(function (o, i) { return card(o, turn.dates, i === bestIdx) }).join('') + '</div>'
+      }
       return h + '</div>'
     }
     function draw() {
@@ -334,13 +359,14 @@
       $$('.msg', log).forEach(function (m) { m.remove() })
       if (hint) hint.hidden = state.turns.length > 0
       log.insertAdjacentHTML('beforeend', state.turns.map(render).join(''))
-      log.scrollTop = log.scrollHeight
+      var last = $$('.msg-staff', log).pop(); if (last) last.scrollIntoView({ block: 'start' })
+      fillNeed()
     }
-    function ask(text) {
+    function ask(text, edited) {
       var btn = $('button', formEl); btn.disabled = true; btn.textContent = 'Thinking…'
       var pending = { q: text, answer: 'Searching our properties and calculating prices…' }
       state.turns.push(pending); draw()
-      fetch(asBox.dataset.assistant, { method: 'POST', headers: { 'content-type': 'application/json', Accept: 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ q: text, history: state.history, need: state.need }) })
+      fetch(asBox.dataset.assistant, { method: 'POST', headers: { 'content-type': 'application/json', Accept: 'application/json' }, credentials: 'same-origin', body: JSON.stringify(edited ? { q: text, history: state.history, need: edited, edited: true } : { q: text, history: state.history, need: state.need }) })
         .then(function (r) { return r.json() })
         .then(function (r) {
           state.turns.pop()

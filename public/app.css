@@ -493,3 +493,28 @@ code { overflow-wrap: anywhere; }
 .chat-form textarea { flex: 1; }
 .err { color: #b42318; }
 .as-hint .chip { cursor: pointer; border: 1px solid var(--line); background: #fff; font: inherit; font-size: .85rem; text-align: left; }
+
+/* Focused AI search */
+.ai-search-hero { margin-top: 22px; padding: 8px 8px 8px 14px; box-shadow: var(--shadow); }
+.ai-search-hero input { font-size: 1.05rem; padding: 12px 6px; }
+.ai-search-hero .btn { padding: 12px 20px; }
+.quick-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.quick-chips .chip { background: rgba(255, 255, 255, .18); color: #fff; border: 1px solid rgba(255, 255, 255, .45); text-decoration: none; }
+.quick-chips .chip:hover { background: rgba(255, 255, 255, .3); }
+.classic-search { margin-top: 14px; }
+.classic-search summary { cursor: pointer; color: #fff; opacity: .9; font-size: .95rem; }
+.classic-search .searchbox { margin-top: 10px; }
+.search-top { margin: 0 0 10px; border: 1px solid var(--line); background: #fff; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.chip-x { text-decoration: none; color: var(--ink); background: var(--green-soft); }
+.chip-x span { opacity: .6; margin-left: 2px; }
+.chip-x:hover span { opacity: 1; }
+.add-dates { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; background: #fffaf0; border: 1px solid #f3e2bd; border-radius: 10px; margin-bottom: 12px; }
+.add-dates input { width: auto; flex: 1 1 140px; }
+.match-why { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--green-2); }
+.need-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.need-bar select, .need-bar input[type=date] { width: auto; flex: 1 1 140px; }
+.need-bar label { display: inline-flex; gap: 6px; align-items: center; }
+.as-best { border: 2px solid var(--green-2); }
+.pill-best { align-self: flex-start; background: var(--green-2); color: #fff; }
+.relax { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px 0 14px; } .relax p { flex-basis: 100%; margin: 0; }

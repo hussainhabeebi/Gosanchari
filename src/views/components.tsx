@@ -30,7 +30,7 @@ export const Stars: FC<{ value: number; count?: number }> = ({ value, count }) =
 
 export const Pill: FC<{ s: string }> = ({ s }) => <span class={`pill pill-${s.replace(/[^a-z_]/gi, '')}`}>{s.replace(/_/g, ' ')}</span>
 
-export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean }> = ({ p, saved, qs, transform }) => {
+export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean; reasons?: string[] }> = ({ p, saved, qs, transform, reasons }) => {
   const fac = parseJson<string[]>(p.facilities, []).slice(0, 3)
   const price = p.stay_price ?? p.from_price
   return (
@@ -48,7 +48,9 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
           <Stars value={p.rating_avg} count={p.rating_count} />
         </div>
         <div class="muted small">📍 {p.destination}</div>
-        <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>
+        {reasons && reasons.length > 0
+          ? <div class="match-why small">{reasons.map((r) => <span>✓ {r}</span>)}</div>
+          : <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
         <div class="row-between pcard-foot">
           <div>
             <span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>

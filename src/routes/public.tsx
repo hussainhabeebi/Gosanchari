@@ -29,6 +29,8 @@ async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv
   return new Set(rows.map((r) => r.property_id))
 }
 
+const HERO_EXAMPLES = ['Munnar this weekend for 2', 'Family of 5 in Wayanad with a pool', 'Alleppey houseboat 2 nights under ₹12,000', 'Group of 15 in Vagamon']
+
 // ---------- 1. Home ----------
 publicRoutes.get('/', async (c) => {
   const [content, settings, dests, featured, offers, saved] = await Promise.all([
@@ -59,21 +61,27 @@ publicRoutes.get('/', async (c) => {
         <div class="wrap">
           <h1>{content.hero.title}</h1>
           <p class="hero-sub">{content.hero.subtitle}</p>
-          <form class="searchbox" method="get" action="/search">
-            <Field label="Location">
-              <input name="destination" list="dest-list" placeholder="Munnar, Wayanad…" />
-              <datalist id="dest-list">{destNames.map((d) => <option value={d} />)}</datalist>
-            </Field>
-            <Field label="Check-in"><input type="date" name="checkIn" min={today} /></Field>
-            <Field label="Check-out"><input type="date" name="checkOut" min={today} /></Field>
-            <Field label="Guests"><input type="number" name="guests" min="1" max="40" value="2" /></Field>
-            <button class="btn btn-lg">Search</button>
-          </form>
-          <form class="ai-search" method="get" action="/search">
+          <form class="ai-search ai-search-hero" method="get" action="/search" role="search">
             <span class="ai-badge">AI</span>
-            <input name="ai" maxlength={200} placeholder="Try: Quiet homestay in Wayanad for 4, under ₹8,000" aria-label="Describe your stay" />
-            <button class="btn">Find</button>
+            <input name="ai" maxlength={200} placeholder="Where, when, how many?" aria-label="Describe your stay" required />
+            <button class="btn">Search</button>
           </form>
+          <div class="quick-chips" aria-label="Examples">
+            {HERO_EXAMPLES.map((e) => <a class="chip" href={`/search?ai=${encodeURIComponent(e)}`}>{e}</a>)}
+          </div>
+          <details class="classic-search">
+            <summary>Or pick place, dates & guests</summary>
+            <form class="searchbox" method="get" action="/search">
+              <Field label="Location">
+                <input name="destination" list="dest-list" placeholder="Munnar, Wayanad…" />
+                <datalist id="dest-list">{destNames.map((d) => <option value={d} />)}</datalist>
+              </Field>
+              <Field label="Check-in"><input type="date" name="checkIn" min={today} /></Field>
+              <Field label="Check-out"><input type="date" name="checkOut" min={today} /></Field>
+              <Field label="Guests"><input type="number" name="guests" min="1" max="40" value="2" /></Field>
+              <button class="btn btn-lg">Search</button>
+            </form>
+          </details>
         </div>
       </section>
 
@@ -166,11 +174,44 @@ publicRoutes.get('/search', async (c) => {
   const view = c.req.query('view') === 'map' ? 'map' : 'list'
   const baseParams = filtersToParams(f)
   const mapParams = new URLSearchParams(baseParams); mapParams.set('view', view === 'map' ? 'list' : 'map')
-  const summaryBits = [
-    f.destination, f.checkIn && f.checkOut ? `${fmtDate(f.checkIn)} – ${fmtDate(f.checkOut)}` : null, f.guests ? `${f.guests} guests` : null,
-    f.priceMax ? `under ${money(f.priceMax)}/night` : null, ...(f.types ?? []), ...(f.facilities ?? []).map((x) => FACILITIES[x]),
-    f.family ? 'family-friendly' : null, f.pet ? 'pet-friendly' : null, f.q ? `“${f.q}”` : null,
-  ].filter(Boolean)
+  // Each understood filter as a chip; tapping it removes just that filter.
+  const without = (drop: (k: string, v: string) => boolean) => {
+    const p = new URLSearchParams([...baseParams.entries()].filter(([k, v]) => !drop(k, v)))
+    if (understood) p.set('understood', understood)
+    return `/search?${p}`
+  }
+  const chips: [string, string][] = [
+    ...(f.destination ? [[`📍 ${f.destination}`, without((k) => k === 'destination')] as [string, string]] : []),
+    ...(f.checkIn && f.checkOut ? [[`📅 ${fmtShortDate(f.checkIn)} – ${fmtShortDate(f.checkOut)}`, without((k) => k === 'checkIn' || k === 'checkOut')] as [string, string]] : []),
+    ...(f.guests ? [[`👥 ${f.guests} guest${f.guests === 1 ? '' : 's'}`, without((k) => k === 'guests')] as [string, string]] : []),
+    ...(f.priceMax ? [[`Under ${money(f.priceMax)}/night`, without((k) => k === 'priceMax')] as [string, string]] : []),
+    ...(f.types ?? []).map((t) => [STAY_TYPES[t] ?? t, without((k, v) => k === 'type' && v === t)] as [string, string]),
+    ...(f.facilities ?? []).map((x) => [FACILITIES[x] ?? x, without((k, v) => k === 'facility' && v === x)] as [string, string]),
+    ...(f.mealPlan ? [[MEAL_PLANS[f.mealPlan] ?? f.mealPlan, without((k) => k === 'meal')] as [string, string]] : []),
+    ...(f.family ? [['Family-friendly', without((k) => k === 'family')] as [string, string]] : []),
+    ...(f.pet ? [['Pet-friendly', without((k) => k === 'pet')] as [string, string]] : []),
+    // The free-text "vibe" only re-orders results; hide it when it just repeats a filter (e.g. "family").
+    ...(f.q && !/^(?:(?:famil\w*|kids?|pool|budget)\s*)+$/i.test(f.q) ? [[`“${f.q}”`, without((k) => k === 'q')] as [string, string]] : []),
+  ]
+  // Nothing found: show which single filter to drop and how many stays that gives.
+  const relax = results.length ? [] : (await Promise.all(chips.slice(0, 6).map(async ([label, href]) => {
+    const p = new URL(href, 'http://x').searchParams
+    const ff: Record<string, string | string[]> = {}
+    for (const k of new Set(p.keys())) { const v = p.getAll(k); ff[k] = v.length > 1 ? v : v[0] }
+    const n = (await searchProperties(c.env, filtersFromQuery(ff), 30)).length
+    return [label, href, n] as [string, string, number]
+  }))).filter(([, , n]) => n > 0).sort((a, b) => b[2] - a[2]).slice(0, 3)
+  const reasonsFor = (p: (typeof results)[number]) => {
+    const fac = parseJson<string[]>(p.facilities, [])
+    const price = p.stay_price ?? p.from_price
+    return [
+      ...(f.facilities ?? []).filter((x) => fac.includes(x)).map((x) => FACILITIES[x] ?? x),
+      ...(f.types?.length && f.types.includes(p.type) ? [STAY_TYPES[p.type] ?? p.type] : []),
+      ...(f.priceMax && price && price <= f.priceMax ? [`Under ${money(f.priceMax)}`] : []),
+      ...(f.checkIn && p.stay_price ? ['Free on your dates'] : []),
+      ...(p.rating_avg >= 4.5 ? [`Rated ${p.rating_avg.toFixed(1)}★`] : []),
+    ].slice(0, 4)
+  }
 
   return page(c, { title: f.destination ? `Stays in ${f.destination}` : 'Find a stay', description: `Homestays, villas, resorts and houseboats${f.destination ? ' in ' + f.destination : ' in Kerala'}.`, head: view === 'map' ? <LeafletHead /> : undefined }, (
     <div class="wrap search-page">
@@ -212,8 +253,26 @@ publicRoutes.get('/search', async (c) => {
       </aside>
 
       <section class="results">
-        {understood && (
-          <AiNote label="We understood">{summaryBits.join(' · ') || 'Showing all stays'} <span class="muted small">(from “{understood}”)</span></AiNote>
+        <form class="ai-search search-top" method="get" action="/search" role="search">
+          <span class="ai-badge">AI</span>
+          <input name="ai" maxlength={200} value={understood ?? ''} placeholder="Describe your stay — place, dates, guests, budget, must-haves" aria-label="Describe your stay" required />
+          <button class="btn btn-sm">Search</button>
+        </form>
+        {chips.length > 0 && (
+          <div class="filter-chips" aria-label="Your search">
+            {understood && <span class="muted small">We understood:</span>}
+            {chips.map(([label, href]) => <a class="chip chip-x" href={href} title="Remove">{label} <span aria-hidden="true">✕</span></a>)}
+            <a class="small" href="/search">Clear all</a>
+          </div>
+        )}
+        {!f.checkIn && results.length > 0 && (
+          <form method="get" action="/search" class="add-dates">
+            {[...baseParams.entries()].filter(([k]) => k !== 'checkIn' && k !== 'checkOut').map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+            <span class="small"><strong>Add your dates</strong> to see exact prices and free rooms:</span>
+            <input type="date" name="checkIn" min={todayIST()} required aria-label="Check-in" />
+            <input type="date" name="checkOut" min={todayIST()} required aria-label="Check-out" />
+            <button class="btn btn-sm">Show prices</button>
+          </form>
         )}
         <div class="results-bar">
           <label for="filters-toggle" class="btn btn-sm btn-outline filters-open">Filters</label>
@@ -233,11 +292,17 @@ publicRoutes.get('/search', async (c) => {
         )}
 
         {results.length > 0 ? (
-          <div class="grid grid-3">{results.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} qs={qs.toString()} transform={settings.images_transform} />)}</div>
+          <div class="grid grid-3">{results.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} qs={qs.toString()} transform={settings.images_transform} reasons={reasonsFor(p)} />)}</div>
         ) : (
           <Empty>
             <h3>No stays match all your filters</h3>
-            <p>Send us an enquiry and our team will find one for you.</p>
+            {relax.length > 0 && (
+              <div class="relax">
+                <p>Try without one of these:</p>
+                {relax.map(([label, href, n]) => <a class="btn btn-sm btn-outline" href={href}>Remove {label.replace(/^[^\w“₹]+/u, '')} → {n} stay{n === 1 ? '' : 's'}</a>)}
+              </div>
+            )}
+            <p>Or send us an enquiry and our team will find one for you.</p>
             <a class="btn" href={`/enquiry?${new URLSearchParams({ destination: f.destination ?? '', checkIn: f.checkIn ?? '', checkOut: f.checkOut ?? '', adults: String(f.guests ?? 2) })}`}>Send us an enquiry</a>
           </Empty>
         )}
