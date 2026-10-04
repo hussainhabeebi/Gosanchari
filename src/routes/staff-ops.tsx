@@ -92,10 +92,10 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
                     {perms.view_net_rates && i.internal_notes ? <div>Remarks: {i.internal_notes}</div> : null}
                   </div>
                 )}
-                <Table head={['Room', 'Sleeps', 'Rate', ...(perms.view_net_rates ? ['Net'] : []), ...(avail ? ['Free'] : []), '']}>
+                <Table head={['Room', 'Sleeps', 'Staff rate', 'Guest rate', ...(perms.view_net_rates ? ['B2B / Net'] : []), ...(avail ? ['Free'] : []), '']}>
                   {prs.map((r) => (
                     <tr>
-                      <td><a href={`/staff/rooms/${p.id}${enquiryId ? `?enquiry=${enquiryId}` : ''}#room-${r.id}`}>{r.name}</a></td><td>{r.capacity}</td><td>{money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''}</td>
+                      <td><a href={`/staff/rooms/${p.id}${enquiryId ? `?enquiry=${enquiryId}` : ''}#room-${r.id}`}>{r.name}</a></td><td>{r.capacity}</td><td class="internal">{r.staff_rate ? money(r.staff_rate) : '—'}</td><td>{money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''}</td>
                       {perms.view_net_rates && <td>{r.net_rate ? money(r.net_rate) : '—'}</td>}
                       {avail && <td>{avail.get(r.id)?.free ?? 0} / {r.units}</td>}
                       <td><a class="btn btn-sm" href={addHref(p.id, r.id)}>Add to quotation</a></td>
@@ -150,11 +150,25 @@ async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   return q
 }
 
-async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; extra_charges: number }) {
+async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; extra_charges: number; guest_rate?: number | null }) {
   const pr = await loadPricing(c.env, o.room_id)
   if (!pr) return null
   const s = await getSettings(c.env)
-  return calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount_pct, extraCharges: o.extra_charges })
+  // A guest rate set by staff replaces the website price (weekday, weekend and seasons) for every night.
+  const room = o.guest_rate ? { ...pr.room, base_rate: o.guest_rate, weekend_rate: o.guest_rate } : pr.room
+  const seasons = o.guest_rate ? [] : pr.seasons
+  return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount_pct, extraCharges: o.extra_charges })
+}
+
+/** Per-night price the guest actually pays for the room (after discount, before extras and GST). */
+function effectiveNightly(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'check_in' | 'check_out' | 'rooms_count'>) {
+  const n = Math.max(1, nightsBetween(o.check_in, o.check_out)) * Math.max(1, o.rooms_count)
+  return Math.round((o.subtotal - o.discount) / n)
+}
+
+/** Discount above the staff member's limit, or a price below the internal staff rate, needs management approval. */
+function optionNeedsApproval(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'check_in' | 'check_out' | 'rooms_count' | 'discount_pct'>, staffRate: number | null, maxDiscountPct: number) {
+  return o.discount_pct > maxDiscountPct || (!!staffRate && effectiveNightly(o) < staffRate)
 }
 
 async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number, roomId: number | null, checkIn: string | null, checkOut: string | null, adults: number, children: number) {
@@ -209,9 +223,9 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   const [options, props, enquiry] = await Promise.all([
-    all<QuoteOptionRow & { property_name: string; room_name: string; net_rate: number | null; meal_plans: string }>(
+    all<QuoteOptionRow & { property_name: string; room_name: string; net_rate: number | null; staff_rate: number | null; base_rate: number; weekend_rate: number | null; meal_plans: string }>(
       c.env,
-      'SELECT o.*, p.name AS property_name, p.meal_plans, r.name AS room_name, r.net_rate FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE o.quotation_id = ? ORDER BY o.id',
+      'SELECT o.*, p.name AS property_name, p.meal_plans, r.name AS room_name, r.net_rate, r.staff_rate, r.base_rate, r.weekend_rate FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE o.quotation_id = ? ORDER BY o.id',
       q.id,
     ),
     all<{ id: number; name: string; destination: string }>(c.env, "SELECT id, name, destination FROM properties WHERE status = 'live' ORDER BY destination, name"),
@@ -219,7 +233,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   ])
   const allRooms = options.length ? await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(options.length)})`, ...options.map((o) => o.property_id)) : []
   const editable = ['draft', 'pending_approval', 'changes_requested'].includes(q.status)
-  const needsApproval = options.some((o) => o.discount_pct > perms.max_discount_pct && !o.discount_approved_by)
+  const needsApproval = options.some((o) => !o.discount_approved_by && optionNeedsApproval(o, o.staff_rate, perms.max_discount_pct))
   const link = `${c.env.SITE_URL}/q/${q.token}`
   return page(c, { title: `Quotation ${q.code}`, area: 'staff', active: 'quotes' }, (
     <div class="stack-lg">
@@ -232,7 +246,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
         </div>
       </div>
       {q.guest_feedback && <div class="flash">Guest said: “{q.guest_feedback}”</div>}
-      {needsApproval && <div class="flash flash-err">A discount is above your limit of {perms.max_discount_pct}%. An admin or manager must approve before it can be sent.</div>}
+      {needsApproval && <div class="flash flash-err">A discount is above your limit of {perms.max_discount_pct}%, or a price is below the internal staff rate. An admin or manager must approve before it can be sent.</div>}
 
       <form method="post" action={`/staff/quotes/${q.id}`} class="stack">
         <section class="card stack">
@@ -260,9 +274,17 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Adults"><input type="number" name={`adults_${o.id}`} value={o.adults} min="1" /></Field>
                 <Field label="Children"><input type="number" name={`children_${o.id}`} value={o.children} min="0" /></Field>
                 <Field label="Meal plan"><Select name={`meal_${o.id}`} value={o.meal_plan ?? ''} options={[['', 'Room only'], ...meals.map((m) => [m, MEAL_PLANS[m] ?? m] as [string, string])]} /></Field>
+                <Field label="Guest rate ₹ / room / night" hint="Your selling price. Blank = website rate."><input type="number" name={`grate_${o.id}`} value={o.guest_rate ?? ''} min="0" placeholder={String(o.base_rate)} /></Field>
                 <Field label={`Discount % (your limit ${perms.max_discount_pct}%)`}><input type="number" name={`disc_${o.id}`} value={o.discount_pct} min="0" max="100" step="0.5" /></Field>
                 <Field label="Extra charges ₹"><input type="number" name={`extra_${o.id}`} value={o.extra_charges} min="0" /></Field>
                 <Field label="Extra label"><input name={`extralabel_${o.id}`} value={o.extra_label ?? ''} placeholder="e.g. Airport pickup" /></Field>
+              </div>
+              <div class="rate-strip small">
+                <span class="internal">Staff rate: <strong>{o.staff_rate ? money(o.staff_rate) : 'not set'}</strong></span>
+                <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} Fri–Sat` : ''}</span>
+                <span>Quoted: <strong>{money(effectiveNightly(o))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
+                {perms.view_net_rates && o.net_rate && <span class="internal">B2B / Net: {money(o.net_rate)}</span>}
+                {o.staff_rate && effectiveNightly(o) < o.staff_rate && <span class="pill pill-red">Below staff rate{o.discount_approved_by ? ' — approved' : ' — needs approval'}</span>}
               </div>
               <table class="breakdown narrow-table">
                 <tr><td>Room charges ({nightsBetween(o.check_in, o.check_out)} nights × {o.rooms_count})</td><td>{money(o.subtotal)}</td></tr>
@@ -315,7 +337,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
               <label class="check small"><input type="checkbox" name="hold" value="1" /> Hold rooms until valid date</label>
             </>
           )}
-          {editable && needsApproval && q.status !== 'pending_approval' && <button class="btn" formaction={`/staff/quotes/${q.id}/request-approval`}>Request discount approval</button>}
+          {editable && needsApproval && q.status !== 'pending_approval' && <button class="btn" formaction={`/staff/quotes/${q.id}/request-approval`}>Request approval</button>}
           {!editable && <a class="btn btn-outline" href={`https://wa.me/${(q.phone ?? '').replace(/\D/g, '')}?text=${encodeURIComponent(link)}`} target="_blank">Resend link on WhatsApp</a>}
           {!editable && q.status !== 'accepted' && <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/reopen`}>Edit (reopen)</button>}
           {!editable && q.status !== 'accepted' && options.length > 0 && <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/convert`}>Convert to booking</button>}
@@ -339,22 +361,27 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       const checkIn = isDate(f[`in_${oid}`]) ? f[`in_${oid}`] : o.check_in
       const checkOut = isDate(f[`out_${oid}`]) && f[`out_${oid}`] > checkIn ? f[`out_${oid}`] : addDays(checkIn, Math.max(1, nightsBetween(o.check_in, o.check_out)))
       const disc = Math.max(0, Math.min(100, parseFloat(f[`disc_${oid}`] ?? '0') || 0))
+      const grate = int(f[`grate_${oid}`]) > 0 ? int(f[`grate_${oid}`]) : null
       const next = {
         room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
-        discount_pct: disc, extra_charges: Math.max(0, int(f[`extra_${oid}`])),
+        discount_pct: disc, extra_charges: Math.max(0, int(f[`extra_${oid}`])), guest_rate: grate,
       }
       const p = await priceOption(c, next)
       if (!p) continue
-      // A changed discount needs fresh approval if it is above the staff limit.
-      const approved = disc === o.discount_pct ? o.discount_approved_by : disc <= perms.max_discount_pct ? null : perms.approve_discounts ? u.id : null
+      // Approval is needed for a discount above the limit or a price below the staff rate; any price change asks again.
+      const staffRate = (await first<{ staff_rate: number | null }>(c.env, 'SELECT staff_rate FROM rooms WHERE id = ?', next.room_id))?.staff_rate ?? null
+      const needs = optionNeedsApproval({ ...next, subtotal: p.subtotal, discount: p.discount }, staffRate, perms.max_discount_pct)
+      const changed = disc !== o.discount_pct || grate !== o.guest_rate || next.room_id !== o.room_id
+      const approved = !needs ? null : !changed ? o.discount_approved_by : perms.approve_discounts ? u.id : null
       await run(
         c.env,
         `UPDATE quotation_options SET room_id = ?, check_in = ?, check_out = ?, rooms_count = ?, adults = ?, children = ?, meal_plan = ?, discount_pct = ?, extra_charges = ?, extra_label = ?,
-           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ? WHERE id = ?`,
+           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ?, guest_rate = ? WHERE id = ?`,
         next.room_id, checkIn, checkOut, next.rooms_count, Math.max(1, int(f[`adults_${oid}`], o.adults)), Math.max(0, int(f[`children_${oid}`], o.children)), f[`meal_${oid}`] || null,
-        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, o.id,
+        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, grate, o.id,
       )
       if (disc !== o.discount_pct) await logActivity(c.env, u.id, 'quote.discount', 'quotation', q.id, { option: o.id, from: o.discount_pct, to: disc })
+      if (grate !== o.guest_rate) await logActivity(c.env, u.id, 'quote.guest_rate', 'quotation', q.id, { option: o.id, from: o.guest_rate, to: grate, staff_rate: staffRate })
     }
   }
   await run(
@@ -443,9 +470,9 @@ opsRoutes.post('/staff/quotes/:id/send', requirePerm('manage_quotes'), async (c)
   if (!q) return c.notFound()
   const f = await saveQuote(c, q)
   q = (await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE id = ?', q.id))!
-  const opts = await all<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE quotation_id = ?', q.id)
+  const opts = await all<QuoteOptionRow & { staff_rate: number | null }>(c.env, 'SELECT o.*, r.staff_rate FROM quotation_options o JOIN rooms r ON r.id = o.room_id WHERE o.quotation_id = ?', q.id)
   if (!opts.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Add at least one option.' })
-  if (opts.some((o) => o.discount_pct > perms.max_discount_pct && !o.discount_approved_by)) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Discount needs approval first.' })
+  if (opts.some((o) => !o.discount_approved_by && optionNeedsApproval(o, o.staff_rate, perms.max_discount_pct))) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'This quote needs approval first (discount above your limit or price below the staff rate).' })
   const s = await getSettings(c.env)
   const link = `${c.env.SITE_URL}/q/${q.token}`
   const via = c.req.query('via')
@@ -490,8 +517,8 @@ opsRoutes.post('/staff/quotes/:id/duplicate', requirePerm('manage_quotes'), asyn
   )
   await run(
     c.env,
-    `INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct)
-     SELECT ?, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct FROM quotation_options WHERE quotation_id = ?`,
+    `INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate)
+     SELECT ?, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate FROM quotation_options WHERE quotation_id = ?`,
     id, q.id,
   )
   return c.redirect(`/staff/quotes/${id}`, 303)
@@ -598,7 +625,7 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
             <td class="nowrap">
               <a class="btn btn-sm" href={`/staff/quotes/${q.id}`}>Edit</a>
               {admin && q.status === 'pending_approval' && perms.approve_discounts && (
-                <form method="post" action={`/admin/quotes/${q.id}/approve`} class="inline"><button class="btn btn-sm">Approve discount</button></form>
+                <form method="post" action={`/admin/quotes/${q.id}/approve`} class="inline"><button class="btn btn-sm">Approve</button></form>
               )}
               {['sent', 'viewed'].includes(q.status) && q.phone && <a class="btn btn-sm btn-outline" target="_blank" href={`https://wa.me/${q.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`${c.env.SITE_URL}/q/${q.token}`)}`}>Resend</a>}
             </td>

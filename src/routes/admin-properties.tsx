@@ -55,7 +55,7 @@ function groupSeasons(rows: (SeasonRate & { id: number })[]): SeasonGroup[] {
   return [...map.values()].sort((a, b) => a.start_date.localeCompare(b.start_date))
 }
 
-const RoomFields = ({ r, pf = '', optional }: { r?: Partial<RoomRow>; pf?: string; optional?: boolean }) => {
+const RoomFields = ({ r, pf = '', optional, showNet }: { r?: Partial<RoomRow>; pf?: string; optional?: boolean; showNet: boolean }) => {
   const am = parseJson<string[]>(r?.facilities, [])
   const req = !optional
   return (
@@ -71,10 +71,16 @@ const RoomFields = ({ r, pf = '', optional }: { r?: Partial<RoomRow>; pf?: strin
         <Field label="Bed type"><input name={`${pf}bed_type`} value={r?.bed_type ?? ''} placeholder="King / 2 singles" class="w-md" /></Field>
         <Field label="Room size (sq ft)"><input type="number" name={`${pf}size_sqft`} value={r?.size_sqft ?? ''} min="0" class="w-sm" /></Field>
         <Field label="View"><Select name={`${pf}room_view`} value={r?.room_view ?? ''} options={[['', '—'], ...ROOM_VIEWS.map((v) => [v, v] as [string, string])]} /></Field>
-        <Field label="Weekday rate ₹"><input type="number" name={`${pf}base_rate`} value={r?.base_rate ?? ''} min="0" required={req} class="w-md" /></Field>
-        <Field label="Weekend rate ₹ (Fri/Sat)"><input type="number" name={`${pf}weekend_rate`} value={r?.weekend_rate ?? ''} min="0" class="w-md" /></Field>
-        <Field label="Net rate ₹ (internal)"><input type="number" name={`${pf}net_rate`} value={r?.net_rate ?? ''} min="0" class="w-md" /></Field>
         <Field label="Min nights"><input type="number" name={`${pf}min_nights`} value={r?.min_nights ?? 1} min="1" class="w-sm" /></Field>
+      </div>
+      <div class="rate-tiers stack-sm">
+        <strong class="small">Rates per room per night</strong>
+        <div class="row wrap-row">
+          {showNet && <Field label="B2B / Net rate ₹" class="internal" hint="Cost from the resort. Management only — never shown to staff."><input type="number" name={`${pf}net_rate`} value={r?.net_rate ?? ''} min="0" class="w-md" /></Field>}
+          <Field label="Internal staff rate ₹" hint="Benchmark for staff. Quoting below it needs approval."><input type="number" name={`${pf}staff_rate`} value={r?.staff_rate ?? ''} min="0" class="w-md" /></Field>
+          <Field label="Guest rate ₹ (weekdays)" hint="Selling price shown on the website."><input type="number" name={`${pf}base_rate`} value={r?.base_rate ?? ''} min="0" required={req} class="w-md" /></Field>
+          <Field label="Guest rate ₹ (Fri / Sat)" hint="Leave blank to use the weekday rate."><input type="number" name={`${pf}weekend_rate`} value={r?.weekend_rate ?? ''} min="0" class="w-md" /></Field>
+        </div>
       </div>
       <div class="row wrap-row">
         <label class="check"><input type="checkbox" name={`${pf}extra_bed`} value="1" checked={!!r?.extra_bed} /> Extra bed available</label>
@@ -88,10 +94,10 @@ const RoomFields = ({ r, pf = '', optional }: { r?: Partial<RoomRow>; pf?: strin
 }
 
 /** A room category block inside the new-property form (fields prefixed nr<idx>_; empty blocks are skipped). */
-const NewRoomBlock = ({ idx }: { idx: string }) => (
+const NewRoomBlock = ({ idx, showNet }: { idx: string; showNet: boolean }) => (
   <fieldset class="room-edit stack new-room" data-idx={idx}>
     <legend><strong>Room category</strong></legend>
-    <RoomFields pf={`nr${idx}_`} optional />
+    <RoomFields pf={`nr${idx}_`} optional showNet={showNet} />
     <Field label="Photos of this room category" hint="JPG / PNG / WebP, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept="image/jpeg,image/png,image/webp" multiple /></Field>
   </fieldset>
 )
@@ -107,6 +113,7 @@ function propertyForm(
   otherSeasons: (SeasonRate & { id: number })[],
   dests: string[],
   showContact: boolean,
+  showNet: boolean,
 ) {
   const fac = parseJson<string[]>(p.facilities, [])
   const meals = parseJson<string[]>(p.meal_plans, [])
@@ -282,8 +289,8 @@ function propertyForm(
             <section class="card stack" id="rooms">
               <h2>{num('rooms')}. Room categories & inventory</h2>
               <p class="muted small">Add each room category with its inventory and rates. Blank ones are skipped. You can edit them and add seasonal rates after saving.</p>
-              <div id="new-rooms" class="stack"><NewRoomBlock idx="0" /></div>
-              <template id="new-room-tpl"><NewRoomBlock idx="__IDX__" /></template>
+              <div id="new-rooms" class="stack"><NewRoomBlock idx="0" showNet={showNet} /></div>
+              <template id="new-room-tpl"><NewRoomBlock idx="__IDX__" showNet={showNet} /></template>
               <button type="button" class="btn btn-sm btn-outline" data-add-room>+ Add another room category</button>
             </section>
             <section class="card stack" id="media">
@@ -314,7 +321,7 @@ function propertyForm(
               <details class="room-edit" open={rooms.length <= 2}>
                 <summary><strong>{r.name}</strong> · {r.units} room{r.units === 1 ? '' : 's'} · sleeps {r.capacity} · {money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''} {!r.active && <span class="pill pill-hidden">inactive</span>}</summary>
                 <form method="post" action={`/admin/rooms/${r.id}`} class="stack">
-                  <RoomFields r={r} />
+                  <RoomFields r={r} showNet={showNet} />
                   <div class="row wrap-row">
                     <label class="check"><input type="checkbox" name="active" value="1" checked={!!r.active} /> Active (bookable / quotable)</label>
                     <button class="btn btn-sm">Save room</button>
@@ -325,7 +332,7 @@ function propertyForm(
             <details class="room-edit" open={rooms.length === 0}>
               <summary><strong>+ Add a room category</strong></summary>
               <form method="post" action={`/admin/properties/${p.id}/rooms`} class="stack">
-                <RoomFields />
+                <RoomFields showNet={showNet} />
                 <button class="btn btn-sm">Add room category</button>
               </form>
             </details>
@@ -430,6 +437,11 @@ async function canSeeContacts(c: Context<AppEnv>) {
   return (await permissionsFor(c.env, c.get('user')!.role)).view_property_contacts
 }
 
+/** B2B / net rates from the resort are for management only (permission "view_net_rates"). */
+async function canSeeNet(c: Context<AppEnv>) {
+  return (await permissionsFor(c.env, c.get('user')!.role)).view_net_rates
+}
+
 async function loadEditor(c: Context<AppEnv>, id: number) {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', id)
   if (!p) return null
@@ -442,10 +454,10 @@ async function loadEditor(c: Context<AppEnv>, id: number) {
   // Per-room fixed-rate seasons are edited here; percentage and all-property seasons stay on the Rates page.
   const mine = seasonRows.filter((s) => s.property_id === p.id && s.room_id != null && s.rate != null)
   const others = seasonRows.filter((s) => !mine.includes(s))
-  return propertyForm(c, p, rooms, media, mine, others, dests, await canSeeContacts(c))
+  return propertyForm(c, p, rooms, media, mine, others, dests, await canSeeContacts(c), await canSeeNet(c))
 }
 
-propertyEditorRoutes.get('/admin/properties/new', requirePerm('manage_properties'), async (c) => propertyForm(c, {}, [], [], [], [], await destinations(c.env), await canSeeContacts(c)))
+propertyEditorRoutes.get('/admin/properties/new', requirePerm('manage_properties'), async (c) => propertyForm(c, {}, [], [], [], [], await destinations(c.env), await canSeeContacts(c), await canSeeNet(c)))
 
 propertyEditorRoutes.get('/admin/properties/:id', requirePerm('manage_properties'), async (c) => {
   const r = await loadEditor(c, int(c.req.param('id')))
@@ -562,11 +574,13 @@ propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_propertie
 })
 
 // ---- Room categories ----
-function roomValues(f: Form) {
+function roomValues(f: Form, withNet: boolean) {
   const optInt = (v: string | undefined) => (v && Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : null)
   return {
     name: str(f.name, 80), capacity: Math.max(1, int(f.capacity, 2)), bed_type: str(f.bed_type, 60) || null, units: Math.max(0, int(f.units, 1)),
-    base_rate: Math.max(0, int(f.base_rate)), weekend_rate: optInt(f.weekend_rate) || null, net_rate: optInt(f.net_rate) || null,
+    base_rate: Math.max(0, int(f.base_rate)), weekend_rate: optInt(f.weekend_rate) || null, staff_rate: optInt(f.staff_rate) || null,
+    // Only management may set the net rate; others leave it unchanged.
+    ...(withNet ? { net_rate: optInt(f.net_rate) || null } : {}),
     min_nights: Math.max(1, int(f.min_nights, 1)), inclusions: str(f.inclusions, 200), description: str(f.description, 1500),
     facilities: JSON.stringify((f.__all.amenities ?? []).filter((x) => x in ROOM_AMENITIES)),
     size_sqft: optInt(f.size_sqft), room_view: str(f.room_view, 40) || null, max_adults: optInt(f.max_adults), max_children: optInt(f.max_children),
@@ -577,7 +591,7 @@ function roomValues(f: Form) {
 propertyEditorRoutes.post('/admin/properties/:id/rooms', requirePerm('manage_properties'), async (c) => {
   const id = int(c.req.param('id'))
   if (!(await first(c.env, 'SELECT 1 FROM properties WHERE id = ?', id))) return c.notFound()
-  const v = roomValues(await form(c))
+  const v = roomValues(await form(c), await canSeeNet(c))
   if (!v.name) return redirectMsg(c, `/admin/properties/${id}#rooms`, { err: 'Room category name is required.' })
   const cols = Object.keys(v)
   await insertId(c.env, `INSERT INTO rooms (property_id, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, id, ...(Object.values(v) as (string | number | null)[]))
@@ -590,11 +604,12 @@ propertyEditorRoutes.post('/admin/rooms/:id', requirePerm('manage_properties'), 
   const r = await first<RoomRow>(c.env, 'SELECT * FROM rooms WHERE id = ?', int(c.req.param('id')))
   if (!r) return c.notFound()
   const f = await form(c)
-  const v = { ...roomValues(f), active: f.active ? 1 : 0 }
+  const v = { ...roomValues(f, await canSeeNet(c)), active: f.active ? 1 : 0 }
   const cols = Object.keys(v)
   await run(c.env, `UPDATE rooms SET ${cols.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...(Object.values(v) as (string | number | null)[]), r.id)
-  if (r.base_rate !== v.base_rate || r.weekend_rate !== v.weekend_rate || r.net_rate !== v.net_rate) {
-    await logActivity(c.env, c.get('user')!.id, 'price.changed', 'room', r.id, { from: { base: r.base_rate, weekend: r.weekend_rate, net: r.net_rate }, to: { base: v.base_rate, weekend: v.weekend_rate, net: v.net_rate } })
+  const net = 'net_rate' in v ? v.net_rate : r.net_rate
+  if (r.base_rate !== v.base_rate || r.weekend_rate !== v.weekend_rate || r.net_rate !== net || r.staff_rate !== v.staff_rate) {
+    await logActivity(c.env, c.get('user')!.id, 'price.changed', 'room', r.id, { from: { guest: r.base_rate, weekend: r.weekend_rate, staff: r.staff_rate, net: r.net_rate }, to: { guest: v.base_rate, weekend: v.weekend_rate, staff: v.staff_rate, net } })
   }
   if (r.units !== v.units) await logActivity(c.env, c.get('user')!.id, 'inventory.changed', 'room', r.id, { from: r.units, to: v.units })
   await afterPropertySave(c, r.property_id)
@@ -603,6 +618,7 @@ propertyEditorRoutes.post('/admin/rooms/:id', requirePerm('manage_properties'), 
 
 /** Rooms and seasons that "Quick fill" found, added on save when staff leave the box ticked. Returns a message part. */
 async function applyExtracted(c: Context<AppEnv>, propertyId: number, f: Form): Promise<string> {
+  const withNet = await canSeeNet(c)
   if (!f.ai_apply_extra) return ''
   const rooms = parseJson<ExtractedRoom[]>(f.ai_rooms, [])
   const seasons = parseJson<ExtractedSeason[]>(f.ai_seasons, [])
@@ -615,7 +631,7 @@ async function applyExtracted(c: Context<AppEnv>, propertyId: number, f: Form): 
       Object.fromEntries(Object.entries(r).filter(([, v]) => !Array.isArray(v)).map(([k, v]) => [k, typeof v === 'boolean' ? (v ? '1' : '') : String(v)])),
       { __all: { amenities: Array.isArray(r.amenities) ? r.amenities.map(String) : [] } },
     ) as Form
-    const v = roomValues(fake)
+    const v = roomValues(fake, withNet)
     if (!v.name || byName.has(v.name.toLowerCase())) continue
     const cols = Object.keys(v)
     const rid = await insertId(c.env, `INSERT INTO rooms (property_id, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, propertyId, ...(Object.values(v) as (string | number | null)[]))
@@ -645,6 +661,7 @@ async function applyExtracted(c: Context<AppEnv>, propertyId: number, f: Form): 
 
 /** Room category blocks on the new-property form (nr0_…, nr1_…). Returns block index → new room id. */
 async function addNewRooms(c: Context<AppEnv>, propertyId: number, f: Form): Promise<Map<string, number>> {
+  const withNet = await canSeeNet(c)
   const out = new Map<string, number>()
   const idxs = [...new Set(Object.keys(f).map((k) => k.match(/^nr(\d{1,2})_name$/)?.[1]).filter((x): x is string => !!x))]
   for (const idx of idxs.slice(0, 30)) {
@@ -653,7 +670,7 @@ async function addNewRooms(c: Context<AppEnv>, propertyId: number, f: Form): Pro
       Object.fromEntries(Object.entries(f).filter(([k]) => k.startsWith(pf)).map(([k, v]) => [k.slice(pf.length), v])),
       { __all: { amenities: f.__all[`${pf}amenities`] ?? [] } },
     ) as Form
-    const v = roomValues(fake)
+    const v = roomValues(fake, withNet)
     if (!v.name) continue
     const cols = Object.keys(v)
     out.set(idx, await insertId(c.env, `INSERT INTO rooms (property_id, ${cols.join(', ')}) VALUES (?, ${placeholders(cols.length)})`, propertyId, ...(Object.values(v) as (string | number | null)[])))

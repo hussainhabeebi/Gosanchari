@@ -174,7 +174,7 @@ for p in props:
         room_ids.setdefault(p['id'], []).append(room_id)
         name, cap, bed, units, base, wk, net, inc = r
         amen = ['hot_water', 'wifi', 'kettle'] + (['ac', 'tv'] if 'ac' in p['facilities'] else ['fan']) + (['balcony'] if p['type'] in ('villa', 'resort', 'cottage') else [])
-        out.append(f"INSERT INTO rooms (id, property_id, name, capacity, bed_type, units, base_rate, weekend_rate, net_rate, inclusions, facilities, size_sqft, max_adults, max_children, extra_bed, extra_bed_rate) VALUES ({room_id}, {p['id']}, {q(name)}, {cap}, {q(bed)}, {units}, {base}, {wk}, {net}, {q(inc)}, {q(amen)}, {250 + 60 * cap}, {min(cap, 3)}, {max(0, cap - 2)}, 1, 1000);")
+        out.append(f"INSERT INTO rooms (id, property_id, name, capacity, bed_type, units, base_rate, weekend_rate, net_rate, staff_rate, inclusions, facilities, size_sqft, max_adults, max_children, extra_bed, extra_bed_rate) VALUES ({room_id}, {p['id']}, {q(name)}, {cap}, {q(bed)}, {units}, {base}, {wk}, {net}, {net + round((base - net) * 0.4 / 100) * 100}, {q(inc)}, {q(amen)}, {250 + 60 * cap}, {min(cap, 3)}, {max(0, cap - 2)}, 1, 1000);")
     # Photos in sections: first picture = facade, scenery = view, room = first room category, pool = pool.
     for i, ph in enumerate(p['photos']):
         cat = 'room' if ph == 'room' else 'pool' if ph == 'pool' else 'facade' if i == 0 else 'view'

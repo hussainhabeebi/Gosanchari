@@ -468,3 +468,6 @@ code { overflow-wrap: anywhere; }
 .share-thumbs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 .share-thumbs img { width: 120px; height: 90px; object-fit: cover; border-radius: 8px; flex: 0 0 auto; }
 .rate-list { margin: 0; padding-left: 18px; }
+.rate-strip { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 8px 10px; background: var(--green-soft); border-radius: 8px; }
+.pill-red { background: var(--red-soft); color: #b42318; }
+.rate-tiers { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; }

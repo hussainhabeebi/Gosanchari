@@ -2,7 +2,7 @@
 
 export const ASK_AI_TABLES: Record<string, string> = {
   properties: 'id, name, type, destination, status, rating_avg, rating_count, is_partner, commission_pct, created_at',
-  rooms: 'id, property_id, name, capacity, units, base_rate, weekend_rate, net_rate',
+  rooms: 'id, property_id, name, capacity, units, base_rate, weekend_rate',
   bookings:
     "id, code, user_id, property_id, room_id, check_in, check_out, nights, adults, children, rooms_count, subtotal, discount, taxes, total, amount_paid, status ('pending','confirmed','checked_in','completed','cancelled'), payment_status ('unpaid','partial','paid','failed','refunded','partially_refunded'), source, guest_name, staff_id, quotation_id, enquiry_id, created_at, cancelled_at",
   payments: "id, booking_id, amount, status ('created','paid','failed','refunded'), created_at",

@@ -66,6 +66,8 @@ export interface RoomRow {
   base_rate: number
   weekend_rate: number | null
   net_rate: number | null
+  /** Internal benchmark rate for staff (between net and guest rate). */
+  staff_rate: number | null
   min_nights: number
   active: number
   description: string
@@ -191,6 +193,8 @@ export interface QuoteOptionRow {
   total: number
   discount_pct: number
   discount_approved_by: number | null
+  /** Per-night selling price set by staff; null = website price by the rate rules. */
+  guest_rate: number | null
 }
 
 export interface BookingRow {

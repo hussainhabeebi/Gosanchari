@@ -4,7 +4,7 @@ import { Hono } from 'hono'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, ChartHead, Empty, Field, jsonScript, Pager, Pill, Select, Stat, Table } from '../views/components'
-import { hashPassword, requirePerm, requireStaff } from '../lib/auth'
+import { hashPassword, permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { askAi } from '../lib/assist'
 import { DEFAULT_PERMISSIONS, PERMISSION_LABELS, ROLE_LABELS, STAFF_ROLES, type PermissionKey, type Permissions, type Role } from '../lib/permissions'
@@ -557,6 +557,7 @@ admin2Routes.post('/admin/settings', requirePerm('manage_settings'), async (c) =
 
 // ---------- 47. Activity log ----------
 admin2Routes.get('/admin/activity', requirePerm('view_activity'), async (c) => {
+  const showNet = (await permissionsFor(c.env, c.get('user')!.role)).view_net_rates
   const pg = pageNum(c)
   const userId = int(c.req.query('user'))
   const action = str(c.req.query('action'), 40)
@@ -596,7 +597,7 @@ admin2Routes.get('/admin/activity', requirePerm('view_activity'), async (c) => {
               <td>{a.name ?? 'System / guest'}{a.role && a.role !== 'guest' ? <span class="muted small"> ({a.role})</span> : null}</td>
               <td><code>{a.action}</code></td>
               <td>{href ? <a href={href}>{a.entity} #{a.entity_id}</a> : `${a.entity}${a.entity_id ? ' #' + a.entity_id : ''}`}</td>
-              <td class="small details-cell">{a.details !== '{}' ? a.details.slice(0, 300) : ''}</td>
+              <td class="small details-cell">{a.details !== '{}' ? (showNet ? a.details : a.details.replace(/"net(_rate)?":\s*-?\d+(\.\d+)?/g, '"net":"hidden"')).slice(0, 300) : ''}</td>
             </tr>
           )
         })}

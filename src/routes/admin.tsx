@@ -168,7 +168,7 @@ adminRoutes.post('/admin/properties/:id/duplicate', requirePerm('manage_properti
      SELECT ?, name || ' (copy)', type, stay_type, destination, address, map_url, lat, lng, owner_name, owner_phone, owner_email, is_partner, commission_pct, highlights, description, description_ml, facilities, meal_plans, checkin_time, checkout_time, cancellation_policy, house_rules, id_required, nearby, pet_friendly, family_friendly, internal_notes, star_category, built_year, themes, languages, how_to_reach, best_time, good_to_know, dining, policies, contact, 'draft' FROM properties WHERE id = ?`,
     slug, p.id,
   )
-  await run(c.env, 'INSERT INTO rooms (property_id, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, min_nights, description, size_sqft, room_view, max_adults, max_children, extra_bed, extra_bed_rate) SELECT ?, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, min_nights, description, size_sqft, room_view, max_adults, max_children, extra_bed, extra_bed_rate FROM rooms WHERE property_id = ? AND active = 1', id, p.id)
+  await run(c.env, 'INSERT INTO rooms (property_id, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, staff_rate, min_nights, description, size_sqft, room_view, max_adults, max_children, extra_bed, extra_bed_rate) SELECT ?, name, capacity, bed_type, facilities, inclusions, units, base_rate, weekend_rate, net_rate, staff_rate, min_nights, description, size_sqft, room_view, max_adults, max_children, extra_bed, extra_bed_rate FROM rooms WHERE property_id = ? AND active = 1', id, p.id)
   await logActivity(c.env, c.get('user')!.id, 'property.duplicated', 'property', id, { from: p.id })
   return c.redirect(`/admin/properties/${id}`, 303)
 })
@@ -399,12 +399,12 @@ adminRoutes.get('/admin/quotes', requirePerm('approve_discounts'), (c) => render
 adminRoutes.post('/admin/quotes/:id/approve', requirePerm('approve_discounts'), async (c) => {
   const id = int(c.req.param('id'))
   const u = c.get('user')!
-  await run(c.env, 'UPDATE quotation_options SET discount_approved_by = ? WHERE quotation_id = ? AND discount_pct > 0', u.id, id)
+  await run(c.env, 'UPDATE quotation_options SET discount_approved_by = ? WHERE quotation_id = ?', u.id, id)
   await run(c.env, "UPDATE quotations SET status = 'draft', updated_at = ? WHERE id = ? AND status = 'pending_approval'", nowIso(), id)
   const q = await first<{ staff_id: number | null; code: string; guest_name: string }>(c.env, 'SELECT staff_id, code, guest_name FROM quotations WHERE id = ?', id)
-  if (q?.staff_id) await run(c.env, 'INSERT INTO tasks (assigned_to, quotation_id, guest_name, reason, due_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', q.staff_id, id, q.guest_name, `Discount approved on ${q.code} — send it now`, nowIso(), u.id)
+  if (q?.staff_id) await run(c.env, 'INSERT INTO tasks (assigned_to, quotation_id, guest_name, reason, due_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', q.staff_id, id, q.guest_name, `Price approved on ${q.code} — send it now`, nowIso(), u.id)
   await logActivity(c.env, u.id, 'quote.discount_approved', 'quotation', id)
-  return redirectMsg(c, '/admin/quotes', { ok: 'Discount approved. The staff member can now send the quote.' })
+  return redirectMsg(c, '/admin/quotes', { ok: 'Approved. The staff member can now send the quote.' })
 })
 
 adminRoutes.get('/admin/bookings', requirePerm('approve_cancellations'), (c) => renderBookings(c, true))

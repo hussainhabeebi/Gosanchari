@@ -33,7 +33,7 @@ export interface Permissions {
 export type PermissionKey = keyof Permissions
 
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
-  view_net_rates: 'See net rates and commission',
+  view_net_rates: 'See B2B / net rates, margins and commission (management only)',
   max_discount_pct: 'Maximum discount on a quote (%)',
   view_all_enquiries: 'See every enquiry (not only their own)',
   manage_enquiries: 'Work on enquiries',

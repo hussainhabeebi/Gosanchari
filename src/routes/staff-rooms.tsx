@@ -120,9 +120,10 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
               <div>
                 <h3 class="small">Prices per night</h3>
                 <ul class="rate-list small">
-                  <li>Weekdays: <strong>{money(r.base_rate)}</strong></li>
-                  {r.weekend_rate && r.weekend_rate !== r.base_rate && <li>Fri & Sat: <strong>{money(r.weekend_rate)}</strong></li>}
-                  {perms.view_net_rates && r.net_rate && <li class="internal">Net (internal): {money(r.net_rate)}</li>}
+                  {perms.view_net_rates && r.net_rate && <li class="internal">B2B / Net rate (management only): {money(r.net_rate)}</li>}
+                  <li class="internal">Internal staff rate: <strong>{r.staff_rate ? money(r.staff_rate) : 'not set'}</strong></li>
+                  <li>Guest rate, weekdays: <strong>{money(r.base_rate)}</strong></li>
+                  {r.weekend_rate && r.weekend_rate !== r.base_rate && <li>Guest rate, Fri & Sat: <strong>{money(r.weekend_rate)}</strong></li>}
                   {r.extra_bed ? <li>Extra bed: {r.extra_bed_rate ? money(r.extra_bed_rate) : 'available'}</li> : null}
                   {r.min_nights > 1 && <li>Minimum {r.min_nights} nights</li>}
                   {seasons.filter((s) => s.rates[r.id] && s.rates[r.id] !== r.base_rate).map((s) => <li>{s.name} ({fmtDate(s.start)} – {fmtDate(s.end)}): <strong>{money(s.rates[r.id])}</strong>{s.minNights ? `, min ${s.minNights} nights` : ''}</li>)}
