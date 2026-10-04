@@ -13,6 +13,8 @@ export interface RoomRates {
   units: number
   staff_rate?: number | null
   /** Guests included in the room rate; null = all `capacity` guests are included. */
+  /** Nights counted as weekend, as JS weekday numbers of the night ("5,6" = Fri & Sat; "5,6,0" adds Sunday). */
+  weekend_nights?: string | null
   base_guests?: number | null
   /** Charge per extra adult / child per night above base_guests (child falls back to adult). */
   extra_adult_rate?: number | null
@@ -61,7 +63,22 @@ export interface SeasonRate {
   /** Internal staff rate and B2B net rate for this season (room-specific seasons only). */
   staff_rate?: number | null
   net_rate?: number | null
+  /** Weekend versions of the season rates (guest / staff / net). */
+  weekend_rate?: number | null
+  staff_weekend_rate?: number | null
+  net_weekend_rate?: number | null
+  /** Flat amount added per room per night on top of whatever rate applies (e.g. X'mas supplement). */
+  supplement?: number | null
+  net_supplement?: number | null
 }
+
+/** Weekend nights for a room's property (default Friday and Saturday nights). */
+export function weekendNights(room: { weekend_nights?: string | null }): number[] {
+  const days = (room.weekend_nights ?? '5,6').split(',').map((x) => parseInt(x, 10)).filter((d) => d >= 0 && d <= 6)
+  return days.length ? days : [5, 6]
+}
+
+const isSupplementOnly = (s: SeasonRate) => !!s.supplement && !(s.rate && s.rate > 0) && s.pct_adjust == null
 
 /** Season types, in the order they win when dates overlap (special first). */
 export const SEASON_KINDS: Record<string, string> = {
@@ -144,13 +161,18 @@ export interface PriceResult {
   errors: string[]
 }
 
-function seasonFor(room: RoomRates, seasons: SeasonRate[], date: string): SeasonRate | undefined {
-  const matching = seasons.filter(
+function seasonsOn(room: RoomRates, seasons: SeasonRate[], date: string): SeasonRate[] {
+  return seasons.filter(
     (s) =>
       s.start_date <= date &&
       date <= s.end_date &&
       (s.room_id === room.id || (s.room_id == null && (s.property_id == null || s.property_id === room.property_id))),
   )
+}
+
+function seasonFor(room: RoomRates, seasons: SeasonRate[], date: string, has?: (s: SeasonRate) => boolean): SeasonRate | undefined {
+  // Supplements are added on top later; they never replace the rate.
+  const matching = seasonsOn(room, seasons, date).filter((s) => !isSupplementOnly(s) && (!has || has(s)))
   // Special / holiday beats season beats off-season; then room-specific beats property-wide beats global;
   // then the most recent start wins.
   const kind = (s: SeasonRate) => KIND_RANK[s.kind ?? 'season'] ?? 2
@@ -159,30 +181,61 @@ function seasonFor(room: RoomRates, seasons: SeasonRate[], date: string): Season
   return matching[0]
 }
 
-export function nightlyRate(room: RoomRates, seasons: SeasonRate[], date: string): NightLine {
-  const dow = weekday(date)
-  const isWeekendNight = dow === 5 || dow === 6 // Friday and Saturday nights
-  const regular = isWeekendNight && room.weekend_rate ? room.weekend_rate : room.base_rate
-  const s = seasonFor(room, seasons, date)
-  if (s) {
-    if (s.rate != null && s.rate > 0) return { date, rate: Math.round(s.rate), label: s.name }
-    if (s.pct_adjust != null) return { date, rate: Math.round(regular * (1 + s.pct_adjust / 100)), label: s.name }
+/** Supplements for a night (most specific one per name, so a room-level supplement replaces a property-wide one). */
+function supplementsOn(room: RoomRates, seasons: SeasonRate[], date: string): SeasonRate[] {
+  const byName = new Map<string, SeasonRate>()
+  const rank = (s: SeasonRate) => (s.room_id != null ? 2 : s.property_id != null ? 1 : 0)
+  for (const s of seasonsOn(room, seasons, date).filter(isSupplementOnly)) {
+    const cur = byName.get(s.name)
+    if (!cur || rank(s) > rank(cur)) byName.set(s.name, s)
   }
-  return { date, rate: regular, label: isWeekendNight && room.weekend_rate ? 'Weekend' : 'Standard' }
+  return [...byName.values()]
 }
 
-/** Average internal staff rate per room-night for a stay (a season's staff rate overrides the room's). */
-export function staffRateForStay(room: RoomRates, seasons: SeasonRate[], checkIn: string, checkOut: string): number | null {
+export function isWeekendNight(room: RoomRates, date: string): boolean {
+  return weekendNights(room).includes(weekday(date))
+}
+
+export function nightlyRate(room: RoomRates, seasons: SeasonRate[], date: string): NightLine {
+  const isWeekend = isWeekendNight(room, date)
+  const regular = isWeekend && room.weekend_rate ? room.weekend_rate : room.base_rate
+  const s = seasonFor(room, seasons, date)
+  let line: NightLine = { date, rate: regular, label: isWeekend && room.weekend_rate ? 'Weekend' : 'Standard' }
+  if (s) {
+    if (s.rate != null && s.rate > 0) line = { date, rate: Math.round(isWeekend && s.weekend_rate ? s.weekend_rate : s.rate), label: s.name }
+    else if (s.pct_adjust != null) line = { date, rate: Math.round(regular * (1 + s.pct_adjust / 100)), label: s.name }
+  }
+  for (const sup of supplementsOn(room, seasons, date)) line = { date, rate: line.rate + (sup.supplement ?? 0), label: `${line.label} + ${sup.name}` }
+  return line
+}
+
+/** Per-night rate of another tier (staff or net) for a stay: season tier rates beat the room's, weekends and supplements included. */
+function tierForStay(room: RoomRates, seasons: SeasonRate[], checkIn: string, checkOut: string, tier: 'staff' | 'net'): number | null {
   const nights = eachNight(checkIn, checkOut)
-  if (!nights.length) return room.staff_rate ?? null
+  const roomRate = tier === 'staff' ? room.staff_rate : (room as RoomRates & { net_rate?: number | null }).net_rate
+  if (!nights.length) return roomRate ?? null
   let sum = 0
   for (const d of nights) {
-    const s = seasonFor(room, seasons, d)
-    const v = (s?.staff_rate ?? null) || room.staff_rate || null
+    // The strongest season that actually has a figure for this tier (a "+25% Christmas" rule has no net rate).
+    const s = seasonFor(room, seasons, d, (x) => !!(tier === 'staff' ? x.staff_rate : x.net_rate))
+    const wk = isWeekendNight(room, d)
+    const seasonV = s ? (tier === 'staff' ? (wk && s.staff_weekend_rate) || s.staff_rate : (wk && s.net_weekend_rate) || s.net_rate) : null
+    const v = seasonV || roomRate || null
     if (!v) return null
-    sum += v
+    const sup = supplementsOn(room, seasons, d).reduce((a, x) => a + ((tier === 'net' ? x.net_supplement ?? x.supplement : x.supplement) ?? 0), 0)
+    sum += v + sup
   }
   return Math.round(sum / nights.length)
+}
+
+/** Average internal staff rate per room-night for a stay (season staff rates, weekends and supplements included). */
+export function staffRateForStay(room: RoomRates, seasons: SeasonRate[], checkIn: string, checkOut: string): number | null {
+  return tierForStay(room, seasons, checkIn, checkOut, 'staff')
+}
+
+/** Average B2B net rate per room-night for a stay (management only). */
+export function netRateForStay(room: RoomRates & { net_rate?: number | null }, seasons: SeasonRate[], checkIn: string, checkOut: string): number | null {
+  return tierForStay(room, seasons, checkIn, checkOut, 'net')
 }
 
 export function taxRateFor(perRoomNight: number, slabs: TaxSlab[] = DEFAULT_TAX_SLABS): number {
@@ -289,20 +342,30 @@ export function discountPercent(subtotal: number, discount: number): number {
 
 /** Season rows → per-room nightly rate for each upcoming season (room-specific beats property-wide beats all-property). */
 export function seasonRates(rooms: Pick<RoomRow, 'id' | 'base_rate'>[], rows: SeasonRate[]) {
-  const groups = new Map<string, { name: string; kind: string; start: string; end: string; minNights: number | null; rates: Record<number, number>; staffRates: Record<number, number> }>()
+  type G = { name: string; kind: string; start: string; end: string; minNights: number | null; rates: Record<number, number>; weekendRates: Record<number, number>; staffRates: Record<number, number>; supplements: Record<number, number> }
+  const groups = new Map<string, G>()
   for (const s of rows) {
     const key = `${s.name}|${s.start_date}|${s.end_date}`
-    if (!groups.has(key)) groups.set(key, { name: s.name, kind: s.kind ?? 'season', start: s.start_date, end: s.end_date, minNights: s.min_nights, rates: {}, staffRates: {} })
+    if (!groups.has(key)) groups.set(key, { name: s.name, kind: s.kind ?? 'season', start: s.start_date, end: s.end_date, minNights: s.min_nights, rates: {}, weekendRates: {}, staffRates: {}, supplements: {} })
   }
   for (const g of groups.values()) {
     const inGroup = rows.filter((s) => s.name === g.name && s.start_date === g.start && s.end_date === g.end)
     for (const r of rooms) {
       const s = inGroup.find((x) => x.room_id === r.id) ?? inGroup.find((x) => x.room_id == null && x.property_id != null) ?? inGroup.find((x) => x.property_id == null)
-      if (!s) { g.rates[r.id] = r.base_rate; continue }
-      g.rates[r.id] = s.rate ?? Math.round(r.base_rate * (1 + (s.pct_adjust ?? 0) / 100))
+      if (!s) continue
+      if (isSupplementOnly(s)) g.supplements[r.id] = s.supplement!
+      else g.rates[r.id] = s.rate ?? Math.round(r.base_rate * (1 + (s.pct_adjust ?? 0) / 100))
+      if (s.weekend_rate) g.weekendRates[r.id] = s.weekend_rate
       if (s.staff_rate) g.staffRates[r.id] = s.staff_rate
       if (s.min_nights) g.minNights = Math.max(g.minNights ?? 0, s.min_nights)
     }
   }
   return [...groups.values()].sort((a, b) => a.start.localeCompare(b.start))
+}
+
+const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+/** "Fri – Sun nights" style label for a property's weekend. */
+export function weekendLabel(weekend_nights: string | null | undefined): string {
+  const d = weekendNights({ weekend_nights }).slice().sort((a, b) => ((a + 2) % 7) - ((b + 2) % 7))
+  return d.length > 1 ? `${DAY[d[0]]} – ${DAY[d[d.length - 1]]} nights` : `${DAY[d[0]]} nights`
 }

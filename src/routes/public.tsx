@@ -1,8 +1,8 @@
 // Public pages (1–9) and the public quotation link (14).
 
 import { Hono, type Context } from 'hono'
-import { COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
-import { seasonKindLabel, seasonRates, type SeasonRate } from '../lib/pricing'
+import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
+import { seasonKindLabel, seasonRates, weekendLabel, type SeasonRate } from '../lib/pricing'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
@@ -333,7 +333,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
     all<ReviewRow>(c.env, "SELECT * FROM reviews WHERE property_id = ? AND status = 'approved' ORDER BY id DESC LIMIT 20", p.id),
     similarProperties(c.env, p.id, 4),
     savedIds(c),
-    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
+    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
   const photos = media.filter((m) => m.media_type !== 'video' && m.r2_key).sort((a, b) => COVER_ORDER.indexOf(a.category) - COVER_ORDER.indexOf(b.category) || a.sort - b.sort)
   const videos = media.filter((m) => m.media_type === 'video')
@@ -497,9 +497,9 @@ publicRoutes.get('/stay/:slug', async (c) => {
                 <table class="table rate-table">
                   <thead><tr><th>Season</th><th>Dates</th>{rooms.map((r) => <th>{r.name}</th>)}</tr></thead>
                   <tbody>
-                    <tr><td>Regular</td><td>Sun – Thu nights</td>{rooms.map((r) => <td>{money(r.base_rate)}</td>)}</tr>
-                    {rooms.some((r) => r.weekend_rate && r.weekend_rate !== r.base_rate) && <tr><td>Weekend</td><td>Fri & Sat nights</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>}
-                    {seasonTable.map((s) => <tr><td>{s.name} <span class={`pill pill-kind-${s.kind}`}>{seasonKindLabel(s.kind)}</span>{s.minNights ? <div class="muted small">min {s.minNights} nights</div> : null}</td><td class="nowrap">{fmtShortDate(s.start)} – {fmtShortDate(s.end)}</td>{rooms.map((r) => <td>{money(s.rates[r.id])}</td>)}</tr>)}
+                    <tr><td>Regular</td><td>Weekdays</td>{rooms.map((r) => <td>{money(r.base_rate)}</td>)}</tr>
+                    {rooms.some((r) => r.weekend_rate && r.weekend_rate !== r.base_rate) && <tr><td>Weekend</td><td>{weekendLabel(p.weekend_nights)}</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>}
+                    {seasonTable.map((s) => <tr><td>{s.name} <span class={`pill pill-kind-${s.kind}`}>{seasonKindLabel(s.kind)}</span>{s.minNights ? <div class="muted small">min {s.minNights} nights</div> : null}</td><td class="nowrap">{fmtShortDate(s.start)} – {fmtShortDate(s.end)}</td>{rooms.map((r) => <td>{s.supplements[r.id] ? `+${money(s.supplements[r.id])} on the usual rate` : s.rates[r.id] ? <>{money(s.rates[r.id])}{s.weekendRates[r.id] && s.weekendRates[r.id] !== s.rates[r.id] ? <div class="muted small">weekend {money(s.weekendRates[r.id])}</div> : null}</> : <span class="muted">regular</span>}</td>)}</tr>)}
                   </tbody>
                 </table>
               </div>
@@ -935,7 +935,7 @@ publicRoutes.get('/q/:token', async (c) => {
           <table class="breakdown">
             <tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>
             {o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}
-            {o.extra_charges > 0 && <tr><td>{o.extra_label || 'Extras'}</td><td>{money(o.extra_charges)}</td></tr>}
+            {o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}
             <tr><td>GST</td><td>{money(o.taxes)}</td></tr>
             <tr class="total"><td>Total</td><td>{money(o.total)}</td></tr>
           </table>

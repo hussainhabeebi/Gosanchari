@@ -518,3 +518,11 @@ code { overflow-wrap: anywhere; }
 .as-best { border: 2px solid var(--green-2); }
 .pill-best { align-self: flex-start; background: var(--green-2); color: #fff; }
 .relax { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px 0 14px; } .relax p { flex-basis: 100%; margin: 0; }
+.season-supplement { display: none; }
+.season-edit form:has(input[name=mode][value=supplement]:checked) .season-supplement { display: flex; }
+.season-edit form:has(input[name=mode][value=supplement]:checked) .season-room { display: none; }
+.pre-line { white-space: pre-line; } .rate-basics { line-height: 1.6; }
+.inline-h { display: inline; margin: 0; font-size: 1.15rem; }
+.addon-pick { border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; display: grid; gap: 6px; }
+.addon-row { flex-wrap: wrap; }
+.addon-row input.w-sm { width: 64px; display: inline-block; padding: 4px 6px; }

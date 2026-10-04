@@ -9,7 +9,7 @@
 import type { Env } from '../env'
 import { aiJson, aiText } from './ai'
 import { all, roomAvailability } from './db'
-import { calculatePrice, seasonKindLabel, staffRateForStay, type SeasonRate } from './pricing'
+import { calculatePrice, netRateForStay, seasonKindLabel, staffRateForStay, type SeasonRate } from './pricing'
 import { destinations } from './properties'
 import { FACILITIES, MEAL_PLANS, parseQueryRules, PROPERTY_TYPES, sanitizeFilters, type SearchFilters } from './search'
 import { getSettings } from './settings'
@@ -253,8 +253,8 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
   if (!ids.length) return { need, checkIn, checkOut, nights, guests, assumedDates, options: [] }
   const ph = ids.map(() => '?').join(', ')
   const [rooms, seasons, avail] = await Promise.all([
-    all<RoomRow>(env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${ph})`, ...ids),
-    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date <= ?`, ...ids, checkIn, checkOut),
+    all<RoomRow & { weekend_nights: string }>(env, `SELECT r.*, p.weekend_nights FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.active = 1 AND r.property_id IN (${ph})`, ...ids),
+    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date <= ?`, ...ids, checkIn, checkOut),
     roomAvailability(env, ids, checkIn, checkOut),
   ])
 
@@ -309,8 +309,7 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
 }
 
 function avgNet(r: RoomRow, ss: SeasonRate[], checkIn: string, checkOut: string): number | null {
-  const net = staffRateForStay({ ...r, staff_rate: r.net_rate }, ss.map((x) => ({ ...x, staff_rate: x.net_rate ?? null })), checkIn, checkOut)
-  return net
+  return netRateForStay(r, ss, checkIn, checkOut)
 }
 
 /** Everything staff may need about one property (for "what's the cancellation policy at X?" questions). */

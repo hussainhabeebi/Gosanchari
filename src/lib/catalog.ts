@@ -161,6 +161,8 @@ export interface Contact {
   email?: string
   email2?: string
   bank_details?: string
+  /** More contacts, one per line: "Name – role – phone". */
+  others?: string
 }
 export const CONTACT_FIELDS: [keyof Contact, string][] = [
   ['person', 'Contact person'],
@@ -170,6 +172,7 @@ export const CONTACT_FIELDS: [keyof Contact, string][] = [
   ['email', 'Email ID 1'],
   ['email2', 'Email ID 2'],
   ['bank_details', 'Account details (bank / UPI)'],
+  ['others', 'More contacts (one per line: name – role – phone)'],
 ]
 
 export const dining = (s: string | null | undefined) => parseJson<Dining>(s, {})
@@ -212,4 +215,43 @@ export function guestsText(r: { capacity: number; base_guests?: number | null; e
   const child = r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''
   const extra = r.extra_adult_rate ? ` (+${money(r.extra_adult_rate)}/adult${child} per night)` : ''
   return `${base} guests incl., max ${r.capacity}${extra}`
+}
+
+/** Extras a property sells (campfire, candle-light dinner…): guest price, and the B2B net cost (management only). */
+export interface Addon {
+  name: string
+  price: number
+  net?: number | null
+  /** "stay" = once per stay (default), "night" = per night, "person" = per person */
+  per?: 'stay' | 'night' | 'person'
+}
+export const ADDON_PER: Record<string, string> = { stay: 'per stay', night: 'per night', person: 'per person' }
+export const addons = (s: string | null | undefined) => parseJson<Addon[]>(s, []).filter((a) => a && a.name)
+
+/** "Name | guest ₹ | net ₹ | per" lines → add-ons (net kept from `previous` when the editor can't see it). */
+export function parseAddonLines(text: string, previous: Addon[], withNet: boolean): Addon[] {
+  const out: Addon[] = []
+  for (const line of text.split('\n')) {
+    const [name, price, net, per] = line.split('|').map((x) => x.trim())
+    if (!name) continue
+    const n = (v: string | undefined) => (v && /\d/.test(v) ? Math.max(0, parseInt(v.replace(/[^\d]/g, ''), 10)) : null)
+    const p = withNet ? per : net
+    const perV = (['stay', 'night', 'person'].includes((p ?? '').toLowerCase()) ? (p ?? '').toLowerCase() : 'stay') as Addon['per']
+    const old = previous.find((a) => a.name.toLowerCase() === name.toLowerCase())
+    out.push({ name: name.slice(0, 80), price: n(price) ?? 0, net: withNet ? n(net) : old?.net ?? null, per: perV })
+  }
+  return out.slice(0, 40)
+}
+
+export function addonLines(list: Addon[], withNet: boolean): string {
+  return list.map((a) => (withNet ? [a.name, a.price, a.net ?? '', a.per ?? 'stay'] : [a.name, a.price, a.per ?? 'stay']).join(' | ')).join('\n')
+}
+
+export interface ChosenAddon { name: string; price: number; qty: number; total: number }
+export const chosenAddons = (s: string | null | undefined) => parseJson<ChosenAddon[]>(s, []).filter((a) => a && a.name)
+/** Guest-facing label for a quote option's extras: "Campfire + Candle-light dinner + Airport pickup". */
+export function extrasLabel(o: { extra_label: string | null; addons?: string | null; extra_charges: number }): string {
+  const adds = chosenAddons(o.addons)
+  const manual = o.extra_charges - adds.reduce((a, x) => a + x.total, 0)
+  return [...adds.map((a) => (a.qty > 1 ? `${a.name} × ${a.qty}` : a.name)), ...(manual > 0 ? [o.extra_label || 'Other extras'] : [])].join(' + ') || o.extra_label || 'Extras'
 }

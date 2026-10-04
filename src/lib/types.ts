@@ -28,6 +28,14 @@ export interface PropertyRow {
   pet_friendly: number
   family_friendly: number
   internal_notes: string
+  weekend_nights: string
+  rate_meal_plan: string | null
+  child_free_below: number | null
+  child_age_to: number | null
+  addons: string
+  b2b_valid_from: string | null
+  b2b_valid_to: string | null
+  b2b_terms: string
   last_minute_note: string
   seo_title: string | null
   seo_description: string | null
@@ -71,6 +79,11 @@ export interface RoomRow {
   base_guests: number | null
   extra_adult_rate: number | null
   extra_child_rate: number | null
+  rack_rate: number | null
+  net_extra_adult_rate: number | null
+  net_extra_child_rate: number | null
+  child_no_bed_rate: number | null
+  net_child_no_bed_rate: number | null
   min_nights: number
   active: number
   description: string
@@ -198,6 +211,7 @@ export interface QuoteOptionRow {
   discount_approved_by: number | null
   /** Per-night selling price set by staff; null = website price by the rate rules. */
   guest_rate: number | null
+  addons: string
 }
 
 export interface BookingRow {

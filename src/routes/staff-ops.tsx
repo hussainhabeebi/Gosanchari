@@ -1,7 +1,7 @@
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
 import { Hono, type Context } from 'hono'
-import { contact as readContact, guestsText, STAY_TYPES, stayTypeLabel } from '../lib/catalog'
+import { addons as readAddons, ADDON_PER, chosenAddons, contact as readContact, extrasLabel, guestsText, STAY_TYPES, stayTypeLabel, type ChosenAddon } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, Field, Pager, Pill, Select, Table, Tabs } from '../views/components'
@@ -9,7 +9,7 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
-import { calculatePrice, discountPercent, occupancy, staffRateForStay } from '../lib/pricing'
+import { calculatePrice, discountPercent, netRateForStay, occupancy, staffRateForStay, weekendLabel } from '../lib/pricing'
 import { quoteFillFromEnquiry, quoteMessageDraft } from '../lib/assist'
 import { cancelBooking, confirmBooking, createBooking, PAYMENT_METHODS, priceStay, recordPayment, storeInvoice } from '../lib/bookings'
 import { fillTemplate, mediaUrl, sendEmail, sendWhatsApp } from '../lib/integrations'
@@ -229,15 +229,23 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   const [options, props, enquiry] = await Promise.all([
-    all<QuoteOptionRow & { property_name: string; room_name: string; net_rate: number | null; staff_rate: number | null; base_rate: number; weekend_rate: number | null; meal_plans: string }>(
+    all<QuoteOptionRow & { property_name: string; room_name: string; net_rate: number | null; staff_rate: number | null; base_rate: number; weekend_rate: number | null; meal_plans: string; property_addons: string }>(
       c.env,
-      'SELECT o.*, p.name AS property_name, p.meal_plans, r.name AS room_name, r.net_rate, r.staff_rate, r.base_rate, r.weekend_rate FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE o.quotation_id = ? ORDER BY o.id',
+      'SELECT o.*, p.name AS property_name, p.meal_plans, p.addons AS property_addons, r.name AS room_name, r.net_rate, r.staff_rate, r.base_rate, r.weekend_rate FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE o.quotation_id = ? ORDER BY o.id',
       q.id,
     ),
     all<{ id: number; name: string; destination: string }>(c.env, "SELECT id, name, destination FROM properties WHERE status = 'live' ORDER BY destination, name"),
     q.enquiry_id ? first<EnquiryRow>(c.env, 'SELECT * FROM enquiries WHERE id = ?', q.enquiry_id) : Promise.resolve(null),
   ])
-  for (const o of options) o.staff_rate = await optionStaffRate(c, o)
+  const netStay = new Map<number, number | null>()
+  for (const o of options) {
+    o.staff_rate = await optionStaffRate(c, o)
+    if (perms.view_net_rates) {
+      const pr = await loadPricing(c.env, o.room_id)
+      netStay.set(o.id, pr ? netRateForStay(pr.room, pr.seasons, o.check_in, o.check_out) : null)
+    }
+  }
+  const weekendOf = new Map((await all<{ id: number; weekend_nights: string }>(c.env, `SELECT id, weekend_nights FROM properties WHERE id IN (${placeholders(Math.max(1, options.length))})`, ...(options.length ? options.map((o) => o.property_id) : [0]))).map((x) => [x.id, x.weekend_nights]))
   const allRooms = options.length ? await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(options.length)})`, ...options.map((o) => o.property_id)) : []
   const editable = ['draft', 'pending_approval', 'changes_requested'].includes(q.status)
   const needsApproval = options.some((o) => !o.discount_approved_by && optionNeedsApproval(o, o.staff_rate, perms.max_discount_pct))
@@ -268,7 +276,9 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
         {options.map((o, i) => {
           const rooms = allRooms.filter((r) => r.property_id === o.property_id)
           const meals = parseJson<string[]>(o.meal_plans, [])
-          const margin = o.net_rate ? o.total - o.taxes - o.net_rate * nightsBetween(o.check_in, o.check_out) * o.rooms_count : null
+          // Margin = what the guest pays for rooms (after discount, before GST) minus the B2B net cost for these exact dates.
+          const net = netStay.get(o.id) ?? null
+          const margin = net ? o.subtotal - o.discount - net * nightsBetween(o.check_in, o.check_out) * o.rooms_count : null
           return (
             <section class="card stack">
               <div class="row-between"><h3>Option {i + 1}: {o.property_name}</h3>{editable && <button class="linklike small" formaction={`/staff/quotes/${q.id}/options/${o.id}/delete`} formnovalidate>Remove</button>}</div>
@@ -283,14 +293,32 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Meal plan"><Select name={`meal_${o.id}`} value={o.meal_plan ?? ''} options={[['', 'Room only'], ...meals.map((m) => [m, MEAL_PLANS[m] ?? m] as [string, string])]} /></Field>
                 <Field label="Guest rate ₹ / room / night" hint="Your selling price. Blank = website rate."><input type="number" name={`grate_${o.id}`} value={o.guest_rate ?? ''} min="0" placeholder={String(o.base_rate)} /></Field>
                 <Field label={`Discount % (your limit ${perms.max_discount_pct}%)`}><input type="number" name={`disc_${o.id}`} value={o.discount_pct} min="0" max="100" step="0.5" /></Field>
-                <Field label="Extra charges ₹"><input type="number" name={`extra_${o.id}`} value={o.extra_charges} min="0" /></Field>
-                <Field label="Extra label"><input name={`extralabel_${o.id}`} value={o.extra_label ?? ''} placeholder="e.g. Airport pickup" /></Field>
+                <Field label="Other extras ₹"><input type="number" name={`extra_${o.id}`} value={Math.max(0, o.extra_charges - chosenAddons(o.addons).reduce((a, x) => a + x.total, 0))} min="0" /></Field>
+                <Field label="Other extras label"><input name={`extralabel_${o.id}`} value={o.extra_label ?? ''} placeholder="e.g. Airport pickup" /></Field>
               </div>
+              {readAddons(o.property_addons).length > 0 && (
+                <fieldset class="addon-pick">
+                  <legend class="small">Add-ons for this option</legend>
+                  {readAddons(o.property_addons).map((a, idx) => {
+                    const chosen = chosenAddons(o.addons).find((x) => x.name === a.name)
+                    const n = nightsBetween(o.check_in, o.check_out)
+                    const defQty = a.per === 'night' ? n : a.per === 'person' ? o.adults + o.children : 1
+                    return (
+                      <label class="check addon-row">
+                        <input type="checkbox" name={`addon_${o.id}`} value={idx} checked={!!chosen} disabled={!editable} />
+                        {a.name} — {money(a.price)}{a.per && a.per !== 'stay' ? ` ${ADDON_PER[a.per]}` : ''}
+                        {perms.view_net_rates && a.net ? <span class="internal small"> (net {money(a.net)})</span> : null}
+                        <span class="small muted">× <input type="number" name={`addonqty_${o.id}_${idx}`} value={chosen?.qty ?? defQty} min="1" max="99" class="w-sm" aria-label="Quantity" disabled={!editable} /></span>
+                      </label>
+                    )
+                  })}
+                </fieldset>
+              )}
               <div class="rate-strip small">
                 <span class="internal">Staff rate: <strong>{o.staff_rate ? money(o.staff_rate) : 'not set'}</strong></span>
-                <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} Fri–Sat` : ''}</span>
+                <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} ${weekendLabel(weekendOf.get(o.property_id)).replace(' nights', '')}` : ''}</span>
                 <span>Quoted: <strong>{money(effectiveNightly(o))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
-                {perms.view_net_rates && o.net_rate && <span class="internal">B2B / Net: {money(o.net_rate)}</span>}
+                {perms.view_net_rates && netStay.get(o.id) && <span class="internal">B2B / Net for these dates: {money(netStay.get(o.id)!)} / room / night</span>}
                 {o.staff_rate && effectiveNightly(o) < o.staff_rate && <span class="pill pill-red">Below staff rate{o.discount_approved_by ? ' — approved' : ' — needs approval'}</span>}
               </div>
               <table class="breakdown narrow-table">
@@ -307,10 +335,10 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                   )
                 })()}
                 {o.discount > 0 && <tr><td>Discount ({discountPercent(o.subtotal, o.discount)}%){o.discount_approved_by ? ' ✓ approved' : ''}</td><td>− {money(o.discount)}</td></tr>}
-                {o.extra_charges > 0 && <tr><td>{o.extra_label || 'Extras'}</td><td>{money(o.extra_charges)}</td></tr>}
+                {o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}
                 <tr><td>GST</td><td>{money(o.taxes)}</td></tr>
                 <tr class="total"><td>Total</td><td>{money(o.total)}</td></tr>
-                {perms.view_net_rates && margin != null && <tr class="internal"><td>Margin (internal)</td><td>{money(margin)}</td></tr>}
+                {perms.view_net_rates && margin != null && <tr class="internal"><td>Room margin (internal, before GST)</td><td>{money(margin)}</td></tr>}
               </table>
               <p class="muted small">Prices are calculated by the rate rules. Save to recalculate.</p>
             </section>
@@ -380,9 +408,16 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       const checkOut = isDate(f[`out_${oid}`]) && f[`out_${oid}`] > checkIn ? f[`out_${oid}`] : addDays(checkIn, Math.max(1, nightsBetween(o.check_in, o.check_out)))
       const disc = Math.max(0, Math.min(100, parseFloat(f[`disc_${oid}`] ?? '0') || 0))
       const grate = int(f[`grate_${oid}`]) > 0 ? int(f[`grate_${oid}`]) : null
+      // Add-ons ticked from the property's list (prices from the property, never from the form).
+      const propAddons = readAddons((await first<{ addons: string }>(c.env, 'SELECT addons FROM properties WHERE id = ?', o.property_id))?.addons)
+      const picked: ChosenAddon[] = (f.__all[`addon_${oid}`] ?? []).map((i) => propAddons[int(i)]).filter(Boolean).map((a) => {
+        const qty = Math.max(1, Math.min(99, int(f[`addonqty_${oid}_${propAddons.indexOf(a)}`], 1)))
+        return { name: a.name, price: a.price, qty, total: a.price * qty }
+      })
+      const addonTotal = picked.reduce((a, x) => a + x.total, 0)
       const next = {
         room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
-        discount_pct: disc, extra_charges: Math.max(0, int(f[`extra_${oid}`])), guest_rate: grate,
+        discount_pct: disc, extra_charges: Math.max(0, int(f[`extra_${oid}`])) + addonTotal, guest_rate: grate,
         adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
       }
       const p = await priceOption(c, next)
@@ -396,9 +431,9 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       await run(
         c.env,
         `UPDATE quotation_options SET room_id = ?, check_in = ?, check_out = ?, rooms_count = ?, adults = ?, children = ?, meal_plan = ?, discount_pct = ?, extra_charges = ?, extra_label = ?,
-           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ?, guest_rate = ? WHERE id = ?`,
+           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ?, guest_rate = ?, addons = ? WHERE id = ?`,
         next.room_id, checkIn, checkOut, next.rooms_count, Math.max(1, int(f[`adults_${oid}`], o.adults)), Math.max(0, int(f[`children_${oid}`], o.children)), f[`meal_${oid}`] || null,
-        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, grate, o.id,
+        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, grate, JSON.stringify(picked), o.id,
       )
       if (disc !== o.discount_pct) await logActivity(c.env, u.id, 'quote.discount', 'quotation', q.id, { option: o.id, from: o.discount_pct, to: disc })
       if (grate !== o.guest_rate) await logActivity(c.env, u.id, 'quote.guest_rate', 'quotation', q.id, { option: o.id, from: o.guest_rate, to: grate, staff_rate: staffRate })
@@ -538,8 +573,8 @@ opsRoutes.post('/staff/quotes/:id/duplicate', requirePerm('manage_quotes'), asyn
   )
   await run(
     c.env,
-    `INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate)
-     SELECT ?, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate FROM quotation_options WHERE quotation_id = ?`,
+    `INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate, addons)
+     SELECT ?, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate, addons FROM quotation_options WHERE quotation_id = ?`,
     id, q.id,
   )
   return c.redirect(`/staff/quotes/${id}`, 303)
@@ -578,7 +613,7 @@ opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (
         <div class="card">
           <h2>{opts.length > 1 ? `Option ${i + 1}: ` : ''}{o.property_name}</h2>
           <p>{o.destination} · {o.room_name} × {o.rooms_count} · {fmtDate(o.check_in)} → {fmtDate(o.check_out)} · {o.adults + o.children} guests</p>
-          <table class="breakdown"><tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>{o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}{o.extra_charges > 0 && <tr><td>{o.extra_label || 'Extras'}</td><td>{money(o.extra_charges)}</td></tr>}<tr><td>GST</td><td>{money(o.taxes)}</td></tr><tr class="total"><td>Total</td><td>{money(o.total)}</td></tr></table>
+          <table class="breakdown"><tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>{o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}{o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}<tr><td>GST</td><td>{money(o.taxes)}</td></tr><tr class="total"><td>Total</td><td>{money(o.total)}</td></tr></table>
         </div>
       ))}
       <p class="muted">Valid till {fmtDate(q.valid_till)}</p>

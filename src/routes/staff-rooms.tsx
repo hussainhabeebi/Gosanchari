@@ -9,8 +9,9 @@ import { permissionsFor, requireStaff } from '../lib/auth'
 import { all, first } from '../lib/db'
 import { mediaUrl } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
-import { guestsText, ROOM_AMENITIES, stayTypeLabel } from '../lib/catalog'
-import { seasonKindLabel, seasonRates, type SeasonRate } from '../lib/pricing'
+import { ADDON_PER, addons as readAddons, guestsText, ROOM_AMENITIES, stayTypeLabel } from '../lib/catalog'
+import { MEAL_PLANS } from '../lib/search'
+import { seasonKindLabel, seasonRates, weekendLabel, type SeasonRate } from '../lib/pricing'
 import type { EnquiryRow, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, int, money, normalizePhone, parseJson, str, todayIST } from '../lib/util'
 import { canSeeEnquiry } from './staff'
@@ -77,9 +78,10 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
   const [rooms, photos, seasonRows] = await Promise.all([
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id),
     all<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND media_type = 'image' AND r2_key != '' ORDER BY sort, id", p.id),
-    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
+    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
   const seasons = seasonRates(rooms, seasonRows)
+  const addonList = readAddons(p.addons)
   const t = settings.images_transform
   const abs = (path: string) => new URL(path, c.req.url).toString()
   const wa = (text: string) => `https://wa.me/${guest?.wa ?? ''}?text=${encodeURIComponent(text)}`
@@ -101,6 +103,16 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
         </div>
       </div>
 
+      <div class="card small stack-sm rate-basics">
+        <div>
+          {p.rate_meal_plan && <span>🍽 Rates include <strong>{p.rate_meal_plan} – {MEAL_PLANS[p.rate_meal_plan] ?? ''}</strong> · </span>}
+          <span>📅 Weekend: <strong>{weekendLabel(p.weekend_nights)}</strong></span>
+          {(p.child_free_below != null || p.child_age_to != null) && <span> · 🧒 Children{p.child_free_below != null ? ` free below ${p.child_free_below}` : ''}{p.child_age_to != null ? `, child rate up to ${p.child_age_to} (older = adult)` : ''}</span>}
+        </div>
+        {addonList.length > 0 && <div>✨ Add-ons: {addonList.map((a, i) => <>{i ? ' · ' : ''}{a.name} <strong>{money(a.price)}</strong>{a.per && a.per !== 'stay' ? ` ${ADDON_PER[a.per]}` : ''}{perms.view_net_rates && a.net ? <span class="internal"> (net {money(a.net)})</span> : null}</>)}</div>}
+        {perms.view_net_rates && (p.b2b_valid_from || p.b2b_valid_to || p.b2b_terms) && <div class="internal">📄 B2B contract{p.b2b_valid_from || p.b2b_valid_to ? ` valid ${p.b2b_valid_from ? fmtDate(p.b2b_valid_from) : '…'} – ${p.b2b_valid_to ? fmtDate(p.b2b_valid_to) : '…'}` : ''}{p.b2b_terms ? <div class="pre-line">{p.b2b_terms}</div> : null}</div>}
+        {p.cancellation_policy && <div>↩ Cancellation: {p.cancellation_policy}</div>}
+      </div>
       {rooms.length === 0 && <Empty>No room categories yet. {perms.manage_properties && <a href={`/admin/properties/${p.id}#rooms`}>Add room categories</a>}</Empty>}
       {rooms.map((r) => {
         const rp = photos.filter((m) => m.room_id === r.id)
@@ -121,12 +133,13 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
                 <h3 class="small">Prices per night</h3>
                 <ul class="rate-list small">
                   {perms.view_net_rates && r.net_rate && <li class="internal">B2B / Net rate (management only): {money(r.net_rate)}</li>}
+                  {r.rack_rate && <li>Rack rate (EP): {money(r.rack_rate)}</li>}
                   <li class="internal">Internal staff rate: <strong>{r.staff_rate ? money(r.staff_rate) : 'not set'}</strong></li>
                   <li>Guest rate, weekdays: <strong>{money(r.base_rate)}</strong></li>
                   {r.weekend_rate && r.weekend_rate !== r.base_rate && <li>Guest rate, Fri & Sat: <strong>{money(r.weekend_rate)}</strong></li>}
                   {(r.base_guests ?? r.capacity) < r.capacity && <li>Rate covers <strong>{r.base_guests}</strong> guests, max {r.capacity}. Extra adult: <strong>{r.extra_adult_rate ? money(r.extra_adult_rate) : 'not set'}</strong>{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? <>, extra child: <strong>{r.extra_child_rate ? money(r.extra_child_rate) : 'free'}</strong></> : null} per night</li>}
                   {r.min_nights > 1 && <li>Minimum {r.min_nights} nights</li>}
-                  {seasons.filter((s) => s.rates[r.id] && s.rates[r.id] !== r.base_rate).map((s) => <li>{seasonKindLabel(s.kind)} · {s.name} ({fmtDate(s.start)} – {fmtDate(s.end)}): guest <strong>{money(s.rates[r.id])}</strong>{s.staffRates[r.id] ? <span class="internal"> · staff {money(s.staffRates[r.id])}</span> : null}{s.minNights ? `, min ${s.minNights} nights` : ''}</li>)}
+                  {seasons.filter((s) => s.supplements[r.id] || (s.rates[r.id] && s.rates[r.id] !== r.base_rate)).map((s) => <li>{seasonKindLabel(s.kind)} · {s.name} ({fmtDate(s.start)} – {fmtDate(s.end)}): {s.supplements[r.id] ? <strong>+{money(s.supplements[r.id])} on the usual rate</strong> : <>guest <strong>{money(s.rates[r.id])}</strong>{s.weekendRates[r.id] ? ` / ${money(s.weekendRates[r.id])} wknd` : ''}</>}{s.staffRates[r.id] ? <span class="internal"> · staff {money(s.staffRates[r.id])}</span> : null}{s.minNights ? `, min ${s.minNights} nights` : ''}</li>)}
                 </ul>
                 {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
               </div>

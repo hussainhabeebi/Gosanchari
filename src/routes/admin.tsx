@@ -184,7 +184,7 @@ adminRoutes.get('/admin/rates', requirePerm('manage_rates'), async (c) => {
   const [y, m] = month.split('-').map(Number)
   const to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10)
   const days = eachNight(from, to)
-  const rooms = pid ? await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', pid) : []
+  const rooms = pid ? await all<RoomRow & { weekend_nights: string }>(c.env, 'SELECT r.*, p.weekend_nights FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.property_id = ? AND r.active = 1 ORDER BY r.base_rate', pid) : []
   const seasons = await all<SeasonRate & { id: number; property_name: string | null; room_name: string | null }>(
     c.env,
     'SELECT s.*, p.name AS property_name, r.name AS room_name FROM season_rates s LEFT JOIN properties p ON p.id = s.property_id LEFT JOIN rooms r ON r.id = s.room_id WHERE (s.property_id = ? OR s.property_id IS NULL) AND s.end_date >= ? ORDER BY s.start_date',

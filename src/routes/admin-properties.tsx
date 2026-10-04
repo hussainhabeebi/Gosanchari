@@ -13,20 +13,20 @@ import { mediaUrl } from '../lib/integrations'
 import { FACILITIES, MEAL_PLANS } from '../lib/search'
 import {
   CONTACT_FIELDS, contact as readContact, CUISINES, dining as readDining, latLngFromMapUrl, legacyType, MENU_TYPES, PHOTO_CATEGORIES,
-  POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, ROOM_CATEGORY_NAMES, guestsText, ROOM_VIEWS, STAY_TYPES, stayType, THEMES, videoEmbedUrl, type Contact, type Dining, type Policies,
+  POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, ROOM_CATEGORY_NAMES, guestsText, addons as readAddons, addonLines, parseAddonLines, ROOM_VIEWS, STAY_TYPES, stayType, THEMES, videoEmbedUrl, type Contact, type Dining, type Policies,
 } from '../lib/catalog'
 import type { NearbyPlace, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, fmtDateTime, int, isDate, money, nowIso, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg, type Form } from './helpers'
 import { destinations } from '../lib/properties'
-import { SEASON_KINDS, seasonKindLabel, type SeasonRate } from '../lib/pricing'
+import { SEASON_KINDS, seasonKindLabel, weekendLabel, weekendNights, type SeasonRate } from '../lib/pricing'
 import { extractProperty, type ExtractedRoom, type ExtractedSeason } from '../lib/propextract'
 
 export const propertyEditorRoutes = new Hono<AppEnv>()
 
 const SECTIONS: [string, string][] = [
   ['basics', 'Basics'], ['location', 'Location'], ['description', 'Description'], ['dining', 'Dining'], ['facilities', 'Facilities'],
-  ['policies', 'Policies'], ['contact', 'Contact details'], ['nearby', 'Nearby'], ['seo', 'SEO'], ['remarks', 'Remarks'],
+  ['policies', 'Policies'], ['rates', 'Rates setup'], ['contact', 'Contact details'], ['nearby', 'Nearby'], ['seo', 'SEO'], ['remarks', 'Remarks'],
   ['rooms', 'Room categories'], ['media', 'Photos & videos'], ['tariff', 'Tariff & seasons'],
 ]
 
@@ -44,16 +44,26 @@ interface SeasonGroup {
   rates: Record<number, number>
   staff: Record<number, number>
   net: Record<number, number>
+  wRates: Record<number, number>
+  wStaff: Record<number, number>
+  wNet: Record<number, number>
+  /** Supplement mode: flat ₹ per room per night added on top (guest and net). */
+  supplement: number | null
+  netSupplement: number | null
 }
 
 function groupSeasons(rows: (SeasonRate & { id: number })[]): SeasonGroup[] {
   const map = new Map<string, SeasonGroup>()
   for (const r of rows) {
     const key = `${r.name}|${r.start_date}|${r.end_date}`
-    const g = map.get(key) ?? { key, name: r.name, start_date: r.start_date, end_date: r.end_date, min_nights: r.min_nights, kind: r.kind ?? 'season', rates: {}, staff: {}, net: {} }
+    const g = map.get(key) ?? { key, name: r.name, start_date: r.start_date, end_date: r.end_date, min_nights: r.min_nights, kind: r.kind ?? 'season', rates: {}, staff: {}, net: {}, wRates: {}, wStaff: {}, wNet: {}, supplement: null, netSupplement: null }
     if (r.room_id && r.rate) g.rates[r.room_id] = r.rate
     if (r.room_id && r.staff_rate) g.staff[r.room_id] = r.staff_rate
     if (r.room_id && r.net_rate) g.net[r.room_id] = r.net_rate
+    if (r.room_id && r.weekend_rate) g.wRates[r.room_id] = r.weekend_rate
+    if (r.room_id && r.staff_weekend_rate) g.wStaff[r.room_id] = r.staff_weekend_rate
+    if (r.room_id && r.net_weekend_rate) g.wNet[r.room_id] = r.net_weekend_rate
+    if (r.supplement && !(r.rate && r.rate > 0)) { g.supplement = r.supplement; g.netSupplement = r.net_supplement ?? null }
     if (r.min_nights) g.min_nights = r.min_nights
     map.set(key, g)
   }
@@ -75,7 +85,8 @@ const RoomFields = ({ r, pf = '', optional, showNet }: { r?: Partial<RoomRow>; p
           <Field label="Guests included in rate" hint="e.g. 2 for a double, 8 for a big cottage"><input type="number" name={`${pf}base_guests`} value={r?.base_guests ?? r?.capacity ?? 2} min="1" max="60" class="w-sm" /></Field>
           <Field label="Max guests" hint="Including extra guests"><input type="number" name={`${pf}capacity`} value={r?.capacity ?? 2} min="1" max="60" class="w-sm" /></Field>
           <Field label="Extra adult ₹/night" hint="Each guest above the included number"><input type="number" name={`${pf}extra_adult_rate`} value={r?.extra_adult_rate ?? r?.extra_bed_rate ?? ''} min="0" class="w-md" /></Field>
-          <Field label="Extra child ₹/night" hint="Blank = same as adult"><input type="number" name={`${pf}extra_child_rate`} value={r?.extra_child_rate ?? ''} min="0" class="w-md" /></Field>
+          <Field label="Extra child (with mattress) ₹/night" hint="Blank = same as adult"><input type="number" name={`${pf}extra_child_rate`} value={r?.extra_child_rate ?? ''} min="0" class="w-md" /></Field>
+          <Field label="Child without bed ₹/night" hint="Optional"><input type="number" name={`${pf}child_no_bed_rate`} value={r?.child_no_bed_rate ?? ''} min="0" class="w-md" /></Field>
           <Field label="Max adults" hint="Optional"><input type="number" name={`${pf}max_adults`} value={r?.max_adults ?? ''} min="1" max="60" class="w-sm" /></Field>
           <Field label="Max children" hint="Optional"><input type="number" name={`${pf}max_children`} value={r?.max_children ?? ''} min="0" max="30" class="w-sm" /></Field>
         </div>
@@ -89,11 +100,19 @@ const RoomFields = ({ r, pf = '', optional, showNet }: { r?: Partial<RoomRow>; p
       <div class="rate-tiers stack-sm">
         <strong class="small">Rates per room per night</strong>
         <div class="row wrap-row">
+          <Field label="Rack rate ₹ (published, EP)" hint="The resort's list price, for reference."><input type="number" name={`${pf}rack_rate`} value={r?.rack_rate ?? ''} min="0" class="w-md" /></Field>
           {showNet && <Field label="B2B / Net rate ₹" class="internal" hint="Cost from the resort. Management only — never shown to staff."><input type="number" name={`${pf}net_rate`} value={r?.net_rate ?? ''} min="0" class="w-md" /></Field>}
           <Field label="Internal staff rate ₹" hint="Benchmark for staff. Quoting below it needs approval."><input type="number" name={`${pf}staff_rate`} value={r?.staff_rate ?? ''} min="0" class="w-md" /></Field>
           <Field label="Guest rate ₹ (weekdays)" hint="Selling price shown on the website."><input type="number" name={`${pf}base_rate`} value={r?.base_rate ?? ''} min="0" required={req} class="w-md" /></Field>
-          <Field label="Guest rate ₹ (Fri / Sat)" hint="Leave blank to use the weekday rate."><input type="number" name={`${pf}weekend_rate`} value={r?.weekend_rate ?? ''} min="0" class="w-md" /></Field>
+          <Field label="Guest rate ₹ (weekend)" hint="Weekend nights are set in Rates setup. Blank = weekday rate."><input type="number" name={`${pf}weekend_rate`} value={r?.weekend_rate ?? ''} min="0" class="w-md" /></Field>
         </div>
+        {showNet && (
+          <div class="row wrap-row internal">
+            <Field label="Net extra adult ₹/night" hint="B2B cost of an extra mattress"><input type="number" name={`${pf}net_extra_adult_rate`} value={r?.net_extra_adult_rate ?? ''} min="0" class="w-md" /></Field>
+            <Field label="Net extra child ₹/night"><input type="number" name={`${pf}net_extra_child_rate`} value={r?.net_extra_child_rate ?? ''} min="0" class="w-md" /></Field>
+            <Field label="Net child without bed ₹/night"><input type="number" name={`${pf}net_child_no_bed_rate`} value={r?.net_child_no_bed_rate ?? ''} min="0" class="w-md" /></Field>
+          </div>
+        )}
       </div>
       <div class="row wrap-row">
         <Field label="Includes" class="grow"><input name={`${pf}inclusions`} value={r?.inclusions ?? ''} placeholder="Breakfast, welcome drink" /></Field>
@@ -269,12 +288,37 @@ function propertyForm(
           <Field label="Other house rules (one per line)"><textarea name="house_rules" rows={3}>{p.house_rules ?? ''}</textarea></Field>
         </section>
 
+        <section class="card stack" id="rates">
+          <h2>{num('rates')}. Rates setup</h2>
+          <Field label="Weekend nights (weekend rates apply on these nights)">
+            <div class="facility-grid">{[[5, 'Friday'], [6, 'Saturday'], [0, 'Sunday'], [4, 'Thursday']].map(([d, l]) => <label class="check"><input type="checkbox" name="weekend_nights" value={d} checked={weekendNights(p as { weekend_nights?: string }).includes(d as number)} /> {l} night</label>)}</div>
+          </Field>
+          <div class="row wrap-row">
+            <Field label="Rates include"><Select name="rate_meal_plan" value={p.rate_meal_plan ?? ''} options={[['', '—'], ...Object.entries(MEAL_PLANS).map(([k, v]) => [k, `${k} – ${v}`] as [string, string])]} /></Field>
+            <Field label="Children free below age"><input type="number" name="child_free_below" value={p.child_free_below ?? ''} min="0" max="17" class="w-sm" /></Field>
+            <Field label="Child rate up to age" hint="Older = adult"><input type="number" name="child_age_to" value={p.child_age_to ?? ''} min="0" max="17" class="w-sm" /></Field>
+          </div>
+          <Field label={showNet ? 'Add-ons — one per line: Name | guest ₹ | net ₹ | per (stay / night / person)' : 'Add-ons — one per line: Name | guest ₹ | per (stay / night / person)'} hint="e.g. Campfire (1 hour) | 1800 | 1500 | stay. Staff can add these to quotes.">
+            <textarea name="addons" rows={4} placeholder={showNet ? 'Campfire (1 hour) | 1800 | 1500 | stay\nCandle-light dinner | 3500 | 3000 | stay\nFlower bed decoration | 1800 | 1500 | stay' : 'Campfire (1 hour) | 1800 | stay'}>{addonLines(readAddons(p.addons), showNet)}</textarea>
+          </Field>
+          {showNet && (
+            <div class="internal stack-sm">
+              <strong class="small">B2B contract (management only)</strong>
+              <div class="row wrap-row">
+                <Field label="Contract valid from"><input type="date" name="b2b_valid_from" value={p.b2b_valid_from ?? ''} /></Field>
+                <Field label="Contract valid to"><input type="date" name="b2b_valid_to" value={p.b2b_valid_to ?? ''} /></Field>
+              </div>
+              <Field label="Contract terms" hint="Supplements, blackout dates, GST on net rates, payment terms, cancellation by the resort…"><textarea name="b2b_terms" rows={4}>{p.b2b_terms ?? ''}</textarea></Field>
+            </div>
+          )}
+        </section>
+
         {showContact && (
           <section class="card stack internal" id="contact">
             <h2>{num('contact')}. Contact details <span class="muted small">(private — only people allowed to see property contacts)</span></h2>
             <div class="grid grid-2">
               {CONTACT_FIELDS.map(([k, label]) => (
-                k === 'bank_details'
+                k === 'bank_details' || k === 'others'
                   ? <Field label={label}><textarea name={`con_${k}`} rows={3} placeholder="Account name, number, IFSC, bank / UPI ID">{con[k] ?? ''}</textarea></Field>
                   : <Field label={label}><input name={`con_${k}`} value={con[k] ?? (k === 'person' ? p.owner_name : k === 'phone' ? p.owner_phone : k === 'email' ? p.owner_email : '') ?? ''} type={k.startsWith('email') ? 'email' : k.startsWith('phone') ? 'tel' : 'text'} /></Field>
               ))}
@@ -409,10 +453,10 @@ function propertyForm(
             <p class="muted small">Rates per room per night. Regular rates come from each room category; a season overrides them on its dates. Types: <strong>Peak season</strong>, <strong>Off-season</strong> and <strong>Special / holiday</strong> (Christmas, New Year, Onam…). When dates overlap, special wins over season, and season over off-season. Leave a room blank to keep its regular rate.</p>
             {showNet && (
               <form method="post" action={`/admin/properties/${p.id}/ratesheet`} enctype="multipart/form-data" class="upload-box stack" id="ratesheet">
-                <h3><span class="ai-badge">AI</span> Import a B2B rate sheet (PDF or Word)</h3>
-                <p class="small muted">Attach the resort's rate sheet. AI reads the room categories, seasons and net rates; you check everything on the next screen before it is saved.</p>
+                <h3><span class="ai-badge">AI</span> Import a B2B rate sheet (PDF, Word or photos)</h3>
+                <p class="small muted">Attach the resort's rate sheet. AI reads room types, rack and net rates, rate periods (weekday / weekend), supplements, extra-person & child charges, add-ons, cancellation policy and contacts — you check everything on the next screen before it is saved.</p>
                 <div class="row wrap-row">
-                  <Field label="Rate sheet"><input type="file" name="sheet" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></Field>
+                  <Field label="Rate sheet — PDF, Word or photos / screenshots of the pages" hint="You can pick several pages at once."><input type="file" name="sheet" multiple accept=".pdf,.docx,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></Field>
                   <Field label="Staff rate = net +" hint="% markup"><input type="number" name="staff_markup" value="15" min="0" max="300" step="0.5" class="w-sm" /></Field>
                   <Field label="Guest rate = net +" hint="% markup"><input type="number" name="guest_markup" value="35" min="0" max="500" step="0.5" class="w-sm" /></Field>
                 </div>
@@ -424,8 +468,8 @@ function propertyForm(
                 <thead><tr><th>Season</th><th>Type</th><th>Dates</th><th>Min nights</th>{rooms.map((r) => <th>{r.name}</th>)}</tr></thead>
                 <tbody>
                   <tr class="muted"><td>Regular (weekday)</td><td>—</td><td>All year</td><td>—</td>{rooms.map((r) => <td>{money(r.base_rate)}<RateSub staff={r.staff_rate} net={showNet ? r.net_rate : null} /></td>)}</tr>
-                  <tr class="muted"><td>Regular (Fri & Sat)</td><td>—</td><td>All year</td><td>—</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>
-                  {groups.map((g) => <tr><td><strong>{g.name}</strong></td><td><span class={`pill pill-kind-${g.kind}`}>{seasonKindLabel(g.kind)}</span></td><td class="nowrap">{fmtDate(g.start_date)} – {fmtDate(g.end_date)}</td><td>{g.min_nights ?? '—'}</td>{rooms.map((r) => <td>{g.rates[r.id] ? <>{money(g.rates[r.id])}<RateSub staff={g.staff[r.id]} net={showNet ? g.net[r.id] : null} /></> : <span class="muted">regular</span>}</td>)}</tr>)}
+                  <tr class="muted"><td>Regular (weekend)</td><td>—</td><td>{weekendLabel(p.weekend_nights)}</td><td>—</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>
+                  {groups.map((g) => <tr><td><strong>{g.name}</strong></td><td><span class={`pill pill-kind-${g.kind}`}>{seasonKindLabel(g.kind)}</span></td><td class="nowrap">{fmtDate(g.start_date)} – {fmtDate(g.end_date)}</td><td>{g.min_nights ?? '—'}</td>{rooms.map((r) => <td>{g.supplement ? <>+{money(g.supplement)}{showNet && g.netSupplement ? <div class="muted small">net +{money(g.netSupplement)}</div> : null}</> : g.rates[r.id] ? <>{money(g.rates[r.id])}{g.wRates[r.id] ? ` / ${money(g.wRates[r.id])}` : ''}<RateSub staff={g.staff[r.id]} net={showNet ? g.net[r.id] : null} /></> : <span class="muted">regular</span>}</td>)}</tr>)}
                 </tbody>
               </table>
             </div>
@@ -441,12 +485,25 @@ function propertyForm(
                     <Field label="To (last night)"><input type="date" name="end_date" value={g?.end_date ?? ''} required /></Field>
                     <Field label="Min nights"><input type="number" name="min_nights" value={g?.min_nights ?? ''} min="1" class="w-sm" /></Field>
                   </div>
+                  <div class="row wrap-row">
+                    <label class="check"><input type="radio" name="mode" value="rates" checked={!g?.supplement} /> Set rates for these dates</label>
+                    <label class="check"><input type="radio" name="mode" value="supplement" checked={!!g?.supplement} /> Add a supplement on top (₹ per room per night)</label>
+                  </div>
+                  <div class="row wrap-row season-supplement">
+                    <Field label="Supplement ₹ / room / night (guest)" hint="e.g. X'mas +₹1,000 on top of the period rate"><input type="number" name="supplement" value={g?.supplement ?? ''} min="0" class="w-md" /></Field>
+                    {showNet && <Field label="Net supplement ₹" class="internal"><input type="number" name="net_supplement" value={g?.netSupplement ?? ''} min="0" class="w-md" /></Field>}
+                  </div>
                   {rooms.map((r) => (
-                    <div class="row wrap-row season-room">
+                    <div class="season-room stack-sm">
                       <strong class="small season-room-name">{r.name}</strong>
-                      {showNet && <Field label="B2B / Net ₹" class="internal"><input type="number" name={`net_${r.id}`} value={g?.net[r.id] ?? ''} min="0" class="w-md" /></Field>}
-                      <Field label="Staff rate ₹"><input type="number" name={`staff_${r.id}`} value={g?.staff[r.id] ?? ''} min="0" class="w-md" placeholder={r.staff_rate ? String(r.staff_rate) : ''} /></Field>
-                      <Field label="Guest rate ₹"><input type="number" name={`rate_${r.id}`} value={g?.rates[r.id] ?? ''} min="0" class="w-md" placeholder={String(r.base_rate)} /></Field>
+                      <div class="row wrap-row">
+                        {showNet && <Field label="Net ₹ weekday" class="internal"><input type="number" name={`net_${r.id}`} value={g?.net[r.id] ?? ''} min="0" class="w-md" /></Field>}
+                        {showNet && <Field label="Net ₹ weekend" class="internal"><input type="number" name={`wnet_${r.id}`} value={g?.wNet[r.id] ?? ''} min="0" class="w-md" /></Field>}
+                        <Field label="Staff ₹ weekday"><input type="number" name={`staff_${r.id}`} value={g?.staff[r.id] ?? ''} min="0" class="w-md" placeholder={r.staff_rate ? String(r.staff_rate) : ''} /></Field>
+                        <Field label="Staff ₹ weekend"><input type="number" name={`wstaff_${r.id}`} value={g?.wStaff[r.id] ?? ''} min="0" class="w-md" /></Field>
+                        <Field label="Guest ₹ weekday"><input type="number" name={`rate_${r.id}`} value={g?.rates[r.id] ?? ''} min="0" class="w-md" placeholder={String(r.base_rate)} /></Field>
+                        <Field label="Guest ₹ weekend" hint="Blank = weekday"><input type="number" name={`wrate_${r.id}`} value={g?.wRates[r.id] ?? ''} min="0" class="w-md" /></Field>
+                      </div>
                     </div>
                   ))}
                   <div class="row">
@@ -486,7 +543,7 @@ async function loadEditor(c: Context<AppEnv>, id: number) {
     destinations(c.env),
   ])
   // Per-room fixed-rate seasons are edited here; percentage and all-property seasons stay on the Rates page.
-  const mine = seasonRows.filter((s) => s.property_id === p.id && s.room_id != null && s.rate != null)
+  const mine = seasonRows.filter((s) => s.property_id === p.id && s.room_id != null && (s.rate != null || s.supplement != null))
   const others = seasonRows.filter((s) => !mine.includes(s))
   return propertyForm(c, p, rooms, media, mine, others, dests, await canSeeContacts(c), await canSeeNet(c))
 }
@@ -502,7 +559,7 @@ function lines(s: string | undefined) {
   return (s ?? '').split('\n').map((x) => x.trim()).filter(Boolean)
 }
 
-function propertyValues(f: Form, withContact: boolean) {
+function propertyValues(f: Form, withContact: boolean, withNet: boolean, before?: Partial<PropertyRow> | null) {
   const nearby: NearbyPlace[] = lines(f.nearby)
     .map((l) => l.split('|').map((x) => x.trim()))
     .filter((x) => x[0])
@@ -535,7 +592,7 @@ function propertyValues(f: Form, withContact: boolean) {
   const policies: Policies = {}
   for (const [k] of POLICY_FIELDS) if (str(f[`pol_${k}`])) policies[k] = str(f[`pol_${k}`], 300)
   const contact: Contact = {}
-  for (const [k] of CONTACT_FIELDS) if (str(f[`con_${k}`])) contact[k] = str(f[`con_${k}`], k === 'bank_details' ? 800 : k.startsWith('email') ? 120 : 40)
+  for (const [k] of CONTACT_FIELDS) if (str(f[`con_${k}`])) contact[k] = str(f[`con_${k}`], k === 'bank_details' || k === 'others' ? 800 : k.startsWith('email') ? 120 : 40)
   // Contact columns are only written by people allowed to see them, so others can't wipe them.
   const contactCols = withContact
     ? { contact: JSON.stringify(contact), owner_name: contact.person ?? null, owner_phone: contact.phone ?? null, owner_email: contact.email ?? null }
@@ -550,6 +607,12 @@ function propertyValues(f: Form, withContact: boolean) {
     themes: JSON.stringify(pick('themes').filter((x) => x in THEMES)),
     how_to_reach: str(f.how_to_reach, 2000), good_to_know: str(f.good_to_know, 1500),
     ...contactCols,
+    weekend_nights: [...new Set(pick('weekend_nights').map((x) => parseInt(x, 10)).filter((d) => d >= 0 && d <= 6))].join(',') || '5,6',
+    rate_meal_plan: f.rate_meal_plan in MEAL_PLANS ? f.rate_meal_plan : null,
+    child_free_below: f.child_free_below ? Math.max(0, Math.min(17, int(f.child_free_below))) : null,
+    child_age_to: f.child_age_to ? Math.max(0, Math.min(17, int(f.child_age_to))) : null,
+    addons: JSON.stringify(parseAddonLines(f.addons ?? '', readAddons(before?.addons), withNet)),
+    ...(withNet ? { b2b_valid_from: isDate(f.b2b_valid_from) ? f.b2b_valid_from : null, b2b_valid_to: isDate(f.b2b_valid_to) ? f.b2b_valid_to : null, b2b_terms: str(f.b2b_terms, 4000) } : {}),
     highlights: JSON.stringify(lines(f.highlights).slice(0, 10)),
     description: str(f.description, 8000), description_ml: str(f.description_ml, 12000),
     facilities: JSON.stringify([...new Set(pick('facilities').filter((x) => x in FACILITIES))]),
@@ -573,7 +636,7 @@ export async function afterPropertySave(c: Context<AppEnv>, id: number) {
 
 propertyEditorRoutes.post('/admin/properties/new', requirePerm('manage_properties'), async (c) => {
   const f = await form(c)
-  const v = propertyValues(f, await canSeeContacts(c))
+  const v = propertyValues(f, await canSeeContacts(c), await canSeeNet(c), null)
   if (!v.name || !v.destination) return redirectMsg(c, '/admin/properties/new', { err: 'Name and destination are required.' })
   let slug = slugify(`${v.name} ${v.destination}`)
   if (await first(c.env, 'SELECT 1 FROM properties WHERE slug = ?', slug)) slug += '-' + Date.now().toString(36)
@@ -595,7 +658,7 @@ propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_propertie
   const before = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', id)
   if (!before) return c.notFound()
   const f = await form(c)
-  const v = propertyValues(f, await canSeeContacts(c))
+  const v = propertyValues(f, await canSeeContacts(c), await canSeeNet(c), before)
   const cols = Object.keys(v)
   await run(c.env, `UPDATE properties SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...(Object.values(v) as (string | number | null)[]), nowIso(), id)
   await run(c.env, 'UPDATE property_photos SET tags_confirmed = 1 WHERE property_id = ?', id)
@@ -616,8 +679,12 @@ function roomValues(f: Form, withNet: boolean) {
     base_guests: Math.max(1, Math.min(int(f.base_guests) || int(f.capacity, 2), Math.max(1, int(f.capacity, 2), int(f.base_guests)))),
     extra_adult_rate: optInt(f.extra_adult_rate) || null, extra_child_rate: f.extra_child_rate === '' || f.extra_child_rate == null ? null : optInt(f.extra_child_rate), bed_type: str(f.bed_type, 60) || null, units: Math.max(0, int(f.units, 1)),
     base_rate: Math.max(0, int(f.base_rate)), weekend_rate: optInt(f.weekend_rate) || null, staff_rate: optInt(f.staff_rate) || null,
-    // Only management may set the net rate; others leave it unchanged.
-    ...(withNet ? { net_rate: optInt(f.net_rate) || null } : {}),
+    rack_rate: optInt(f.rack_rate) || null, child_no_bed_rate: f.child_no_bed_rate === '' || f.child_no_bed_rate == null ? null : optInt(f.child_no_bed_rate),
+    // Only management may set net (B2B) figures; others leave them unchanged.
+    ...(withNet ? {
+      net_rate: optInt(f.net_rate) || null, net_extra_adult_rate: optInt(f.net_extra_adult_rate) || null,
+      net_extra_child_rate: optInt(f.net_extra_child_rate) ?? null, net_child_no_bed_rate: optInt(f.net_child_no_bed_rate) ?? null,
+    } : {}),
     min_nights: Math.max(1, int(f.min_nights, 1)), inclusions: str(f.inclusions, 200), description: str(f.description, 1500),
     facilities: JSON.stringify((f.__all.amenities ?? []).filter((x) => x in ROOM_AMENITIES)),
     size_sqft: optInt(f.size_sqft), room_view: str(f.room_view, 40) || null, max_adults: optInt(f.max_adults), max_children: optInt(f.max_children),
@@ -816,23 +883,38 @@ propertyEditorRoutes.post('/admin/properties/:id/seasons', requirePerm('manage_p
   const kind = f.kind in SEASON_KINDS ? f.kind : 'season'
   const withNet = await canSeeNet(c)
   const stmts: D1PreparedStatement[] = []
-  // Net rates are only edited by management; keep the old ones when someone else saves the season.
-  const keptNet = new Map<number, number | null>()
+  const uid = c.get('user')!.id
+  // Net (B2B) figures are only edited by management; keep the old ones when someone else saves the season.
+  const kept = new Map<number, { net_rate: number | null; net_weekend_rate: number | null; net_supplement: number | null }>()
   if (f.orig_key) {
     const [on, os, oe] = f.orig_key.split('|')
     if (!withNet) {
-      for (const r of await all<{ room_id: number; net_rate: number | null }>(c.env, 'SELECT room_id, net_rate FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND name = ? AND start_date = ? AND end_date = ?', id, on, os, oe)) keptNet.set(r.room_id, r.net_rate)
+      for (const r of await all<{ room_id: number; net_rate: number | null; net_weekend_rate: number | null; net_supplement: number | null }>(c.env, 'SELECT room_id, net_rate, net_weekend_rate, net_supplement FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND name = ? AND start_date = ? AND end_date = ?', id, on, os, oe)) kept.set(r.room_id, r)
     }
-    stmts.push(c.env.DB.prepare('DELETE FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND rate IS NOT NULL AND name = ? AND start_date = ? AND end_date = ?').bind(id, on, os, oe))
+    stmts.push(c.env.DB.prepare('DELETE FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND (rate IS NOT NULL OR supplement IS NOT NULL) AND name = ? AND start_date = ? AND end_date = ?').bind(id, on, os, oe))
   }
+  const ins = 'INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights, created_by, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  const opt = (k: string) => int(f[k]) || null
   let n = 0
-  for (const r of rooms) {
-    const rate = int(f[`rate_${r.id}`])
-    if (rate > 0) {
-      const staff = int(f[`staff_${r.id}`]) || null
-      const net = withNet ? int(f[`net_${r.id}`]) || null : keptNet.get(r.id) ?? null
-      stmts.push(c.env.DB.prepare('INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights, created_by, kind, staff_rate, net_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, r.id, name, f.start_date, f.end_date, rate, minNights, c.get('user')!.id, kind, staff, net))
+  if (f.mode === 'supplement') {
+    // Same supplement for every room category (one row per room keeps editing simple).
+    const sup = opt('supplement')
+    if (!sup) return redirectMsg(c, `/admin/properties/${id}#tariff`, { err: 'Enter the supplement amount.' })
+    for (const r of rooms) {
+      const netSup = withNet ? opt('net_supplement') : kept.get(r.id)?.net_supplement ?? null
+      stmts.push(c.env.DB.prepare(ins).bind(id, r.id, name, f.start_date, f.end_date, null, minNights, uid, kind, null, null, null, null, null, sup, netSup))
       n++
+    }
+  } else {
+    for (const r of rooms) {
+      const rate = int(f[`rate_${r.id}`])
+      if (rate > 0) {
+        const k = kept.get(r.id)
+        const net = withNet ? opt(`net_${r.id}`) : k?.net_rate ?? null
+        const wnet = withNet ? opt(`wnet_${r.id}`) : k?.net_weekend_rate ?? null
+        stmts.push(c.env.DB.prepare(ins).bind(id, r.id, name, f.start_date, f.end_date, rate, minNights, uid, kind, opt(`staff_${r.id}`), net, opt(`wrate_${r.id}`), opt(`wstaff_${r.id}`), wnet, null, null))
+        n++
+      }
     }
   }
   if (!n) return redirectMsg(c, `/admin/properties/${id}#tariff`, { err: 'Enter a rate for at least one room category.' })
@@ -846,7 +928,7 @@ propertyEditorRoutes.post('/admin/properties/:id/seasons/delete', requirePerm('m
   const id = int(c.req.param('id'))
   const f = await form(c)
   const [on, os, oe] = (f.orig_key ?? '').split('|')
-  await run(c.env, 'DELETE FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND rate IS NOT NULL AND name = ? AND start_date = ? AND end_date = ?', id, on ?? '', os ?? '', oe ?? '')
+  await run(c.env, 'DELETE FROM season_rates WHERE property_id = ? AND room_id IS NOT NULL AND (rate IS NOT NULL OR supplement IS NOT NULL) AND name = ? AND start_date = ? AND end_date = ?', id, on ?? '', os ?? '', oe ?? '')
   await logActivity(c.env, c.get('user')!.id, 'price.season_deleted', 'property', id, { name: on, from: os, to: oe })
   return redirectMsg(c, `/admin/properties/${id}#tariff`, { ok: 'Season deleted.' })
 })

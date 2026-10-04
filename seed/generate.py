@@ -209,6 +209,9 @@ out.append("UPDATE season_rates SET kind = 'special' WHERE name = 'Christmas & N
 # Occupancy examples: double-style room (rate for 2, max 3) and a group villa (rate for 6, max 8).
 out.append("UPDATE rooms SET base_guests = 2, extra_adult_rate = 1000, extra_child_rate = 600 WHERE name = 'Estate View Room';")
 out.append("UPDATE rooms SET base_guests = 6, extra_adult_rate = 1500 WHERE name = 'Entire villa (3 bedrooms)';")
+# B2B contract details for Misty Tea Bungalow (property 1)
+out.append("""UPDATE properties SET rate_meal_plan = 'CP', child_free_below = 6, child_age_to = 11, b2b_valid_from = strftime('%Y', 'now') || '-04-01', b2b_valid_to = (strftime('%Y', 'now') + 1) || '-03-31', b2b_terms = 'Net rates exclude GST. 50% advance to confirm.', addons = '[{"name":"Campfire (1 hour)","price":1800,"net":1500,"per":"stay"},{"name":"Candle-light dinner","price":3500,"net":3000,"per":"stay"},{"name":"Flower bed decoration","price":1800,"net":1500,"per":"stay"}]' WHERE id = 1;""")
+out.append("UPDATE rooms SET rack_rate = 4999, net_extra_adult_rate = 800, net_extra_child_rate = 500, child_no_bed_rate = 500, net_child_no_bed_rate = 350 WHERE name = 'Estate View Room';")
 out.append("INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, min_nights) VALUES (5, NULL, 'Houseboat peak', strftime('%Y', 'now') || '-12-15', strftime('%Y', 'now') || '-12-31', 13500, NULL);")
 
 out.append(f"INSERT INTO coupons (code, title, description, discount_type, discount_value, max_discount, min_amount, valid_from, valid_to, property_ids, usage_limit) VALUES ('WELCOME10', 'Welcome offer', '10% off your first stay — mention the code in your enquiry', 'pct', 10, 2000, 3000, {d(-30)}, {d(120)}, NULL, 500);")
