@@ -152,6 +152,8 @@
       co.min = ci.value
     })
     refresh()
+    var wantRoom = new URLSearchParams(location.search).get('room')
+    if (wantRoom && $('#room-select option[value="' + wantRoom.replace(/\D/g, '') + '"]')) { $('#room-select').value = wantRoom; refresh(); $('#book').scrollIntoView() }
     $$('[data-pick-room]').forEach(function (b) {
       b.addEventListener('click', function () { $('#room-select').value = b.dataset.pickRoom; refresh(); $('#book').scrollIntoView({ behavior: 'smooth' }) })
     })
@@ -292,6 +294,17 @@
     })
     return touched
   }
+  // Share a link: phone share sheet when available, otherwise copy to clipboard
+  $$('[data-share]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var url = b.dataset.share, old = b.textContent
+      var done = function (msg) { b.textContent = msg; setTimeout(function () { b.textContent = old }, 1800) }
+      if (navigator.share && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+        navigator.share({ title: b.dataset.shareTitle || document.title, text: b.dataset.shareText || '', url: b.dataset.shareText ? undefined : url }).catch(function () {})
+      } else if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { done('Link copied ✓') }, function () { prompt('Copy this link', url) })
+      else prompt('Copy this link', url)
+    })
+  })
   // New property: add more room category blocks
   var roomTpl = document.getElementById('new-room-tpl')
   function addRoomBlock() {

@@ -87,7 +87,7 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
                     {perms.view_property_contacts && (() => {
                       const k = readContact(i.contact)
                       const phones = [k.phone, k.phone2, k.phone3].filter(Boolean) as string[]
-                      return <>{k.person && ` · Contact: ${k.person}`}{phones.map((ph) => <> · <a href={`tel:${ph}`}>{ph}</a></>)}{k.email && <> · <a href={`mailto:${k.email}`}>{k.email}</a></>}</>
+                      return <>{k.person && ` · Contact: ${k.person}`}{phones.map((ph) => <> · <a href={`tel:${ph}`}>{ph}</a></>)}{[k.email, k.email2].filter(Boolean).map((em) => <> · <a href={`mailto:${em}`}>{em}</a></>)}</>
                     })()}
                     {perms.view_net_rates && i.internal_notes ? <div>Remarks: {i.internal_notes}</div> : null}
                   </div>
@@ -95,7 +95,7 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
                 <Table head={['Room', 'Sleeps', 'Rate', ...(perms.view_net_rates ? ['Net'] : []), ...(avail ? ['Free'] : []), '']}>
                   {prs.map((r) => (
                     <tr>
-                      <td>{r.name}</td><td>{r.capacity}</td><td>{money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''}</td>
+                      <td><a href={`/staff/rooms/${p.id}${enquiryId ? `?enquiry=${enquiryId}` : ''}#room-${r.id}`}>{r.name}</a></td><td>{r.capacity}</td><td>{money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''}</td>
                       {perms.view_net_rates && <td>{r.net_rate ? money(r.net_rate) : '—'}</td>}
                       {avail && <td>{avail.get(r.id)?.free ?? 0} / {r.units}</td>}
                       <td><a class="btn btn-sm" href={addHref(p.id, r.id)}>Add to quotation</a></td>

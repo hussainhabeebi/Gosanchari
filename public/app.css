@@ -458,3 +458,13 @@ code { overflow-wrap: anywhere; }
 .footer-bottom { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
 .footer-credits a { color: #fff; }
 .footer-bottom { padding-right: 76px; }
+
+/* Room page gallery + staff room sharing */
+.room-gallery { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.room-gallery a { position: relative; display: block; border-radius: 10px; overflow: hidden; background: var(--green-soft); }
+.room-gallery img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+.room-gallery .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 10px; background: linear-gradient(transparent, rgba(0,0,0,.6)); color: #fff; font-size: .85rem; }
+.share-room { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fff; }
+.share-thumbs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.share-thumbs img { width: 120px; height: 90px; object-fit: cover; border-radius: 8px; flex: 0 0 auto; }
+.rate-list { margin: 0; padding-left: 18px; }

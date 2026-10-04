@@ -2,7 +2,7 @@
 
 import { Hono, type Context } from 'hono'
 import { COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
-import type { SeasonRate } from '../lib/pricing'
+import { seasonRates, type SeasonRate } from '../lib/pricing'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
@@ -21,25 +21,6 @@ import { clientIp, form, redirectMsg } from './helpers'
 export const publicRoutes = new Hono<AppEnv>()
 
 const NEARBY_ICONS: Record<string, string> = { railway: '🚆', airport: '✈️', bus: '🚌', hospital: '🏥', atm: '🏧', shopping: '🛍', restaurant: '🍽', beach: '🏖', waterfall: '💧', viewpoint: '🌄', attraction: '📍' }
-
-/** Season rows → per-room nightly rate for each upcoming season (room-specific beats property-wide beats all-property). */
-function seasonRates(rooms: RoomRow[], rows: SeasonRate[]) {
-  const groups = new Map<string, { name: string; start: string; end: string; minNights: number | null; rates: Record<number, number> }>()
-  for (const s of rows) {
-    const key = `${s.name}|${s.start_date}|${s.end_date}`
-    if (!groups.has(key)) groups.set(key, { name: s.name, start: s.start_date, end: s.end_date, minNights: s.min_nights, rates: {} })
-  }
-  for (const g of groups.values()) {
-    const inGroup = rows.filter((s) => s.name === g.name && s.start_date === g.start && s.end_date === g.end)
-    for (const r of rooms) {
-      const s = inGroup.find((x) => x.room_id === r.id) ?? inGroup.find((x) => x.room_id == null && x.property_id != null) ?? inGroup.find((x) => x.property_id == null)
-      if (!s) { g.rates[r.id] = r.base_rate; continue }
-      g.rates[r.id] = s.rate ?? Math.round(r.base_rate * (1 + (s.pct_adjust ?? 0) / 100))
-      if (s.min_nights) g.minNights = Math.max(g.minNights ?? 0, s.min_nights)
-    }
-  }
-  return [...groups.values()].sort((a, b) => a.start.localeCompare(b.start))
-}
 
 async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv['Variables']['user'] }): Promise<Set<number>> {
   const u = c.get('user')
@@ -996,3 +977,54 @@ publicRoutes.get('/media/*', async (c) => {
   return new Response((obj as R2ObjectBody).body, { headers: h })
 })
 
+
+// ---------- Room category page (shareable link: staff send it to guests on WhatsApp) ----------
+publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
+  const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
+  const user = c.get('user')
+  const isStaffUser = !!user && user.role !== 'guest'
+  const r = p ? await first<RoomRow>(c.env, 'SELECT * FROM rooms WHERE id = ? AND property_id = ?', int(c.req.param('roomId')), p.id) : null
+  if (!p || !r || ((p.status !== 'live' || !r.active) && !isStaffUser)) return page(c, { title: 'Not found' }, <div class="wrap section"><Empty><h2>This room is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
+  const settings = await getSettings(c.env)
+  const photos = await all<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND room_id = ? AND media_type = 'image' AND r2_key != '' ORDER BY sort, id", p.id, r.id)
+  const am = parseJson<string[]>(r.facilities, [])
+  const t = settings.images_transform
+  return page(c, {
+    title: `${r.name} · ${p.name}`,
+    description: `${r.name} at ${p.name}, ${p.destination}. Up to ${r.capacity} guests${r.bed_type ? `, ${r.bed_type}` : ''}. Photos, amenities and rates.`,
+    image: photos[0] ? new URL(mediaUrl(photos[0].r2_key, 1200, t), c.req.url).toString() : undefined,
+  }, (
+    <div class="section"><div class="wrap stack">
+      <a href={`/stay/${p.slug}#rooms`} class="small">← {p.name}</a>
+      <div class="row-between">
+        <div>
+          <h1>{r.name}</h1>
+          <div class="muted">{p.name} · 📍 {p.destination}</div>
+        </div>
+        <div class="room-price">
+          <div class="price">{money(r.base_rate)}</div>
+          <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
+        </div>
+      </div>
+      {photos.length > 0
+        ? <div class="room-gallery" data-gallery>{photos.map((m) => <a href={mediaUrl(m.r2_key, 1600, t)} data-full><img src={mediaUrl(m.r2_key, 800, t)} alt={m.caption ?? r.name} loading="lazy" />{m.caption && <span class="cap">{m.caption}</span>}</a>)}</div>
+        : <p class="muted">Photos of this room are coming soon.</p>}
+      <div class="card stack">
+        <div class="room-meta">
+          <span>👥 Up to {r.capacity} guests{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
+          {r.bed_type && <span>🛏 {r.bed_type}</span>}
+          {r.size_sqft && <span>📐 {r.size_sqft} sq ft</span>}
+          {r.room_view && <span>🪟 {r.room_view} view</span>}
+        </div>
+        {r.description && <p>{r.description}</p>}
+        {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
+        {r.extra_bed ? <div class="small">Extra bed available{r.extra_bed_rate ? ` · ${money(r.extra_bed_rate)}/night` : ''}</div> : null}
+        {am.length > 0 && <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>}
+        <div class="row wrap-row">
+          <a class="btn" href={`/stay/${p.slug}?room=${r.id}`}>Enquire about this room</a>
+          <a class="btn btn-outline" href={`/stay/${p.slug}`}>See the whole property</a>
+        </div>
+      </div>
+    </div></div>
+  ))
+})

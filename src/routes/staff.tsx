@@ -359,6 +359,7 @@ staffRoutes.get('/staff/enquiries/:id', requirePerm('manage_enquiries'), async (
         </div>
         <div class="row wrap-row">
           <a class="btn btn-sm btn-outline" href={`/staff/finder?enquiry=${e.id}&destination=${encodeURIComponent(e.destination ?? '')}&checkIn=${e.check_in ?? ''}&checkOut=${e.check_out ?? ''}&guests=${e.adults + e.children}`}>Find properties</a>
+          <a class="btn btn-sm btn-outline" href={`/staff/rooms?enquiry=${e.id}`}>Share room photos</a>
           <form method="post" action={`/staff/quotes/new?enquiry=${e.id}`} class="inline"><button class="btn btn-sm">Create quotation</button></form>
           <form method="post" action={`/staff/enquiries/${e.id}/status`} class="inline"><input type="hidden" name="status" value="booked" /><button class="btn btn-sm btn-outline">Mark booked</button></form>
           <details class="inline-details"><summary class="btn btn-sm btn-outline">Mark lost</summary>

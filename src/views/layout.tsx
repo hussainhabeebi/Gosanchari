@@ -33,6 +33,7 @@ const STAFF_NAV: { key: string; href: string; label: string; perm?: keyof Permis
   { key: 'dashboard', href: '/staff', label: 'Dashboard' },
   { key: 'inbox', href: '/staff/enquiries', label: 'Enquiries', perm: 'manage_enquiries' },
   { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
+  { key: 'rooms', href: '/staff/rooms', label: 'Rooms & photos' },
   { key: 'quotes', href: '/staff/quotes', label: 'Quotations', perm: 'manage_quotes' },
   { key: 'bookings', href: '/staff/bookings', label: 'Bookings', perm: 'manage_bookings' },
   { key: 'calendar', href: '/staff/calendar', label: 'Availability', perm: 'manage_bookings' },

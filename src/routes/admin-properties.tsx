@@ -13,7 +13,7 @@ import { mediaUrl } from '../lib/integrations'
 import { FACILITIES, MEAL_PLANS } from '../lib/search'
 import {
   CONTACT_FIELDS, contact as readContact, CUISINES, dining as readDining, latLngFromMapUrl, legacyType, MENU_TYPES, PHOTO_CATEGORIES,
-  POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, ROOM_VIEWS, STAY_TYPES, stayType, THEMES, videoEmbedUrl, type Contact, type Dining, type Policies,
+  POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, ROOM_CATEGORY_NAMES, ROOM_VIEWS, STAY_TYPES, stayType, THEMES, videoEmbedUrl, type Contact, type Dining, type Policies,
 } from '../lib/catalog'
 import type { NearbyPlace, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, fmtDateTime, int, isDate, money, nowIso, parseJson, slugify, str } from '../lib/util'
@@ -61,7 +61,7 @@ const RoomFields = ({ r, pf = '', optional }: { r?: Partial<RoomRow>; pf?: strin
   return (
     <>
       <div class="row wrap-row">
-        <Field label="Room category name" class="grow"><input name={`${pf}name`} value={r?.name ?? ''} required={req} maxlength={80} placeholder="e.g. Deluxe Valley View" /></Field>
+        <Field label="Room category name" class="grow"><input name={`${pf}name`} value={r?.name ?? ''} required={req} maxlength={80} list="room-cat-names" placeholder="Standard / Deluxe / Suite…" /></Field>
         <Field label="Inventory (rooms of this type)"><input type="number" name={`${pf}units`} value={r?.units ?? 1} min="0" max="500" class="w-sm" /></Field>
         <Field label="Max guests"><input type="number" name={`${pf}capacity`} value={r?.capacity ?? 2} min="1" max="40" class="w-sm" /></Field>
         <Field label="Max adults"><input type="number" name={`${pf}max_adults`} value={r?.max_adults ?? ''} min="1" max="40" class="w-sm" /></Field>
@@ -129,6 +129,7 @@ function propertyForm(
         <h1>{isNew ? 'Add property' : p.name}</h1>
         {!isNew && <div class="row wrap-row"><Pill s={p.status ?? 'draft'} /><a class="btn btn-sm btn-outline" href={`/stay/${p.slug}`} target="_blank">Preview</a></div>}
       </div>
+      <datalist id="room-cat-names">{ROOM_CATEGORY_NAMES.map((n) => <option value={n} />)}</datalist>
       <nav class="section-nav">
         {visible.map(([k, l], i) => <a href={`#${k}`}>{i + 1}. {l}</a>)}
       </nav>
@@ -252,7 +253,7 @@ function propertyForm(
               {CONTACT_FIELDS.map(([k, label]) => (
                 k === 'bank_details'
                   ? <Field label={label}><textarea name={`con_${k}`} rows={3} placeholder="Account name, number, IFSC, bank / UPI ID">{con[k] ?? ''}</textarea></Field>
-                  : <Field label={label}><input name={`con_${k}`} value={con[k] ?? (k === 'person' ? p.owner_name : k === 'phone' ? p.owner_phone : k === 'email' ? p.owner_email : '') ?? ''} type={k === 'email' ? 'email' : k.startsWith('phone') ? 'tel' : 'text'} /></Field>
+                  : <Field label={label}><input name={`con_${k}`} value={con[k] ?? (k === 'person' ? p.owner_name : k === 'phone' ? p.owner_phone : k === 'email' ? p.owner_email : '') ?? ''} type={k.startsWith('email') ? 'email' : k.startsWith('phone') ? 'tel' : 'text'} /></Field>
               ))}
             </div>
           </section>
@@ -488,7 +489,7 @@ function propertyValues(f: Form, withContact: boolean) {
   const policies: Policies = {}
   for (const [k] of POLICY_FIELDS) if (str(f[`pol_${k}`])) policies[k] = str(f[`pol_${k}`], 300)
   const contact: Contact = {}
-  for (const [k] of CONTACT_FIELDS) if (str(f[`con_${k}`])) contact[k] = str(f[`con_${k}`], k === 'bank_details' ? 800 : k === 'email' ? 120 : 40)
+  for (const [k] of CONTACT_FIELDS) if (str(f[`con_${k}`])) contact[k] = str(f[`con_${k}`], k === 'bank_details' ? 800 : k.startsWith('email') ? 120 : 40)
   // Contact columns are only written by people allowed to see them, so others can't wipe them.
   const contactCols = withContact
     ? { contact: JSON.stringify(contact), owner_name: contact.person ?? null, owner_phone: contact.phone ?? null, owner_email: contact.email ?? null }

@@ -13,6 +13,7 @@ import { authRoutes } from './routes/auth'
 import { guestRoutes } from './routes/guest'
 import { staffRoutes } from './routes/staff'
 import { opsRoutes } from './routes/staff-ops'
+import { staffRoomRoutes } from './routes/staff-rooms'
 import { adminRoutes } from './routes/admin'
 import { propertyEditorRoutes } from './routes/admin-properties'
 import { admin2Routes } from './routes/admin2'
@@ -74,6 +75,7 @@ app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', staffRoomRoutes)
 app.route('/', propertyEditorRoutes)
 app.route('/', adminRoutes)
 app.route('/', admin2Routes)

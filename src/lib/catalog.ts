@@ -78,6 +78,12 @@ export const ROOM_AMENITIES: Record<string, string> = {
   heater: 'Room heater',
 }
 
+/** Suggested room category names (staff can still type their own). */
+export const ROOM_CATEGORY_NAMES = [
+  'Standard Room', 'Deluxe Room', 'Super Deluxe Room', 'Premium Room', 'Executive Room', 'Suite Room', 'Family Room', 'Family Suite',
+  'Honeymoon Suite', 'Cottage', 'Premium Cottage', 'Villa', 'Pool Villa', 'Tree House', 'Tent', 'Dormitory', 'Entire Property',
+]
+
 export const ROOM_VIEWS = ['Garden', 'Pool', 'Valley', 'Hill / mountain', 'Tea estate', 'Lake / backwater', 'Sea', 'Forest', 'River', 'City', 'No view']
 
 export const CUISINES = ['Kerala', 'South Indian', 'North Indian', 'Chinese', 'Continental', 'Seafood', 'Vegetarian', 'Jain', 'Arabic', 'Barbecue']
@@ -153,6 +159,7 @@ export interface Contact {
   phone2?: string
   phone3?: string
   email?: string
+  email2?: string
   bank_details?: string
 }
 export const CONTACT_FIELDS: [keyof Contact, string][] = [
@@ -160,7 +167,8 @@ export const CONTACT_FIELDS: [keyof Contact, string][] = [
   ['phone', 'Contact number 1'],
   ['phone2', 'Contact number 2'],
   ['phone3', 'Contact number 3'],
-  ['email', 'Email ID'],
+  ['email', 'Email ID 1'],
+  ['email2', 'Email ID 2'],
   ['bank_details', 'Account details (bank / UPI)'],
 ]
 
