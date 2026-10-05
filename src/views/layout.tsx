@@ -9,6 +9,7 @@ export type Area = 'public' | 'guest' | 'staff' | 'admin'
 
 export interface PageOpts {
   title: string
+  embedded?: boolean
   description?: string
   area?: Area
   active?: string
@@ -80,10 +81,11 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, se
       <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
       <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
       <nav class="topnav">
-        <a href="/search">Stays</a>
-        <a href="/offers">Offers</a>
-        <a href="/about">About</a>
-        <a href="/contact">Contact</a>
+        <a href="/">Home</a>
+        <details class="nav-dropdown"><summary>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
+        <a href="/offers">Packages</a>
+        <a href="/about">About Us</a>
+        <details class="nav-dropdown"><summary>Contact</summary><div class="nav-panel contact-panel"><a href={`tel:${settings.business.phone}`}>{settings.business.phone}</a><a href={`mailto:${settings.business.email}`}>{settings.business.email}</a></div></details>
         {user ? (
           <>
             <a href={isStaff(user.role) ? (user.role === 'sales' ? '/staff' : '/admin') : '/my'} class="btn btn-sm btn-outline">
@@ -94,7 +96,7 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, se
             </form>
           </>
         ) : (
-          <a href="/login" class="btn btn-sm">Login / Sign up</a>
+          <details class="nav-dropdown portal-dropdown"><summary class="btn btn-sm">Portal Login ⌄</summary><div class="nav-panel"><a href="/login?next=%2Fmy"><strong>Guest Login</strong><small>For travel agents &amp; guests</small></a><a href="/login?tab=email&amp;next=%2Fstaff"><strong>Staff Login</strong><small>For team members</small></a></div></details>
         )}
         <a class="btn btn-sm btn-wa" href={`https://wa.me/${settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">
           WhatsApp
@@ -202,7 +204,7 @@ export const Layout: FC<LayoutProps> = (p) => {
           {p.turnstileSiteKey && <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
           {p.head}
         </head>
-        <body class={`area-${area}`}>
+        <body class={`area-${area}${p.embedded ? ' embedded-stay' : ''}`}>
           <a class="skip" href="#main">Skip to content</a>
           <TopBar user={p.user} settings={p.settings} />
           {dash ? (
@@ -222,7 +224,7 @@ export const Layout: FC<LayoutProps> = (p) => {
           {area === 'public' && <Footer settings={p.settings} />}
           {area !== 'staff' && area !== 'admin' && (
             <a class="wa-float" href={`https://wa.me/${p.settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener" aria-label="Chat on WhatsApp">
-              💬
+              💬 Need Help?
             </a>
           )}
           <script src="/app.js" defer></script>
@@ -246,7 +248,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
   const perms = user && isStaff(user.role) ? resolvePermissions(user.role, settings.role_permissions) : null
   const flash = { ok: c.req.query('ok')?.slice(0, 200), err: c.req.query('err')?.slice(0, 200) }
   return c.html(
-    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL}>
+    <Layout {...opts} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL}>
       {body}
     </Layout>,
     status as 200,

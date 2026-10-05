@@ -29,7 +29,6 @@ async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv
   return new Set(rows.map((r) => r.property_id))
 }
 
-const HERO_EXAMPLES = ['Munnar this weekend for 2', 'Family of 5 in Wayanad with a pool', 'Alleppey houseboat 2 nights under ₹12,000', 'Group of 15 in Vagamon']
 
 // ---------- 1. Home ----------
 publicRoutes.get('/', async (c) => {
@@ -57,52 +56,24 @@ publicRoutes.get('/', async (c) => {
 
   return page(c, { title: settings.business.name, description: content.hero.subtitle, canonical: c.env.SITE_URL + '/' }, (
     <>
-      <section class="hero" style={`background-image:linear-gradient(rgba(5,40,37,.55),rgba(5,40,37,.55)),url('${content.hero.image}')`}>
+      <section class="hero reference-hero">
         <div class="wrap">
-          <h1>{content.hero.title}</h1>
-          <p class="hero-sub">{content.hero.subtitle}</p>
-          <form class="ai-search ai-search-hero" method="get" action="/search" role="search">
-            <span class="ai-badge">AI</span>
-            <input name="ai" maxlength={200} placeholder="Where, when, how many?" aria-label="Describe your stay" required />
-            <button class="btn">Search</button>
+          <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
+          <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
+            <Field label="⌖ Destination"><Select name="destination" value={destNames.includes('Munnar') ? 'Munnar' : ''} options={[['', 'Anywhere in Kerala'], ...destNames.map((d) => [d, d] as [string, string])]} /></Field>
+            <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
+            <Field label="▣ Check-out"><input type="date" name="checkOut" min={today} /></Field>
+            <details class="guest-picker"><summary><span class="field-label">♙ Guests</span><strong data-guest-summary>2 Adults, 0 Kids</strong></summary><div class="guest-panel"><Field label="Adults"><input name="guests" type="number" min="1" max="40" value="2" /></Field><Field label="Children"><input name="children" type="number" min="0" max="20" value="0" /></Field></div></details>
+            <button class="btn find-stay">⌕ &nbsp; Find My Stay</button>
           </form>
-          <div class="quick-chips" aria-label="Examples">
-            {HERO_EXAMPLES.map((e) => <a class="chip" href={`/search?ai=${encodeURIComponent(e)}`}>{e}</a>)}
-          </div>
-          <details class="classic-search">
-            <summary>Or pick place, dates & guests</summary>
-            <form class="searchbox" method="get" action="/search">
-              <Field label="Location">
-                <input name="destination" list="dest-list" placeholder="Munnar, Wayanad…" />
-                <datalist id="dest-list">{destNames.map((d) => <option value={d} />)}</datalist>
-              </Field>
-              <Field label="Check-in"><input type="date" name="checkIn" min={today} /></Field>
-              <Field label="Check-out"><input type="date" name="checkOut" min={today} /></Field>
-              <Field label="Guests"><input type="number" name="guests" min="1" max="40" value="2" /></Field>
-              <button class="btn btn-lg">Search</button>
-            </form>
-          </details>
+          <div class="trust-strip"><span>✦ <strong>Best Price Guarantee</strong><small>Unbeatable Deals</small></span><span>♧ <strong>24/7 Support</strong><small>We're always here</small></span><span>◇ <strong>Trusted Partner</strong><small>Verified Resorts</small></span><span>★ <strong>Curated Experiences</strong><small>Handpicked Stays</small></span></div>
         </div>
       </section>
-
-      <section class="wrap section">
-        <h2>Popular destinations</h2>
-        <div class="grid grid-4">
-          {dests.map((d) => (
-            <a class="dest" href={`/search?destination=${encodeURIComponent(d.name)}`}>
-              <img src={mediaUrl(d.image, 500, settings.images_transform)} alt={d.name} loading="lazy" />
-              <div class="dest-label"><strong>{d.name}</strong><span>{d.n} stays</span></div>
-            </a>
-          ))}
-        </div>
+      <section class="wrap section popular-stays">
+        <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
+        <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
       </section>
-
-      {featured.length > 0 && (
-        <section class="wrap section">
-          <div class="row-between"><h2>Featured stays</h2><a href="/search">See all →</a></div>
-          <div class="grid grid-4">{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div>
-        </section>
-      )}
+      <section class="wrap section" id="destinations"><h2>Popular destinations</h2><div class="grid grid-4">{dests.map((d) => <a class="dest" href={`/search?destination=${encodeURIComponent(d.name)}`}><img src={mediaUrl(d.image, 500, settings.images_transform)} alt={d.name} loading="lazy" /><div class="dest-label"><strong>{d.name}</strong><span>{d.n} stays</span></div></a>)}</div></section>
 
       {(offers.length > 0 || content.banners.length > 0) && (
         <section class="wrap section">
@@ -171,6 +142,7 @@ publicRoutes.get('/search', async (c) => {
   if (f.checkIn) qs.set('checkIn', f.checkIn)
   if (f.checkOut) qs.set('checkOut', f.checkOut)
   if (f.guests) qs.set('guests', String(f.guests))
+  if (c.req.query('children')) qs.set('children', String(Math.max(0, Math.min(20, int(c.req.query('children'))))))
   const view = c.req.query('view') === 'map' ? 'map' : 'list'
   const baseParams = filtersToParams(f)
   const mapParams = new URLSearchParams(baseParams); mapParams.set('view', view === 'map' ? 'list' : 'map')
@@ -214,12 +186,12 @@ publicRoutes.get('/search', async (c) => {
   }
 
   return page(c, { title: f.destination ? `Stays in ${f.destination}` : 'Find a stay', description: `Homestays, villas, resorts and houseboats${f.destination ? ' in ' + f.destination : ' in Kerala'}.`, head: view === 'map' ? <LeafletHead /> : undefined }, (
-    <div class="wrap search-page">
+    <><section class="destination-hero"><div class="wrap"><span class="eyebrow">DESTINATION</span><h1>{f.destination || 'Kerala'}</h1><p>MISTY MOUNTAINS, ENDLESS MEMORIES</p></div></section><div class="wrap search-page">
       <input type="checkbox" id="filters-toggle" class="nav-toggle" />
       <aside class="filters">
         <label for="filters-toggle" class="filters-close">✕ Close</label>
         <form method="get" action="/search" class="stack">
-          <h3>Filters</h3>
+          <h3>Filter by</h3>
           <Field label="Location">
             <Select name="destination" value={f.destination} options={[['', 'Anywhere in Kerala'], ...dests.map((d) => [d, d] as [string, string])]} />
           </Field>
@@ -316,7 +288,7 @@ publicRoutes.get('/search', async (c) => {
           </>
         )}
       </section>
-    </div>
+    </div></>
   ))
 })
 
@@ -444,7 +416,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                     <div class="room-price">
                       <div class="price">{money(r.base_rate)}</div>
                       <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
-                      <button class="btn btn-sm" data-pick-room={r.id}>Enquire</button>
+                      <button class="btn btn-sm" data-pick-room={r.id}>Book</button>
                     </div>
                   </div>
                 )
@@ -608,7 +580,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
         <aside class="booking-box card" id="book">
           <div class="price-line"><span class="price">{money(rooms[0]?.base_rate ?? 0)}</span> <span class="muted">/ night onwards</span></div>
-          <h3>Send an enquiry</h3>
+          <span class="eyebrow">CHAT WITH YOUR</span><h3>Personal <span class="advisor-green">Advisor</span></h3>
           <p class="muted small">Tell us your dates — our team will confirm availability and send you a quote on WhatsApp.</p>
           <form method="post" action="/enquiry" class="stack" data-price-url={`/stay/${p.slug}/price`}>
             <input type="hidden" name="property_id" value={p.id} />
@@ -625,14 +597,14 @@ publicRoutes.get('/stay/:slug', async (c) => {
             </div>
             <div class="row">
               <Field label="Adults"><input type="number" name="adults" min="1" max="40" value={Math.max(1, guests)} /></Field>
-              <Field label="Children"><input type="number" name="children" min="0" max="20" value="0" /></Field>
+              <Field label="Children"><input type="number" name="children" min="0" max="20" value={Math.max(0, Math.min(20, int(c.req.query('children'))))} /></Field>
               <Field label="Rooms"><input type="number" name="rooms" min="1" max="20" value="1" /></Field>
             </div>
             <div class="price-box" aria-live="polite"><span class="muted small">Pick dates to see an estimated price.</span></div>
             <Field label="Message (optional)"><textarea name="message" rows={2} maxlength={2000} placeholder="Special requests, questions…"></textarea></Field>
             <input type="hidden" name="whatsapp_optin" value="1" />
             <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
-            <button class="btn btn-lg">Send Enquiry</button>
+            <button type="button" class="btn btn-lg" data-trip-quote>Get Quote →</button><button class="btn btn-outline">Send Enquiry</button>
             <p class="muted small">No payment now. Final price is confirmed in your quote.</p>
           </form>
         </aside>
