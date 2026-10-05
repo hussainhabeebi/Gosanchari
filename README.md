@@ -65,11 +65,11 @@ Trigger cron jobs locally: `curl "http://localhost:8787/cdn-cgi/handler/schedule
 | | Command |
 |---|---|
 | Build | `npm run build` (type check + tests; Wrangler bundles the Worker itself) |
-| Deploy | `npm run deploy` (applies D1 migrations, then `wrangler deploy`) |
+| Deploy | `npm run deploy` (requires existing D1, applies migrations, then `wrangler deploy`) |
 
 For a Cloudflare dashboard Git connection (Workers & Pages → Create → Import a repository), use those same two commands. The root directory is `/`.
 
-**First deploy.** No IDs need editing: the deploy script creates the D1 database if needed and applies migrations. `wrangler deploy` then creates the KV namespace, R2 buckets and queue by name.
+**Existing D1 required.** The deploy script stops and reports the original error if lookup of `gosanchari` fails; it never creates a D1 database. It finds or creates the KV namespace, applies pending D1 migrations, then runs `wrangler deploy`. R2 buckets and the queue use their configured names.
 
 1. Change `SITE_URL` in `wrangler.toml` to your address, then commit.
 2. Deploy, either:

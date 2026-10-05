@@ -22,6 +22,8 @@ import { destinations } from '../lib/properties'
 import { SEASON_KINDS, seasonKindLabel, weekendLabel, weekendNights, type SeasonRate } from '../lib/pricing'
 import { extractProperty, type ExtractedRoom, type ExtractedSeason } from '../lib/propextract'
 
+import { cataloguePage } from './property-catalogue'
+
 export const propertyEditorRoutes = new Hono<AppEnv>()
 
 const SECTIONS: [string, string][] = [
@@ -536,6 +538,7 @@ async function canSeeNet(c: Context<AppEnv>) {
 async function loadEditor(c: Context<AppEnv>, id: number) {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', id)
   if (!p) return null
+  if (p.catalogue_only) return cataloguePage(c, p.id, true)
   const [rooms, media, seasonRows, dests] = await Promise.all([
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? ORDER BY active DESC, base_rate', p.id),
     all<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE property_id = ? ORDER BY category, sort, id', p.id),
@@ -803,7 +806,7 @@ const IMAGE_TYPES = /^image\/(jpeg|png|webp)$/
 const VIDEO_TYPES = /^video\/(mp4|webm|quicktime)$/
 
 /** Save uploaded photos/videos to R2 and the gallery. Images get AI tag suggestions in the background. */
-async function storeMedia(c: Context<AppEnv>, propertyId: number, files: File[], category: string, roomId: number | null, caption: string | null) {
+export async function storeMedia(c: Context<AppEnv>, propertyId: number, files: File[], category: string, roomId: number | null, caption: string | null) {
   const maxSort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', propertyId))?.m ?? 0
   let n = 0
   const skipped: string[] = []

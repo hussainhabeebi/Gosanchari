@@ -8,6 +8,8 @@ import type { AppEnv, Env, JobMessage } from './env'
 import { sessionMiddleware } from './lib/auth'
 import { page } from './views/layout'
 import { publicRoutes } from './routes/public'
+import { catalogueRoutes } from './routes/property-catalogue'
+import { catalogueLegacyGuard } from './routes/catalogue-guard'
 import { bookingDocRoutes } from './routes/booking-docs'
 import { authRoutes } from './routes/auth'
 import { guestRoutes } from './routes/guest'
@@ -47,6 +49,7 @@ app.use('*', (c, next) => (c.req.path === '/chat/ws' ? next() : security(c, next
 // Form posts must come from our own pages (webhooks use JSON and verify signatures).
 app.use('*', csrf())
 app.use('*', sessionMiddleware)
+app.use('*', catalogueLegacyGuard)
 
 // Live chat: WebSocket to the visitor's chat room Durable Object.
 app.get('/chat/ws', async (c) => {
@@ -71,6 +74,7 @@ app.get('/sitemap.xml', async (c) => {
 })
 app.get('/healthz', (c) => c.json({ ok: true }))
 
+app.route('/', catalogueRoutes)
 app.route('/', webhookRoutes)
 app.route('/', authRoutes)
 app.route('/', bookingDocRoutes)

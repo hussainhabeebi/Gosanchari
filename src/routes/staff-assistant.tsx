@@ -73,7 +73,7 @@ assistantRoutes.post('/staff/assistant/ask', requirePerm('manage_quotes'), async
   const need = body.edited ? needFromForm(body.need, await destinations(c.env)) : await readNeed(c.env, q, prev)
   let result: AssistantResult
   if (need.intent === 'property_info' && need.propertyName) {
-    const info = await propertyInfo(c.env, need.propertyName, perms.view_property_contacts, perms.view_net_rates)
+    const info = await propertyInfo(c.env, need.propertyName, perms.view_property_contacts, perms.view_net_rates, u.role)
     result = { need, checkIn: '', checkOut: '', nights: 0, guests: 0, assumedDates: false, options: [], ...(info ? { info } : {}) }
     if (!info) result = await findOptions(c.env, { ...need, intent: 'find' }, perms.view_net_rates)
   } else {

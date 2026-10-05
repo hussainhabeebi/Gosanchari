@@ -1,6 +1,8 @@
 // Row types for the main tables.
 
 export interface PropertyRow {
+  catalogue_only?: number
+  classification?: string | null
   id: number
   slug: string
   name: string
@@ -62,6 +64,7 @@ export interface PropertyRow {
   contact: string
 }
 
+/** Legacy quote-compatible rooms. Use CatalogueRoom for catalogue_only properties with unknown details. */
 export interface RoomRow {
   id: number
   property_id: number
@@ -274,6 +277,7 @@ export interface ReviewRow {
 }
 
 export interface PropertyCard {
+  catalogue_only?: number
   id: number
   slug: string
   name: string
@@ -284,7 +288,7 @@ export interface PropertyCard {
   facilities: string
   meal_plans: string
   from_price: number
-  max_guests: number
+  max_guests: number | null
   photo: string | null
   lat: number | null
   lng: number | null

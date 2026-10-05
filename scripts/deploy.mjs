@@ -1,4 +1,4 @@
-// Deploy: make sure the D1 database and KV namespace exist (reusing them if they do), apply migrations,
+// Deploy: require the existing D1 database, find/create the KV namespace, apply migrations,
 // then `wrangler deploy`. Works locally (after `wrangler login`) and in Cloudflare Workers Builds.
 // R2 buckets and the queue are named in wrangler.toml and provisioned by `wrangler deploy`.
 import { spawnSync } from 'node:child_process'
@@ -13,10 +13,14 @@ const fail = (msg, code = 1) => { console.error(`✘ ${msg}`); process.exit(code
 
 // ---- D1 ----
 console.log(`▶ D1 database "${DB}"`)
-if (run(['d1', 'info', DB], true).status !== 0) {
-  console.log('  not found — creating it')
-  if (run(['d1', 'create', DB, '--location', 'apac']).status !== 0) fail('Could not create the D1 database')
-} else console.log('  found')
+const databaseInfo = run(['d1', 'info', DB], true)
+if (databaseInfo.status !== 0) {
+  if (databaseInfo.stdout) process.stderr.write(databaseInfo.stdout)
+  if (databaseInfo.stderr) process.stderr.write(databaseInfo.stderr)
+  if (databaseInfo.error) console.error(databaseInfo.error)
+  fail('Existing D1 lookup failed; stopping without creating a database or applying migrations', databaseInfo.status || 1)
+}
+console.log('  found')
 
 // ---- KV: find by title (create if missing) and pin its id in the config used for this deploy ----
 function findKv() {

@@ -3,3 +3,6 @@ node_modules/
 .dev.vars
 dist/
 *.log
+# Client pricing is confidential; never publish Staff/B2B rates in this public repository.
+data/golden-munnar-palace.json
+seed/golden-munnar-palace.sql

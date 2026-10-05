@@ -1,0 +1,470 @@
+{
+  "property": {
+    "slug": "golden-munnar-palace-by-hawk-hospitality",
+    "name": "Golden Munnar Palace by Hawk Hospitality",
+    "destination": "Chithirapuram, Munnar",
+    "type": "resort",
+    "stay_type": "hotel",
+    "classification": "5-Star facility hotel",
+    "catalogue_only": 1,
+    "status": "live",
+    "description": "Golden Munnar Palace by Hawk Hospitality is a 5-Star facility hotel located at Chithirapuram, Munnar. The property has 98 rooms with balconies opening to Tea Garden or Mountain Views.",
+    "highlights": [
+      "98 rooms",
+      "Balconies opening to Tea Garden or Mountain Views"
+    ],
+    "facilities": [
+      "pool",
+      "gym",
+      "140-seater Restaurant",
+      "Coffee Shop",
+      "Business Centre",
+      "Board Room",
+      "110 Pax Theatre-style Conference Hall",
+      "indoor_games"
+    ],
+    "address": null,
+    "lat": null,
+    "lng": null,
+    "checkin_time": null,
+    "checkout_time": null,
+    "id_required": null,
+    "pet_friendly": null,
+    "family_friendly": null,
+    "star_category": null,
+    "child_free_below": 6,
+    "child_age_to": 11,
+    "policies": {
+      "child": "Children below 6: complimentary. Age 12 and above: adult."
+    },
+    "cancellation_policy": "Cancelled 30 days before: 100% refund, adjusted in next booking\nCancelled 15 days before: 75% refund, adjusted in next booking\nCancelled 7 days before: 50% refund, adjusted in next booking\nLess than 7 days: 100% retention"
+  },
+  "rooms": [
+    {
+      "name": "Golden Executive with Balcony Non-AC",
+      "units": 68,
+      "capacity": null,
+      "rack_rate": 7000,
+      "rack_basis": "+ GST",
+      "base_rate": 7000,
+      "base_guests": null,
+      "min_nights": null,
+      "extra_bed": null,
+      "staff_rate": null,
+      "net_rate": null,
+      "bed_type": null,
+      "size_sqft": null,
+      "room_view": null,
+      "facilities": [
+        "balcony"
+      ],
+      "periods": [
+        {
+          "start_date": "2026-04-01",
+          "end_date": "2026-04-30",
+          "staff_rate": 90001,
+          "net_rate": 80001,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-05-01",
+          "end_date": "2026-05-31",
+          "staff_rate": null,
+          "net_rate": 81001,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-06-01",
+          "end_date": "2026-09-30",
+          "staff_rate": 92001,
+          "net_rate": 82001,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-10-01",
+          "end_date": "2027-03-31",
+          "staff_rate": 93001,
+          "net_rate": 83001,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        }
+      ]
+    },
+    {
+      "name": "Golden Suite with Balcony Non-AC",
+      "units": 17,
+      "capacity": null,
+      "rack_rate": 11000,
+      "rack_basis": "+ GST",
+      "base_rate": 11000,
+      "base_guests": null,
+      "min_nights": null,
+      "extra_bed": null,
+      "staff_rate": null,
+      "net_rate": null,
+      "bed_type": null,
+      "size_sqft": null,
+      "room_view": null,
+      "facilities": [
+        "balcony"
+      ],
+      "periods": [
+        {
+          "start_date": "2026-04-01",
+          "end_date": "2026-04-30",
+          "staff_rate": 90101,
+          "net_rate": 80101,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-05-01",
+          "end_date": "2026-05-31",
+          "staff_rate": null,
+          "net_rate": 81101,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-06-01",
+          "end_date": "2026-09-30",
+          "staff_rate": 92101,
+          "net_rate": 82101,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-10-01",
+          "end_date": "2027-03-31",
+          "staff_rate": 93101,
+          "net_rate": 83101,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        }
+      ]
+    },
+    {
+      "name": "Golden Honeymoon Suite with Balcony Non-AC",
+      "units": 10,
+      "capacity": null,
+      "rack_rate": 15000,
+      "rack_basis": "+ GST",
+      "base_rate": 15000,
+      "base_guests": null,
+      "min_nights": null,
+      "extra_bed": null,
+      "staff_rate": null,
+      "net_rate": null,
+      "bed_type": null,
+      "size_sqft": null,
+      "room_view": null,
+      "facilities": [
+        "balcony"
+      ],
+      "periods": [
+        {
+          "start_date": "2026-04-01",
+          "end_date": "2026-04-30",
+          "staff_rate": 90201,
+          "net_rate": 80201,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-05-01",
+          "end_date": "2026-05-31",
+          "staff_rate": null,
+          "net_rate": 81201,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-06-01",
+          "end_date": "2026-09-30",
+          "staff_rate": 92201,
+          "net_rate": 82201,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-10-01",
+          "end_date": "2027-03-31",
+          "staff_rate": 93201,
+          "net_rate": 83201,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        }
+      ]
+    },
+    {
+      "name": "Golden Duplex (4 Pax) Non-AC",
+      "units": 3,
+      "capacity": 4,
+      "rack_rate": 19000,
+      "rack_basis": "+ GST",
+      "base_rate": 19000,
+      "base_guests": null,
+      "min_nights": null,
+      "extra_bed": null,
+      "staff_rate": null,
+      "net_rate": null,
+      "bed_type": null,
+      "size_sqft": null,
+      "room_view": null,
+      "facilities": [],
+      "periods": [
+        {
+          "start_date": "2026-04-01",
+          "end_date": "2026-04-30",
+          "staff_rate": 90301,
+          "net_rate": 80301,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-05-01",
+          "end_date": "2026-05-31",
+          "staff_rate": null,
+          "net_rate": 81301,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-06-01",
+          "end_date": "2026-09-30",
+          "staff_rate": 92301,
+          "net_rate": 82301,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        },
+        {
+          "start_date": "2026-10-01",
+          "end_date": "2027-03-31",
+          "staff_rate": 93301,
+          "net_rate": 83301,
+          "staff_basis": null,
+          "net_basis": "CPAI"
+        }
+      ]
+    }
+  ],
+  "charges": [
+    {
+      "charge_key": "ac",
+      "name": "AC on request",
+      "amount": 500,
+      "child_amount": null,
+      "basis": "per room/night",
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "extra-bed",
+      "name": "Extra Bed",
+      "amount": 1250,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": "CPAI",
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "child-with-bed",
+      "name": "Child With Bed",
+      "amount": 900,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": "CPAI",
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "child-without-bed",
+      "name": "Child Without Bed",
+      "amount": 650,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": "CPAI",
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "meals",
+      "name": "Lunch/Dinner",
+      "amount": 800,
+      "child_amount": 500,
+      "basis": "per adult / per child",
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "candle-light-dinner",
+      "name": "Candle Light Dinner",
+      "amount": 3000,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [
+        "Room Balcony",
+        "Restaurant",
+        "Terrace",
+        "Pool area"
+      ],
+      "notes": ""
+    },
+    {
+      "charge_key": "flower-bed",
+      "name": "Flower Bed",
+      "amount": 1500,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "honeymoon-cake",
+      "name": "Half KG Honeymoon Cake",
+      "amount": 1000,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "badam-milk",
+      "name": "Badam Milk",
+      "amount": 400,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "chocolate",
+      "name": "Homemade Chocolate",
+      "amount": 500,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "wine",
+      "name": "Wine Bottle",
+      "amount": 1750,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "fruit-basket",
+      "name": "Fruit Basket",
+      "amount": 1000,
+      "child_amount": null,
+      "basis": null,
+      "rate_basis": null,
+      "start_date": null,
+      "end_date": null,
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "diwali",
+      "name": "Diwali supplement",
+      "amount": 1000,
+      "child_amount": null,
+      "basis": "per room/night",
+      "rate_basis": null,
+      "start_date": "2026-11-05",
+      "end_date": "2026-11-15",
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "christmas",
+      "name": "Christmas period supplement",
+      "amount": 2000,
+      "child_amount": null,
+      "basis": "per room/night",
+      "rate_basis": null,
+      "start_date": "2026-12-20",
+      "end_date": "2027-01-05",
+      "mandatory": 0,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "christmas-gala",
+      "name": "Christmas Gala Dinner",
+      "amount": 2500,
+      "child_amount": 1250,
+      "basis": "per person / per child",
+      "rate_basis": null,
+      "start_date": "2026-12-24",
+      "end_date": "2026-12-24",
+      "mandatory": 1,
+      "options": [],
+      "notes": ""
+    },
+    {
+      "charge_key": "new-year",
+      "name": "New Year Celebration",
+      "amount": 3000,
+      "child_amount": 1500,
+      "basis": "per person / per child",
+      "rate_basis": null,
+      "start_date": "2026-12-31",
+      "end_date": "2026-12-31",
+      "mandatory": 1,
+      "options": [],
+      "notes": ""
+    }
+  ],
+  "_test_only": "Synthetic internal rates. NOT the client rates. Never import this fixture into D1."
+}

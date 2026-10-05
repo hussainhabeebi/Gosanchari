@@ -18,6 +18,9 @@ import type { NearbyPlace, PhotoRow, PropertyRow, QuotationRow, QuoteOptionRow, 
 import { addDays, eachNight, fmtDate, fmtShortDate, int, isDate, money, nightsBetween, normalizePhone, nowIso, parseJson, refCode, str, todayIST } from '../lib/util'
 import { clientIp, form, redirectMsg } from './helpers'
 
+import { cataloguePage } from './property-catalogue'
+import { loadCatalogue } from '../lib/property-catalogue'
+
 export const publicRoutes = new Hono<AppEnv>()
 
 const NEARBY_ICONS: Record<string, string> = { railway: '🚆', airport: '✈️', bus: '🚌', hospital: '🏥', atm: '🏧', shopping: '🛍', restaurant: '🍽', beach: '🏖', waterfall: '💧', viewpoint: '🌄', attraction: '📍' }
@@ -323,6 +326,7 @@ publicRoutes.get('/search', async (c) => {
 // ---------- 3. Property details ----------
 publicRoutes.get('/stay/:slug', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
+  if (p?.catalogue_only) return cataloguePage(c, p.id)
   const user = c.get('user')
   const isStaffUser = !!user && user.role !== 'guest'
   if (!p || (p.status !== 'live' && !isStaffUser)) return page(c, { title: 'Not found' }, <div class="wrap section"><Empty><h2>This stay is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
@@ -655,6 +659,11 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
 // Estimated price for the enquiry box (rule-based; the quote confirms the final price).
 publicRoutes.post('/stay/:slug/price', async (c) => {
+  const property = await first<{id: number; catalogue_only: number}>(c.env, "SELECT id,catalogue_only FROM properties WHERE slug=? AND status='live'", c.req.param('slug'))
+  if (property?.catalogue_only) {
+    const data = await loadCatalogue(c.env, property.id) // Public projection, regardless of session role.
+    return c.json({ catalogue_only: true, rooms: data!.rooms.map(({id,name,rack_rate,rack_basis}) => ({id,name,rack_rate,rack_basis})), charges: data!.charges })
+  }
   const f = await form(c)
   if (!isDate(f.checkIn) || !isDate(f.checkOut)) return c.json({ errors: ['Pick your dates'] })
   let roomId = int(f.room)
@@ -1046,6 +1055,7 @@ publicRoutes.get('/media/*', async (c) => {
 // ---------- Room category page (shareable link: staff send it to guests on WhatsApp) ----------
 publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
+  if (p?.catalogue_only) return cataloguePage(c, p.id, false, int(c.req.param('roomId')))
   const user = c.get('user')
   const isStaffUser = !!user && user.role !== 'guest'
   const r = p ? await first<RoomRow>(c.env, 'SELECT * FROM rooms WHERE id = ? AND property_id = ?', int(c.req.param('roomId')), p.id) : null

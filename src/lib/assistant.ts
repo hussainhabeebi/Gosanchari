@@ -1,3 +1,4 @@
+import { loadCatalogue } from './property-catalogue'
 // Staff AI assistant ("ask about our resorts"): staff describe what a client needs in plain words; we
 //  1. read the need (AI, with rule-based fallback),
 //  2. search our own property database, check availability and calculate exact prices for the dates with the
@@ -241,7 +242,7 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
   else if (need.destination) { where.push('p.destination = ?'); args.push(need.destination) }
   if (need.types?.length) { where.push(`COALESCE(p.stay_type, p.type) IN (${need.types.map(() => '?').join(', ')})`); args.push(...need.types) }
   if (need.pet) where.push('p.pet_friendly = 1')
-  const props = await all<PropertyRow>(env, `SELECT p.* FROM properties p WHERE ${where.join(' AND ')} ORDER BY p.rating_avg DESC LIMIT 60`, ...args)
+  const props = await all<PropertyRow>(env, `SELECT p.* FROM properties p WHERE p.catalogue_only = 0 AND ${where.join(' AND ')} ORDER BY p.rating_avg DESC LIMIT 60`, ...args)
   const wantFac = need.facilities ?? []
   const candidates = props.filter((p) => {
     const fac = parseJson<string[]>(p.facilities, [])
@@ -313,9 +314,10 @@ function avgNet(r: RoomRow, ss: SeasonRate[], checkIn: string, checkOut: string)
 }
 
 /** Everything staff may need about one property (for "what's the cancellation policy at X?" questions). */
-export async function propertyInfo(env: Env, name: string, showContacts: boolean, showNet: boolean): Promise<Record<string, unknown> | null> {
+export async function propertyInfo(env: Env, name: string, showContacts: boolean, showNet: boolean, role?: import('./permissions').Role): Promise<Record<string, unknown> | null> {
   const p = (await all<PropertyRow>(env, "SELECT * FROM properties WHERE name LIKE ? AND status != 'hidden' ORDER BY status = 'live' DESC LIMIT 1", `%${name}%`))[0]
   if (!p) return null
+  if (p.catalogue_only) return loadCatalogue(env, p.id, role)
   const rooms = await all<RoomRow>(env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id)
   const pol = readPolicies(p.policies)
   return {

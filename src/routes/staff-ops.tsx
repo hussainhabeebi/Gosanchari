@@ -72,6 +72,14 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
         <div class="row-between"><span class="muted">{results.length} properties{avail ? ' with free rooms' : ''}</span><button class="btn btn-sm btn-outline">Compare selected (max 3)</button></div>
         {results.length === 0 && <Empty>No matches. Loosen the filters or check other dates.</Empty>}
         {results.map((p) => {
+          if (p.catalogue_only) return <div class="card finder-row">
+            {p.photo && <img src={mediaUrl(p.photo, 240)} alt="" />}
+            <div class="grow stack-sm">
+              <strong>{p.name}</strong><span>{p.destination}</span>
+              <span>Rack Rate from {money(p.from_price)} + GST</span>
+              <a class="btn btn-sm" href={`/staff/catalogue/${p.id}`}>View property, supplied rates and photos</a>
+            </div>
+          </div>
           const i = info.get(p.id)
           const prs = rooms.filter((r) => r.property_id === p.id)
           return (
@@ -116,7 +124,8 @@ opsRoutes.get('/staff/finder/compare', requirePerm('manage_quotes'), async (c) =
   const perms = await permissionsFor(c.env, u.role)
   const ids = c.req.queries('ids')?.map(Number).filter(Boolean).slice(0, 3) ?? []
   if (!ids.length) return redirectMsg(c, '/staff/finder', { err: 'Select up to 3 properties to compare.' })
-  const props = await all<PropertyRow>(c.env, `SELECT * FROM properties WHERE id IN (${placeholders(ids.length)})`, ...ids)
+  const props = await all<PropertyRow>(c.env, `SELECT * FROM properties WHERE catalogue_only=0 AND id IN (${placeholders(ids.length)})`, ...ids)
+  if (!props.length) return redirectMsg(c, '/staff/rooms', { err: 'Use the catalogue page for this property.' })
   const rooms = await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(ids.length)}) ORDER BY base_rate`, ...ids)
   const rows: [string, (p: PropertyRow) => unknown][] = [
     ['Type', (p) => stayTypeLabel(p)], ['Destination', (p) => p.destination], ['Rating', (p) => `★ ${p.rating_avg.toFixed(1)} (${p.rating_count})`],
@@ -178,6 +187,7 @@ function optionNeedsApproval(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | '
 }
 
 async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number, roomId: number | null, checkIn: string | null, checkOut: string | null, adults: number, children: number) {
+  if (await first(c.env, 'SELECT id FROM properties WHERE id=? AND catalogue_only=1', propertyId)) return
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', propertyId)
   const room = rooms.find((r) => r.id === roomId) ?? rooms.find((r) => r.capacity >= adults + children) ?? rooms[0]
   if (!room) return
@@ -195,6 +205,8 @@ async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number
 
 // Create a quote (from the enquiry workspace, finder or directly).
 async function createQuote(c: Context<AppEnv>) {
+  const catalogueId = int(c.req.query('property'))
+  if (catalogueId && await first(c.env, 'SELECT id FROM properties WHERE id=? AND catalogue_only=1', catalogueId)) return c.text('This property is a catalogue only.', 409)
   const u = c.get('user')!
   const s = await getSettings(c.env)
   const enquiryId = int(c.req.query('enquiry')) || null

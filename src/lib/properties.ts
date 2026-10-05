@@ -1,3 +1,4 @@
+import { catalogueDocument, loadCatalogue } from './property-catalogue'
 import { COVER_PHOTO_SQL, dining as readDining, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, stayType, stayTypeLabel, THEMES } from './catalog'
 // Property search (database), semantic ranking (Vectorize), similar properties, knowledge-base docs.
 
@@ -12,9 +13,9 @@ import { nightsBetween, nowIso, parseJson, sha256Hex, todayIST } from './util'
 
 const CARD_SQL = `
 SELECT p.id, p.slug, p.name, COALESCE(p.stay_type, p.type) AS type, p.destination, p.rating_avg, p.rating_count, p.facilities, p.meal_plans,
-       p.lat, p.lng, p.featured, p.pet_friendly, p.family_friendly, p.created_at,
-       (SELECT MIN(base_rate) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS from_price,
-       (SELECT COALESCE(SUM(capacity * units), 0) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS max_guests,
+       p.lat, p.lng, p.featured, p.pet_friendly, p.family_friendly, p.created_at, p.catalogue_only,
+       (SELECT MIN(CASE WHEN p.catalogue_only = 1 THEN rack_rate ELSE base_rate END) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS from_price,
+       CASE WHEN p.catalogue_only = 1 THEN NULL ELSE (SELECT COALESCE(SUM(capacity * units), 0) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) END AS max_guests,
        ${COVER_PHOTO_SQL} AS photo
 FROM properties p`
 
@@ -93,7 +94,7 @@ export async function searchProperties(env: Env, f: SearchFilters, limit = 60): 
 
   if (f.checkIn && f.checkOut && cards.length) {
     cards = await withStayPrices(env, cards, f)
-    cards = cards.filter((c) => c.available)
+    cards = cards.filter((c) => c.catalogue_only || c.available)
     if (f.priceMax) cards = cards.filter((c) => (c.stay_price ?? c.from_price) <= f.priceMax!)
   }
 
@@ -102,7 +103,8 @@ export async function searchProperties(env: Env, f: SearchFilters, limit = 60): 
 }
 
 async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters): Promise<PropertyCard[]> {
-  const ids = cards.map((c) => c.id)
+  const ids = cards.filter((c) => !c.catalogue_only).map((c) => c.id)
+  if (!ids.length) return cards
   const ph = placeholders(ids.length)
   const [rooms, seasons, avail] = await Promise.all([
     all<RoomRow & { weekend_nights: string }>(env, `SELECT r.*, p.weekend_nights FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.active = 1 AND r.property_id IN (${ph})`, ...ids),
@@ -112,6 +114,7 @@ async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters)
   const nights = nightsBetween(f.checkIn!, f.checkOut!)
   const guests = f.guests ?? 2
   for (const c of cards) {
+    if (c.catalogue_only) continue // Catalogue listing only; no availability or stay total asserted.
     let best: { perNight: number; total: number } | null = null
     const propRooms = rooms.filter((r) => r.property_id === c.id)
     // Can the whole group fit in the free units?
@@ -149,7 +152,7 @@ export function propertyEmbeddingText(p: PropertyRow, rooms: Pick<RoomRow, 'name
     readDining(p.dining).cuisines?.join(', ') ?? '',
     p.family_friendly ? 'Good for families and kids.' : '',
     p.pet_friendly ? 'Pet friendly.' : '',
-    `Rooms: ${rooms.map((r) => `${r.name} for ${r.capacity}`).join('; ')}.`,
+    `Rooms: ${rooms.map((r) => r.capacity == null ? r.name : `${r.name} for ${r.capacity}`).join('; ')}.`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -258,6 +261,10 @@ export async function embedProperty(env: Env, propertyId: number): Promise<void>
 // ---- Knowledge base documents for AI Search (stored in R2) ----
 
 export async function propertyDoc(env: Env, p: PropertyRow): Promise<string> {
+  if (p.catalogue_only) {
+    const data = await loadCatalogue(env, p.id)
+    return data ? catalogueDocument(data) : ''
+  }
   const rooms = await all<RoomRow>(env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id)
   const seasons = await all<{ name: string; start_date: string; end_date: string; room_id: number | null; rate: number | null; pct_adjust: number | null }>(
     env, 'SELECT name, start_date, end_date, room_id, rate, pct_adjust FROM season_rates WHERE property_id = ? ORDER BY start_date', p.id,
@@ -355,6 +362,7 @@ async function reindexKb(env: Env): Promise<void> {
 }
 
 export async function bestRoomFor(env: Env, propertyId: number, guests: number, checkIn: string | null, checkOut: string | null) {
+  if (await first(env, 'SELECT id FROM properties WHERE id=? AND catalogue_only=1', propertyId)) return null
   const rooms = await all<RoomRow>(env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', propertyId)
   if (!rooms.length) return null
   if (!checkIn || !checkOut) return { room: rooms[0], roomsCount: roomsNeeded(guests, rooms[0].capacity), price: null }

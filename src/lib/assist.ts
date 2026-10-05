@@ -189,7 +189,7 @@ export async function matchProperties(env: Env, e: EnquiryRow, n = 3): Promise<(
   else candidates = (await all<{ id: number }>(env, "SELECT id FROM properties WHERE status = 'live' ORDER BY (destination = ?) DESC, rating_avg DESC LIMIT 30", e.destination ?? '')).map((r) => r.id)
   let cards = await cardsByIds(env, candidates)
   if (e.destination) cards = [...cards.filter((c) => c.destination === e.destination), ...cards.filter((c) => c.destination !== e.destination)]
-  cards = cards.filter((c) => c.max_guests >= guests)
+  cards = cards.filter((c) => (c.max_guests ?? 0) >= guests)
   if (e.check_in && e.check_out) {
     const avail = await roomAvailability(env, cards.map((c) => c.id), e.check_in, e.check_out)
     const rooms = await all<{ id: number; property_id: number; capacity: number }>(env, `SELECT id, property_id, capacity FROM rooms WHERE active = 1`)

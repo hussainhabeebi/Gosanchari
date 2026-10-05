@@ -16,6 +16,8 @@ import type { EnquiryRow, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, int, money, normalizePhone, parseJson, str, todayIST } from '../lib/util'
 import { canSeeEnquiry } from './staff'
 
+import { catalogueStaff } from '../lib/property-catalogue'
+
 export const staffRoomRoutes = new Hono<AppEnv>()
 staffRoomRoutes.use('/staff/rooms', requireStaff)
 staffRoomRoutes.use('/staff/rooms/*', requireStaff)
@@ -73,6 +75,10 @@ staffRoomRoutes.get('/staff/rooms', async (c) => {
 staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', int(c.req.param('id')))
   if (!p) return c.notFound()
+  if (p.catalogue_only) {
+    if (!catalogueStaff(c.get('user')?.role)) return c.text('Staff only', 403)
+    return c.redirect(`/staff/catalogue/${p.id}`, 302)
+  }
   const u = c.get('user')!
   const [perms, settings, guest] = await Promise.all([permissionsFor(c.env, u.role), getSettings(c.env), enquiryGuest(c)])
   const [rooms, photos, seasonRows] = await Promise.all([

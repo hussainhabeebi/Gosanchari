@@ -36,12 +36,12 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
   return (
     <article class="card pcard">
       <a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`} class="pcard-img">
-        <img src={mediaUrl(p.photo, 600, transform)} alt={p.name} loading="lazy" width="600" height="400" />
+        {(!p.catalogue_only || p.photo) && <img src={mediaUrl(p.photo, 600, transform)} alt={p.name} loading="lazy" width="600" height="400" />}
         <span class="pcard-type">{STAY_TYPES[p.type] ?? p.type}</span>
       </a>
-      <form method="post" action={`/saved/${p.id}`} class="pcard-heart">
+      {!p.catalogue_only && <form method="post" action={`/saved/${p.id}`} class="pcard-heart">
         <button title={saved ? 'Remove from saved' : 'Save'} aria-label="Save property" class={saved ? 'on' : ''}>{saved ? '♥' : '♡'}</button>
-      </form>
+      </form>}
       <div class="pcard-body">
         <div class="row-between">
           <h3><a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>{p.name}</a></h3>
@@ -53,7 +53,7 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
           : <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
         <div class="row-between pcard-foot">
           <div>
-            <span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>
+            <span class="muted small">{p.catalogue_only ? 'Rack Rate · + GST' : p.stay_price ? 'avg / night' : 'from / night'}</span>
             <div class="price">{money(price)}</div>
             {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
           </div>
