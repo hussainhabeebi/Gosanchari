@@ -9,6 +9,7 @@ export type Area = 'public' | 'guest' | 'staff' | 'admin'
 
 export interface PageOpts {
   title: string
+  journey?: JourneyTheme
   embedded?: boolean
   description?: string
   area?: Area
@@ -29,6 +30,31 @@ interface LayoutProps extends PageOpts {
   siteUrl: string
   children?: Child
 }
+
+
+interface JourneyTheme { mood: string; label: string; description: string; nativeHero?: boolean }
+/** A shared visual story, selected by route so all pages receive a consistent theme. */
+export function journeyTheme(path: string, area: Area = 'public'): JourneyTheme {
+  if (path === '/') return { mood: 'adventure', label: 'Your journey begins', description: 'Explore · Stay · Unwind', nativeHero: true }
+  if (path === '/search') return { mood: 'curiosity', label: 'Follow your curiosity', description: 'Find a place that feels like you', nativeHero: true }
+  if (path.startsWith('/stay/')) return { mood: 'unwind', label: 'Pause. Breathe. Stay.', description: 'A little comfort along your journey' }
+  if (path === '/offers') return { mood: 'anticipation', label: 'Something to look forward to', description: 'Make your next escape a little more memorable' }
+  if (path === '/about') return { mood: 'reflection', label: 'Every journey has a story', description: 'Travel more. Worry less.' }
+  if (path === '/contact' || path === '/help') return { mood: 'connection', label: 'You are never travelling alone', description: 'A friendly guide, whenever you need one' }
+  if (path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot') || path.startsWith('/reset')) return { mood: 'welcome', label: 'Welcome to your next chapter', description: 'Your journey, all in one place' }
+  if (path.startsWith('/enquiry')) return { mood: 'hope', label: 'Let us plan your next escape', description: 'Tell us your dream. We will help with the details.' }
+  if (path.startsWith('/q/')) return { mood: 'anticipation', label: 'Your escape is taking shape', description: 'The next chapter is almost here' }
+  if (path.startsWith('/policies')) return { mood: 'clarity', label: 'Travel with peace of mind', description: 'Clear details for a carefree journey' }
+  if (area === 'guest' || path.startsWith('/my')) return { mood: 'memories', label: 'Your travel story', description: 'Plans to look forward to. Memories to keep.' }
+  if (area === 'staff' || area === 'admin') return { mood: 'focus', label: 'Make every journey count', description: 'Thoughtful service, one traveller at a time' }
+  return { mood: 'discovery', label: 'Keep exploring', description: 'There is always another story waiting' }
+}
+
+const JourneyBanner: FC<{ theme: JourneyTheme; title: string }> = ({ theme, title }) => (
+  <section class="journey-banner" aria-label={theme.label}>
+    <div class="wrap journey-copy"><span class="eyebrow">{theme.label}</span><h2>{title}</h2><p>{theme.description}</p></div>
+  </section>
+)
 
 const STAFF_NAV: { key: string; href: string; label: string; perm?: keyof Permissions }[] = [
   { key: 'dashboard', href: '/staff', label: 'Dashboard' },
@@ -204,7 +230,7 @@ export const Layout: FC<LayoutProps> = (p) => {
           {p.turnstileSiteKey && <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
           {p.head}
         </head>
-        <body class={`area-${area}${p.embedded ? ' embedded-stay' : ''}`}>
+        <body class={`area-${area}${p.embedded ? ' embedded-stay' : ''} journey-${p.journey?.mood ?? 'discovery'}`}>
           <a class="skip" href="#main">Skip to content</a>
           <TopBar user={p.user} settings={p.settings} />
           {dash ? (
@@ -212,12 +238,14 @@ export const Layout: FC<LayoutProps> = (p) => {
               <SideNav area={area} active={p.active} perms={p.perms} user={p.user!} />
               <main id="main" class="dash-main">
                 <Flash {...p.flash} />
+                {p.journey && !p.embedded && <JourneyBanner theme={p.journey} title={p.title} />}
                 {p.children}
               </main>
             </div>
           ) : (
             <main id="main">
               <Flash {...p.flash} />
+              {p.journey && !p.journey.nativeHero && !p.embedded && <JourneyBanner theme={p.journey} title={p.title} />}
               {p.children}
             </main>
           )}
@@ -248,7 +276,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
   const perms = user && isStaff(user.role) ? resolvePermissions(user.role, settings.role_permissions) : null
   const flash = { ok: c.req.query('ok')?.slice(0, 200), err: c.req.query('err')?.slice(0, 200) }
   return c.html(
-    <Layout {...opts} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL}>
+    <Layout {...opts} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL}>
       {body}
     </Layout>,
     status as 200,
