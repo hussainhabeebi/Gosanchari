@@ -1,4 +1,3 @@
-import { STAY_TYPES } from '../lib/catalog'
 import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
 import { FACILITIES } from '../lib/search'
@@ -37,7 +36,7 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
     <article class="card pcard">
       <a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`} class="pcard-img">
         <img src={mediaUrl(p.photo, 600, transform)} alt={p.name} loading="lazy" width="600" height="400" />
-        <span class="pcard-type">{STAY_TYPES[p.type] ?? p.type}</span>
+        <span class="pcard-type">⌖ {p.destination}</span>
       </a>
       <form method="post" action={`/saved/${p.id}`} class="pcard-heart">
         <button title={saved ? 'Remove from saved' : 'Save'} aria-label="Save property" class={saved ? 'on' : ''}>{saved ? '♥' : '♡'}</button>
@@ -57,7 +56,7 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
             <div class="price">{money(price)}</div>
             {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
           </div>
-          <a class="btn btn-sm" href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View</a>
+          <a class="btn btn-sm btn-outline" data-stay-preview href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View Details →</a>
         </div>
       </div>
     </article>
