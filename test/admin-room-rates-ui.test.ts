@@ -116,7 +116,7 @@ describe('Admin room rate step', () => {
     expect(ui.fields().find(i => i.name === 'r101_off_wk_MAP_direct')!.value).toBe('')
   })
 
-  it('submits each room to the unchanged wizard save handler with correct associations', async () => {
+  it.each([false, true])('submits independent room drafts, including private-only CP: %s', async (privateOnly) => {
     const db = new DatabaseSync(':memory:')
     try {
       for (const file of readdirSync('migrations').filter((f: string) => f.endsWith('.sql')).sort()) db.exec(readFileSync('migrations/' + file,'utf8'))
@@ -136,15 +136,37 @@ describe('Admin room rate step', () => {
       ui.set(`r${ids[0]}_off_from`,'2030-01-01'); ui.set(`r${ids[0]}_off_to`,'2030-01-31'); ui.set(`r${ids[0]}_off_wk_CP_direct`,'7000')
       ui.next.fire('click')
       ui.set(`r${ids[1]}_sea_from`,'2030-02-01'); ui.set(`r${ids[1]}_sea_to`,'2030-02-28'); ui.set(`r${ids[1]}_sea_wk_AP_direct`,'9000')
+      if (privateOnly) {
+        ui.buttons[0].fire('click')
+        ui.set(`r${ids[0]}_off_wk_CP_direct`,'')
+        ui.set(`r${ids[0]}_off_wk_CP_staff`,'3250'); ui.set(`r${ids[0]}_off_we_CP_staff`,'3500')
+        ui.set(`r${ids[0]}_off_wk_CP_b2b`,'3000'); ui.set(`r${ids[0]}_off_we_CP_b2b`,'3250')
+        ui.next.fire('click')
+        ui.set(`r${ids[1]}_sea_wk_AP_direct`,'')
+        ui.set(`r${ids[1]}_sea_wk_CP_staff`,'3800'); ui.set(`r${ids[1]}_sea_we_CP_staff`,'4000')
+        ui.set(`r${ids[1]}_sea_wk_CP_b2b`,'3500'); ui.set(`r${ids[1]}_sea_we_CP_b2b`,'3750')
+        const draft = ui.fields().map(i=>[i.name,i.value])
+        ui.buttons[0].fire('click'); ui.select.value=String(ids[1]); ui.select.fire('change')
+        expect(ui.fields().map(i=>[i.name,i.value])).toEqual(draft)
+        expect(ui.statuses.map(s=>s.textContent)).toEqual(['Rates added ✓','Rates added ✓','Not added'])
+      }
       ui.buttons[0].fire('click')
       const body = new URLSearchParams(ui.fields().map(i=>[i.name,i.value]))
       const response = await app.request(`http://localhost/admin/properties/${property.id}/setup/3`,{method:'POST',body},env)
       expect(response.status).toBe(303)
       const rows = db.prepare("SELECT room_id,meal_plan,rate,weekend_rate,staff_rate,net_rate FROM season_rates WHERE source='wizard' ORDER BY room_id").all()
-      expect(rows.map((r: any)=>({...r}))).toEqual([
+      expect(rows.map((r: any)=>({...r}))).toEqual(privateOnly ? [
+        {room_id:ids[0],meal_plan:'CP',rate:null,weekend_rate:null,staff_rate:3250,net_rate:3000},
+        {room_id:ids[1],meal_plan:'CP',rate:null,weekend_rate:null,staff_rate:3800,net_rate:3500},
+      ] : [
         {room_id:ids[0],meal_plan:'CP',rate:7000,weekend_rate:null,staff_rate:null,net_rate:null},
         {room_id:ids[1],meal_plan:'AP',rate:9000,weekend_rate:null,staff_rate:null,net_rate:null},
       ])
+      if (privateOnly) {
+        expect(db.prepare('SELECT rate_meal_plan,meal_plans FROM properties WHERE id=?').get(property.id)).toMatchObject({rate_meal_plan:'CP',meal_plans:'["CP"]'})
+        expect(db.prepare('SELECT base_rate FROM rooms WHERE id=?').get(ids[0])).toMatchObject({base_rate:0})
+        expect(db.prepare("SELECT staff_weekend_rate,net_weekend_rate FROM season_rates WHERE source='wizard' AND room_id=?").get(ids[0])).toMatchObject({staff_weekend_rate:3500,net_weekend_rate:3250})
+      }
       expect(JSON.stringify(db.prepare('SELECT * FROM properties WHERE id != ?').all(property.id))).toBe(unrelated)
     } finally {db.close()}
   })

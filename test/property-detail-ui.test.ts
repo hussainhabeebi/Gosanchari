@@ -92,4 +92,24 @@ describe('public property detail UI', () => {
     } finally { db.close() }
   })
 
+  it.each(['guest','staff','admin'])('does not return private-only CP prices or render zero prices for %s', async (role) => {
+    const {db,property,env} = fixture(['common'])
+    try {
+      const room = db.prepare('SELECT id FROM rooms WHERE property_id=? ORDER BY id LIMIT 1').get(property.id) as {id:number}
+      db.prepare('UPDATE rooms SET base_rate=0,weekend_rate=NULL WHERE property_id=?').run(property.id)
+      db.prepare("UPDATE properties SET rate_meal_plan='CP',weekend_nights='5,6,0' WHERE id=?").run(property.id)
+      db.prepare("INSERT INTO season_rates(property_id,room_id,name,start_date,end_date,rate,staff_rate,net_rate,staff_weekend_rate,net_weekend_rate,kind,meal_plan,source) VALUES (?,?,'CP season','2026-10-01','2027-03-31',NULL,3250,3000,3500,3250,'season','CP','wizard')").run(property.id,room.id)
+      const user = {...db.prepare('SELECT * FROM users ORDER BY id LIMIT 1').get() as any, role}
+      const app = new Hono<any>().use('*',async(c,next)=>{if(user)c.set('user',user);await next()}).route('/',publicRoutes)
+      const before = JSON.stringify(db.prepare('SELECT * FROM season_rates ORDER BY id').all())
+      const html = await (await app.request('http://localhost/stay/'+property.slug,{},env)).text()
+      expect(html).not.toContain('₹0')
+      expect(html).toContain('For a personalised offer, fill in your details below and enquire.')
+      const result = await (await app.request('http://localhost/stay/'+property.slug+'/price',{method:'POST',body:new URLSearchParams({room:String(room.id),checkIn:'2026-10-08',checkOut:'2026-10-09',rooms:'1',adults:'2',children:'0'})},env)).json() as any
+      expect(result.errors).toEqual(['For a personalised offer, fill in your details below and enquire.'])
+      expect(JSON.stringify(result)).not.toMatch(/staff_rate|net_rate|3250|3000|3500/)
+      expect(JSON.stringify(db.prepare('SELECT * FROM season_rates ORDER BY id').all())).toBe(before)
+    } finally {db.close()}
+  })
+
 })

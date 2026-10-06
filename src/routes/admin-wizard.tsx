@@ -450,6 +450,7 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
   const stmts: D1PreparedStatement[] = [c.env.DB.prepare("DELETE FROM season_rates WHERE property_id = ? AND source = 'wizard'").bind(p.id)]
   let saved = 0
   let defaultPlan: string | null = null
+  const configuredPlans = new Set<string>()
   for (const r of rooms) {
     let regular: { plan: string; wk: number | null; we: number | null; staff: number | null; net: number | null } | null = null
     for (const [pk, , , kind] of [...PERIODS].reverse()) {
@@ -461,11 +462,14 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
         const net = perms.view_net_rates ? n(`${key}_wk_${plan}_b2b`) : keep?.net_rate ?? null
         const netWe = perms.view_net_rates ? n(`${key}_we_${plan}_b2b`) : keep?.net_weekend_rate ?? null
         const wk = n(`${key}_wk_${plan}_direct`), we = n(`${key}_we_${plan}_direct`)
-        if (!wk && !we) continue
-        stmts.push(c.env.DB.prepare(ins).bind(p.id, r.id, PERIOD_NAME[pk], from, to, wk ?? we, we, n(`${key}_wk_${plan}_staff`), n(`${key}_we_${plan}_staff`), net, netWe, null, null, kind, plan, uid))
+        const staff = n(`${key}_wk_${plan}_staff`), staffWe = n(`${key}_we_${plan}_staff`)
+        if ([wk, we, staff, staffWe, net, netWe].every((v) => v == null)) continue
+        configuredPlans.add(plan)
+        defaultPlan ??= plan
+        stmts.push(c.env.DB.prepare(ins).bind(p.id, r.id, PERIOD_NAME[pk], from, to, wk, we, staff, staffWe, net, netWe, null, null, kind, plan, uid))
         saved++
         // Regular room rates (outside any period) follow the season's CP rate, else the first plan entered.
-        if (!regular || (plan === 'CP' && regular.plan !== 'CP' && pk === 'sea')) regular = { plan, wk: wk ?? we, we, staff: n(`${key}_wk_${plan}_staff`), net }
+        if (wk != null && (!regular || (plan === 'CP' && regular.plan !== 'CP' && pk === 'sea'))) regular = { plan, wk, we, staff, net }
       }
     }
     const froms = f.__all[`r${r.id}_peak_from`] ?? [], tos = f.__all[`r${r.id}_peak_to`] ?? [], amts = f.__all[`r${r.id}_peak_amt`] ?? [], descs = f.__all[`r${r.id}_peak_desc`] ?? []
@@ -476,11 +480,11 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
       saved++
     })
     if (regular) {
-      defaultPlan ??= regular.plan
+      // Private-only rows do not invent a legacy public base rate.
       stmts.push(c.env.DB.prepare(`UPDATE rooms SET base_rate = ?, weekend_rate = ?, staff_rate = COALESCE(?, staff_rate)${perms.view_net_rates ? ', net_rate = COALESCE(?, net_rate)' : ''} WHERE id = ?`).bind(...[regular.wk, regular.we, regular.staff, ...(perms.view_net_rates ? [regular.net] : []), r.id]))
     }
   }
-  if (defaultPlan) stmts.push(c.env.DB.prepare("UPDATE properties SET rate_meal_plan = ?, weekend_nights = '5,6,0', meal_plans = ? WHERE id = ?").bind(defaultPlan, JSON.stringify(PLANS.map(([x]) => x).filter((pl) => old.some((o) => o.meal_plan === pl) || Object.keys(f).some((k) => k.includes(`_${pl}_direct`) && int(f[k]) > 0))), p.id))
+  if (defaultPlan) stmts.push(c.env.DB.prepare("UPDATE properties SET rate_meal_plan = ?, weekend_nights = '5,6,0', meal_plans = ? WHERE id = ?").bind(p.rate_meal_plan && configuredPlans.has(p.rate_meal_plan) ? p.rate_meal_plan : defaultPlan, JSON.stringify([...configuredPlans]), p.id))
   await c.env.DB.batch(stmts)
   await logActivity(c.env, uid, 'price.wizard_rates', 'property', p.id, { rows: saved })
   await afterPropertySave(c, p.id)
