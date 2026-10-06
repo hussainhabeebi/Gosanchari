@@ -5,7 +5,7 @@ import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
-import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, monthOccupancy, notifyStaff, run } from '../lib/db'
+import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
 import { closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
 import { getContent, getSettings } from '../lib/settings'
@@ -14,7 +14,7 @@ import { mediaUrl, verifyTurnstile } from '../lib/integrations'
 import { rateLimit } from '../lib/auth'
 import { priceStay } from '../lib/bookings'
 import type { NearbyPlace, PhotoRow, PropertyRow, QuotationRow, QuoteOptionRow, ReviewRow, RoomRow } from '../lib/types'
-import { addDays, eachNight, fmtDate, fmtShortDate, int, isDate, money, nightsBetween, normalizePhone, nowIso, parseJson, refCode, str, todayIST } from '../lib/util'
+import { fmtDate, fmtShortDate, int, isDate, money, nightsBetween, normalizePhone, nowIso, parseJson, refCode, str, todayIST } from '../lib/util'
 import { clientIp, form, redirectMsg } from './helpers'
 
 export const publicRoutes = new Hono<AppEnv>()
@@ -314,19 +314,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const din = readDining(p.dining)
   const pol = readPolicies(p.policies)
   const themes = parseJson<string[]>(p.themes, [])
-  // Availability calendar: next ~2 months, a date is greyed out when every room is full.
-  const from = todayIST()
-  const to = addDays(from, 62)
-  const occ = await monthOccupancy(c.env, p.id, from, to)
-  const fullDates: string[] = []
-  for (const d of eachNight(from, to)) {
-    const anyFree = rooms.some((r) => {
-      const used = occ.bookings.filter((b) => b.room_id === r.id && b.check_in <= d && d < b.check_out).reduce((a, b) => a + b.rooms_count, 0)
-      const blocked = occ.blocks.some((b) => b.room_id == null && b.date === d) ? r.units : occ.blocks.filter((b) => b.room_id === r.id && b.date === d).length
-      return used + blocked < r.units
-    })
-    if (!anyFree) fullDates.push(d)
-  }
   const facilities = parseJson<string[]>(p.facilities, [])
   const meals = parseJson<string[]>(p.meal_plans, [])
   const nearby = parseJson<NearbyPlace[]>(p.nearby, [])
@@ -506,13 +493,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
                 <ul class="nearby">{nearby.map((n) => <li><span>{NEARBY_ICONS[n.kind] ?? '📍'} {n.name}</span><span class="muted">{n.km} km{n.time ? ` · ${n.time}` : ''}</span></li>)}</ul>
               </>
             )}
-          </section>
-
-          <section class="section-sm">
-            <h2>Availability</h2>
-            <p class="muted small">Greyed-out dates are fully booked.</p>
-            <div class="avail-cal" data-from={from} data-months="2"></div>
-            {jsonScript('full-dates', fullDates)}
           </section>
 
           <section class="section-sm" id="ask">

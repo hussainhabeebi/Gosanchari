@@ -58,6 +58,12 @@ describe('public property detail UI', () => {
         expect(summary).not.toContain('href="#' + section + '"')
       }
       expect(html).not.toContain('action="/saved/' + property.id + '"')
+      expect(html).not.toContain('<h2>Availability</h2>')
+      expect(html).not.toContain('avail-cal')
+      expect(html).not.toContain('Greyed-out dates are fully booked')
+      expect(html).not.toContain('full-dates')
+      expect(html).toContain('name="check_in"')
+      expect(html).toContain('name="check_out"')
       expect(html).not.toContain('Rates by season')
       expect(html).not.toContain('class="table rate-table"')
       expect(html).toContain('class="mobile-book-bar"')
