@@ -58,10 +58,29 @@ describe('public property detail UI', () => {
         expect(summary).not.toContain('href="#' + section + '"')
       }
       expect(html).not.toContain('action="/saved/' + property.id + '"')
+      expect(html).not.toContain('Rates by season')
+      expect(html).not.toContain('class="table rate-table"')
       expect(html).toContain('class="mobile-book-bar"')
       expect(html).toContain('action="/enquiry"')
       expect(html).toContain('data-price-url="/stay/' + property.slug + '/price"')
       expect(JSON.stringify(['properties','rooms','property_photos','season_rates'].map(t => db.prepare('SELECT * FROM ' + t + ' ORDER BY id').all()))).toBe(before)
     } finally { db.close() }
   })
+  it('retains dated public pricing and peak supplements without private rates', async () => {
+    const { db, property, env, app } = fixture(['common'])
+    try {
+      const room = db.prepare('SELECT id FROM rooms WHERE property_id=? ORDER BY id LIMIT 1').get(property.id) as { id: number }
+      db.prepare("INSERT INTO season_rates(property_id,room_id,name,start_date,end_date,rate,staff_rate,net_rate,kind) VALUES (?,?,'UI season','2030-01-01','2030-01-31',8000,6543,4321,'season')").run(property.id,room.id)
+      db.prepare("INSERT INTO season_rates(property_id,room_id,name,start_date,end_date,supplement,kind) VALUES (?,?,'UI peak','2030-01-01','2030-01-31',1000,'special')").run(property.id,room.id)
+      const before = JSON.stringify(db.prepare('SELECT * FROM season_rates ORDER BY id').all())
+      const response = await app.request('http://localhost/stay/' + property.slug + '/price', { method: 'POST', body: new URLSearchParams({room:String(room.id),checkIn:'2030-01-07',checkOut:'2030-01-08',rooms:'1',adults:'2',children:'0'}) }, env)
+      expect(response.status).toBe(200)
+      const data = await response.json() as any
+      expect(data.errors).toEqual([])
+      expect(data.roomCharges).toBe(9000)
+      expect(JSON.stringify(data)).not.toMatch(/staff_rate|net_rate|6543|4321/)
+      expect(JSON.stringify(db.prepare('SELECT * FROM season_rates ORDER BY id').all())).toBe(before)
+    } finally { db.close() }
+  })
+
 })

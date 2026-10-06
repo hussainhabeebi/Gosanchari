@@ -2,7 +2,6 @@
 
 import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
-import { seasonKindLabel, seasonRates, weekendLabel, type SeasonRate } from '../lib/pricing'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
@@ -299,13 +298,12 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const isStaffUser = !!user && user.role !== 'guest'
   if (!p || (p.status !== 'live' && !isStaffUser)) return page(c, { title: 'Not found' }, <div class="wrap section"><Empty><h2>This stay is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
   const settings = await getSettings(c.env)
-  const [media, rooms, reviews, similar, saved, seasonRows] = await Promise.all([
+  const [media, rooms, reviews, similar, saved] = await Promise.all([
     all<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE property_id = ? ORDER BY sort, id', p.id),
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id),
     all<ReviewRow>(c.env, "SELECT * FROM reviews WHERE property_id = ? AND status = 'approved' ORDER BY id DESC LIMIT 20", p.id),
     similarProperties(c.env, p.id, 4),
     savedIds(c),
-    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
   const photos = media.filter((m) => m.media_type !== 'video' && m.r2_key).sort((a, b) => COVER_ORDER.indexOf(a.category) - COVER_ORDER.indexOf(b.category) || a.sort - b.sort)
   // Promote the existing exterior cover once; retain all other photo ordering.
@@ -313,7 +311,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
   if (facadeIndex > 0) photos.unshift(...photos.splice(facadeIndex, 1))
   const videos = media.filter((m) => m.media_type === 'video')
   const mediaGroups = Object.keys(PHOTO_CATEGORIES).map((k) => [k, photos.filter((m) => m.category === k)] as const).filter(([k, list]) => list.length && k !== 'room')
-  const seasonTable = seasonRates(rooms, seasonRows, p.rate_meal_plan)
   const din = readDining(p.dining)
   const pol = readPolicies(p.policies)
   const themes = parseJson<string[]>(p.themes, [])
@@ -456,23 +453,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
                   </div>
                 </div>
               )}
-            </section>
-          )}
-
-          {seasonTable.length > 0 && rooms.length > 0 && (
-            <section class="section-sm" id="rates">
-              <h2>Rates by season</h2>
-              <p class="muted small">Per room per night, before GST. Final price is confirmed in your quote.</p>
-              <div class="table-wrap">
-                <table class="table rate-table">
-                  <thead><tr><th>Season</th><th>Dates</th>{rooms.map((r) => <th>{r.name}</th>)}</tr></thead>
-                  <tbody>
-                    <tr><td>Regular</td><td>Weekdays</td>{rooms.map((r) => <td>{money(r.base_rate)}</td>)}</tr>
-                    {rooms.some((r) => r.weekend_rate && r.weekend_rate !== r.base_rate) && <tr><td>Weekend</td><td>{weekendLabel(p.weekend_nights)}</td>{rooms.map((r) => <td>{money(r.weekend_rate ?? r.base_rate)}</td>)}</tr>}
-                    {seasonTable.map((s) => <tr><td>{s.name} <span class={`pill pill-kind-${s.kind}`}>{seasonKindLabel(s.kind)}</span>{s.minNights ? <div class="muted small">min {s.minNights} nights</div> : null}</td><td class="nowrap">{fmtShortDate(s.start)} – {fmtShortDate(s.end)}</td>{rooms.map((r) => <td>{s.supplements[r.id] ? `+${money(s.supplements[r.id])} on the usual rate` : s.rates[r.id] ? <>{money(s.rates[r.id])}{s.weekendRates[r.id] && s.weekendRates[r.id] !== s.rates[r.id] ? <div class="muted small">weekend {money(s.weekendRates[r.id])}</div> : null}</> : <span class="muted">regular</span>}</td>)}</tr>)}
-                  </tbody>
-                </table>
-              </div>
             </section>
           )}
 
