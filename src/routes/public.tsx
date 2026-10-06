@@ -308,6 +308,9 @@ publicRoutes.get('/stay/:slug', async (c) => {
     all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
   const photos = media.filter((m) => m.media_type !== 'video' && m.r2_key).sort((a, b) => COVER_ORDER.indexOf(a.category) - COVER_ORDER.indexOf(b.category) || a.sort - b.sort)
+  // Promote the existing exterior cover once; retain all other photo ordering.
+  const facadeIndex = photos.findIndex((photo) => photo.category === 'facade')
+  if (facadeIndex > 0) photos.unshift(...photos.splice(facadeIndex, 1))
   const videos = media.filter((m) => m.media_type === 'video')
   const mediaGroups = Object.keys(PHOTO_CATEGORIES).map((k) => [k, photos.filter((m) => m.category === k)] as const).filter(([k, list]) => list.length && k !== 'room')
   const seasonTable = seasonRates(rooms, seasonRows)
@@ -350,9 +353,11 @@ publicRoutes.get('/stay/:slug', async (c) => {
     image: photos[0] ? (photos[0].r2_key.startsWith('http') ? photos[0].r2_key : c.env.SITE_URL + mediaUrl(photos[0].r2_key, 1200)) : undefined,
     canonical: `${c.env.SITE_URL}/stay/${p.slug}`,
     head: <LeafletHead />,
+    hideJourneyBanner: true,
   }, (
     <div class="wrap property-page">
       {p.status !== 'live' && <div class="flash flash-err">Preview — this property is {p.status} and not visible to guests.</div>}
+      <h1 class="property-title">{p.name}</h1>
       <div class="gallery" data-gallery>
         {gallery.slice(0, 5).map((ph, i) => (
           <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} class={`g-item g-${i}`} data-full>
@@ -367,7 +372,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
         <div class="prop-main">
           <div class="row-between">
             <div>
-              <h1>{p.name}</h1>
               <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
               {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
             </div>

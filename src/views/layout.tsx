@@ -11,6 +11,7 @@ export interface PageOpts {
   title: string
   journey?: JourneyTheme
   embedded?: boolean
+  hideJourneyBanner?: boolean
   description?: string
   area?: Area
   active?: string
@@ -245,7 +246,7 @@ export const Layout: FC<LayoutProps> = (p) => {
           ) : (
             <main id="main">
               <Flash {...p.flash} />
-              {p.journey && !p.journey.nativeHero && !p.embedded && <JourneyBanner theme={p.journey} title={p.title} />}
+              {p.journey && !p.hideJourneyBanner && !p.journey.nativeHero && !p.embedded && <JourneyBanner theme={p.journey} title={p.title} />}
               {p.children}
             </main>
           )}
