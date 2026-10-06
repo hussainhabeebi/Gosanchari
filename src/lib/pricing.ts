@@ -50,7 +50,10 @@ export function occupancy(room: RoomRates, roomsCount: number, adults: number, c
   return { included, max, extraAdults, extraChildren, perNight, total: perNight * Math.max(0, nights) }
 }
 
+export const PERSONALISED_OFFER = 'For a personalised offer, fill in your details below and enquire.'
+
 export interface SeasonRate {
+  source?: string | null
   id?: number
   property_id: number | null
   room_id: number | null
@@ -211,10 +214,15 @@ export function nightlyRate(room: RoomRates, seasons: SeasonRate[], date: string
   const regular = isWeekend && room.weekend_rate ? room.weekend_rate : room.base_rate
   const s = seasonFor(room, seasons, date, undefined, plan)
   let line: NightLine = { date, rate: regular, label: isWeekend && room.weekend_rate ? 'Weekend' : 'Standard' }
-  if (s) {
+  if (s?.source === 'wizard') {
+    // Matrix blanks are intentional, including a blank weekend Direct cell.
+    const direct = isWeekend ? s.weekend_rate : s.rate
+    line = { date, rate: direct != null && direct > 0 ? direct : 0, label: s.name }
+  } else if (s) {
     if (s.rate != null && s.rate > 0) line = { date, rate: Math.round(isWeekend && s.weekend_rate ? s.weekend_rate : s.rate), label: s.name }
     else if (s.pct_adjust != null) line = { date, rate: Math.round(regular * (1 + s.pct_adjust / 100)), label: s.name }
   }
+  if (!(line.rate > 0)) return { date, rate: 0, label: PERSONALISED_OFFER }
   for (const sup of supplementsOn(room, seasons, date)) line = { date, rate: line.rate + (sup.supplement ?? 0), label: `${line.label} + ${sup.name}` }
   return line
 }
@@ -289,6 +297,10 @@ export function calculatePrice(input: PriceInput): PriceResult {
   }
 
   const lines = eachNight(checkIn, checkOut).map((d) => nightlyRate(room, seasons, d, input.mealPlan))
+  if (lines.some((line) => !(line.rate > 0))) {
+    errors.push(PERSONALISED_OFFER)
+    return empty
+  }
   // Minimum stay: the strictest rule among the room and any season touching the stay.
   let minNights = room.min_nights || 1
   for (const d of lines) {

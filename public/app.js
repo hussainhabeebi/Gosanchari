@@ -429,12 +429,81 @@
   var roomSel = $('[data-room-select]')
   function showRoom(id) { $$('[data-rate-room]').forEach(function (p) { p.hidden = p.dataset.rateRoom !== String(id) }) }
   if (roomSel) {
-    roomSel.addEventListener('change', function () { showRoom(roomSel.value) })
+    var rateForm = roomSel.closest('form'), panels = $$('[data-rate-room]', rateForm)
+    var draftKey = 'room-rates:' + rateForm.dataset.ratesDraft + ':' + rateForm.getAttribute('action')
+    function rateValues(defaults) {
+      return panels.map(function (panel) {
+        return { id: panel.dataset.rateRoom, fields: $$('input', panel).map(function (input) { return { name: input.name, value: defaults ? input.defaultValue : input.value } }) }
+      })
+    }
+    // Browser-restored values are drafts, not the saved server baseline.
+    var savedValues = JSON.stringify(rateValues(true)), roomDrafts = rateValues(), activeRoom = roomSel.value
+    function hydrateRoom(room) {
+      var panel = panels.find(function (panel) { return panel.dataset.rateRoom === room.id })
+      if (!panel) return
+      var peaks = $('[data-peaks]', panel)
+      var count = room.fields.filter(function (field) { return field.name === 'r' + room.id + '_peak_from' }).length
+      while (peaks.children.length < count) peaks.appendChild(peaks.lastElementChild.cloneNode(true))
+      var offsets = {}
+      $$('input', panel).forEach(function (input) {
+        var matches = room.fields.filter(function (field) { return field.name === input.name })
+        var index = offsets[input.name] || 0; offsets[input.name] = index + 1
+        if (matches[index]) input.value = matches[index].value
+      })
+    }
+    function rateStatus() {
+      roomDrafts.forEach(function (room) {
+        var panel = panels.find(function (panel) { return panel.dataset.rateRoom === room.id })
+        var names = $$('input[type="number"]', panel).map(function (input) { return input.name })
+        var added = room.fields.some(function (field) { return names.indexOf(field.name) !== -1 && field.value.trim() !== '' })
+        $('[data-rate-status="' + room.id + '"]', rateForm).textContent = added ? 'Rates added ✓' : 'Not added'
+      })
+    }
+    function retainRates() {
+      // Only capture the room being edited; hidden controls must not overwrite its neighbours' drafts.
+      var edited = rateValues().find(function (room) { return room.id === activeRoom })
+      roomDrafts = roomDrafts.map(function (room) { return room.id === activeRoom ? edited : room })
+      rateStatus()
+      try { sessionStorage.setItem(draftKey, JSON.stringify({ base: savedValues, rooms: roomDrafts, selected: roomSel.value })) } catch (e) {}
+    }
+    // Drafts stay in this tab, scoped to the operator/property. Discard only rooms whose saved server values changed.
+    try {
+      var draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null')
+      if (draft) {
+        var baseline = JSON.parse(draft.base), current = rateValues(true)
+        roomDrafts = roomDrafts.map(function (room) {
+          var before = baseline.find(function (saved) { return saved.id === room.id })
+          var now = current.find(function (saved) { return saved.id === room.id })
+          if (JSON.stringify(before) !== JSON.stringify(now)) return room
+          return draft.rooms.find(function (saved) { return saved.id === room.id }) || room
+        })
+        if (Array.prototype.some.call(roomSel.options, function (option) { return option.value === draft.selected })) roomSel.value = draft.selected
+      } else sessionStorage.removeItem(draftKey)
+    } catch (e) {}
+    activeRoom = roomSel.value
+    roomDrafts.forEach(hydrateRoom); rateStatus(); showRoom(activeRoom)
+    function selectRateRoom(id) {
+      retainRates()
+      var room = roomDrafts.find(function (room) { return room.id === String(id) })
+      if (!room) return
+      hydrateRoom(room); roomSel.value = room.id; activeRoom = room.id; showRoom(room.id); retainRates()
+    }
+    rateForm.addEventListener('input', retainRates)
+    window.addEventListener('pagehide', retainRates)
+    rateForm.addEventListener('submit', function () { retainRates(); roomDrafts.forEach(hydrateRoom) })
+    $$('[data-view-rate-room]', rateForm).forEach(function (button) {
+      button.addEventListener('click', function () {
+        selectRateRoom(button.dataset.viewRateRoom)
+        roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    })
+    roomSel.addEventListener('change', function () { selectRateRoom(roomSel.value) })
     var nx = $('[data-next-room]')
     if (nx) nx.addEventListener('click', function () {
+      retainRates()
       var i = roomSel.selectedIndex + 1
       if (i >= roomSel.options.length) { alert('All room categories are listed. Add more in Room Categories.'); return }
-      roomSel.selectedIndex = i; showRoom(roomSel.value); roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      selectRateRoom(roomSel.options[i].value); roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
   }
   $$('[data-add-peak]').forEach(function (b) {

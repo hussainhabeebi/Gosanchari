@@ -62,8 +62,8 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
           : <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
         <div class="row-between pcard-foot">
           <div>
-            <span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>
-            <div class="price">{money(price)}</div>
+            {price > 0 ? <><span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>
+            <div class="price">{money(price)}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
             {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
           </div>
           <a class="btn btn-sm btn-outline" data-stay-preview href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View Details →</a>
