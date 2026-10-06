@@ -85,15 +85,6 @@ publicRoutes.get('/', async (c) => {
         </section>
       )}
 
-      <section class="wrap section">
-        <h2>Why book with us</h2>
-        <div class="grid grid-4">
-          {content.why_us.map((w) => (
-            <div class="why"><div class="why-icon">{w.icon}</div><strong>{w.title}</strong><p class="muted">{w.text}</p></div>
-          ))}
-        </div>
-      </section>
-
       {reviews.length > 0 && (
         <section class="wrap section">
           <h2>What guests say</h2>
