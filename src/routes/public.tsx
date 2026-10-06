@@ -321,8 +321,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const checkIn = isDate(c.req.query('checkIn')) ? c.req.query('checkIn')! : ''
   const checkOut = isDate(c.req.query('checkOut')) ? c.req.query('checkOut')! : ''
   const guests = int(c.req.query('guests'), 2)
-  const lang = user?.language ?? 'en'
-  const description = lang === 'ml' && p.description_ml ? p.description_ml : p.description
   const gallery = photos.length ? photos : [{ id: 0, r2_key: '', caption: p.name } as PhotoRow]
   const ld = {
     '@context': 'https://schema.org', '@type': 'LodgingBusiness', name: p.name, description: p.seo_description ?? p.description.slice(0, 200),
@@ -363,7 +361,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
             <h2>About this property</h2>
             {p.review_summary && <AiNote label="AI Insights · Guest review summary">{p.review_summary}</AiNote>}
             {highlights.length > 0 && <ul class="highlights">{highlights.map((h) => <li>{h}</li>)}</ul>}
-            {description.split(/\n{2,}/).map((para) => <p>{para}</p>)}
             {p.built_year && (
               <dl class="info-list">
                 <dt>Built / renovated</dt><dd>{p.built_year}</dd>

@@ -8,8 +8,7 @@ import { propertyDoc, semanticScores, cardsByIds } from './properties'
 import { getContent, getSettings } from './settings'
 import { guardSql, schemaForPrompt } from './sqlguard'
 import type { EnquiryRow, MessageRow, PropertyCard, PropertyRow, QuotationRow, QuoteOptionRow, ReviewRow } from './types'
-import { fmtDate, money, nightsBetween, parseJson, sha256Hex, todayIST } from './util'
-import { STAY_TYPES } from './catalog'
+import { fmtDate, money, nightsBetween, sha256Hex, todayIST } from './util'
 import { roomAvailability } from './db'
 import { roomsNeeded } from './pricing'
 
@@ -454,19 +453,15 @@ export async function askAi(env: Env, question: string): Promise<AskAiResult> {
 }
 
 /**
- * After the wizard's first step: AI fills in what the data-entry team didn't type — a description (English and
- * Malayalam), how to reach, best-known nearby attractions — only where those fields are still empty, and notes it in
- * the internal remarks so staff know to check. Facts come from the name, place, category and highlights given.
+ * After the wizard's first step: AI fills in how to reach and best-known nearby attractions
+ * only where those fields are still empty, and notes it in
+ * the internal remarks so staff know to check. Location context comes from the property name and destination.
  */
 export async function enrichProperty(env: Env, id: number): Promise<void> {
   const p = await first<PropertyRow>(env, 'SELECT * FROM properties WHERE id = ?', id)
   if (!p) return
-  const highlights = parseJson<string[]>(p.highlights, []).join('; ')
+  // Wizard enrichment never writes description or description_ml; highlights are entered manually.
   const set: Record<string, string> = {}
-  if (!p.description) {
-    const d = await writeDescription(env, p.name, STAY_TYPES[p.stay_type ?? p.type] ?? p.type, p.destination, highlights || p.name)
-    if (d?.en) { set.description = d.en; if (d.ml) set.description_ml = d.ml }
-  }
   if (!p.how_to_reach || p.nearby === '[]' || !p.nearby) {
     const r = await aiJson<{ how_to_reach?: string; nearby?: { name: string; kind?: string; km?: number; time?: string }[] }>(env, 'description_writer', {
       size: 'large', maxTokens: 700,

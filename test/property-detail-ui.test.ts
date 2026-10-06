@@ -112,4 +112,20 @@ describe('public property detail UI', () => {
     } finally {db.close()}
   })
 
+  it.each(['en','ml'])('About shows exact manual highlights without stored descriptions: %s', async (language) => {
+    const {db,property,env}=fixture(['common'])
+    try {
+      const highlights=['98-room premium stay / Private balconies with tea garden & mountain views / Swimming pool & gym / Restaurant, conference hall & indoor games']
+      db.prepare('UPDATE properties SET highlights=?,description=?,description_ml=? WHERE id=?').run(JSON.stringify(highlights),'STORED_EN_FIRST\n\nSTORED_EN_SECOND','STORED_ML_FIRST\n\nSTORED_ML_SECOND',property.id)
+      const before=JSON.stringify(db.prepare('SELECT * FROM properties WHERE id=?').get(property.id))
+      const app=new Hono<any>().use('*',async(c,next)=>{c.set('user',{id:1,role:'guest',language});await next()}).route('/',publicRoutes)
+      const html=await (await app.request('http://localhost/stay/'+property.slug,{},env)).text()
+      const about=html.slice(html.indexOf('<h2>About this property</h2>'),html.indexOf('<section',html.indexOf('<h2>About this property</h2>')))
+      expect(about).toContain('About this property')
+      expect(about).toContain(highlights[0].replace(/&/g,'&amp;'))
+      for(const marker of ['STORED_EN_FIRST','STORED_EN_SECOND','STORED_ML_FIRST','STORED_ML_SECOND']) expect(about).not.toContain(marker)
+      expect(JSON.stringify(db.prepare('SELECT * FROM properties WHERE id=?').get(property.id))).toBe(before)
+    }finally{db.close()}
+  })
+
 })

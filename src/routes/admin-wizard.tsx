@@ -1,7 +1,7 @@
 // Admin → Add Property: a 7-step wizard for the data-entry team, kept to exactly what the team fills in:
 //  1 Property Details · 2 Room Categories · 3 Room Rates · 4 Additional Charges & Kids Policies ·
 //  5 Cancellation Policy & Contact Details · 6 Images & Media · 7 Review & Save.
-// Each step saves on "Save & Continue". After step 1, AI fills in description, how to reach and nearby attractions
+// Each step saves on "Save & Continue". After step 1, AI fills in how to reach and nearby attractions
 // in the background (only where empty) for staff to check.
 
 import { Hono, type Context } from 'hono'
@@ -161,7 +161,7 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
   for (const k of selectedThemes) if (!themes.some(([key]) => key === k)) themes.push([k, THEMES[k] ?? k])
   const video = photos.find((x) => x.video_url)
   return page(c, { title: p ? `Edit ${p.name}` : 'Add Property', area: 'admin', active: 'prop_new' }, (
-    <Shell p={p} step={1} done={done} icon={I.home} title="Property Details" sub="Add the property details here and AI will fetch additional details (like description, location info, attractions, etc.)">
+    <Shell p={p} step={1} done={done} icon={I.home} title="Property Details" sub="Add the property details here. AI can fetch location info and nearby attractions.">
       <form method="post" action={p ? `/admin/properties/${p.id}/setup/1` : '/admin/properties/new'} enctype="multipart/form-data" class="stack wiz-form">
         <div class="wiz-2">
           <label class="wf"><span class="wl">Property Name <b>*</b></span><input name="name" value={p?.name ?? ''} required maxlength={100} placeholder="e.g. Elixir Woods Resort" /></label>
@@ -247,7 +247,7 @@ async function saveStep1(c: Context<AppEnv>, existing: PropertyRow | null) {
     const had = await first(c.env, "SELECT 1 FROM property_photos WHERE property_id = ? AND video_url = ?", id, video)
     if (!had) await run(c.env, "INSERT INTO property_photos (property_id, r2_key, caption, sort, category, media_type, video_url) VALUES (?, '', NULL, 999, 'common', 'video', ?)", id, video)
   }
-  // AI fills in description, how to reach and nearby attractions (only where still empty).
+  // Keep location/nearby enrichment, without generating property descriptions.
   await enqueue(c.env, { type: 'enrich_property', propertyId: id })
   await afterPropertySave(c, id)
   return { id }
