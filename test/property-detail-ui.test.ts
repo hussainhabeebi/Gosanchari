@@ -58,6 +58,9 @@ describe('public property detail UI', () => {
         expect(summary).not.toContain('href="#' + section + '"')
       }
       expect(html).not.toContain('action="/saved/' + property.id + '"')
+      expect(html).toContain('For a personalised offer, fill in your details below and enquire.')
+      expect(html.slice(html.indexOf('class="prop-layout"'), html.indexOf('<h2>Similar properties</h2>') > 0 ? html.indexOf('<h2>Similar properties</h2>') : html.length)).not.toContain('class="price"')
+      expect(html).not.toContain('/ night onwards')
       expect(html).not.toContain('<h2>Availability</h2>')
       expect(html).not.toContain('avail-cal')
       expect(html).not.toContain('Greyed-out dates are fully booked')

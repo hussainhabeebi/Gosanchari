@@ -396,8 +396,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                       <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>
                     </div>
                     <div class="room-price">
-                      <div class="price">{money(r.base_rate)}</div>
-                      <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
+                      {isStaffUser ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
                       <button class="btn btn-sm" data-pick-room={r.id}>Book</button>
                     </div>
                   </div>
@@ -537,7 +536,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         </div>
 
         <aside class="booking-box card" id="book">
-          <div class="price-line"><span class="price">{money(rooms[0]?.base_rate ?? 0)}</span> <span class="muted">/ night onwards</span></div>
+          <p class="muted">For a personalised offer, fill in your details below and enquire.</p>
           <span class="eyebrow">CHAT WITH YOUR</span><h3>Personal <span class="advisor-green">Advisor</span></h3>
           <p class="muted small">Tell us your dates — our team will confirm availability and send you a quote on WhatsApp.</p>
           <form method="post" action="/enquiry" class="stack" data-price-url={`/stay/${p.slug}/price`}>
@@ -575,7 +574,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         </section>
       )}
       <div class="mobile-book-bar">
-        <div><span class="price">{money(rooms[0]?.base_rate ?? 0)}</span><span class="muted small"> /night</span></div>
+        <div class="muted small">For a personalised offer, fill in your details below and enquire.</div>
         <a class="btn" href="#book">Enquire</a>
       </div>
       {jsonScript('ld', ld)}
@@ -997,8 +996,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
           <div class="muted">{p.name} · 📍 {p.destination}</div>
         </div>
         <div class="room-price">
-          <div class="price">{money(r.base_rate)}</div>
-          <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
+          {isStaffUser ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
         </div>
       </div>
       {photos.length > 0
