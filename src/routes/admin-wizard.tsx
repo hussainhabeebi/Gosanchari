@@ -186,12 +186,12 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
         <label class="wf"><span class="wl">Short Highlights about Property (3-4 points) <b>*</b></span>
           <textarea name="highlights" rows={3} maxlength={300} required placeholder="Enter key highlights (e.g. scenic location, private pool, family friendly, etc.)">{parseJson<string[]>(p?.highlights, []).join('\n')}</textarea><Counter max={300} />
         </label>
-        <div class="wf">
+        <div class="wf common-photos" data-common-photos data-upload-url={p ? `/admin/properties/${p.id}/common-photos` : undefined}>
           <span class="wl">Common Photos & Video Link</span>
-          <span class="muted small">Upload a few common photos of the property and/or add a YouTube/drive video link</span>
+          <span class="muted small">Add common photos and/or a YouTube/Drive video link. New-property photos are saved with Save & Continue.</span>
           <div class="wiz-2 media-row">
             <label class="drop">
-              <input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple />
+              <input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple data-common-photo-input />
               <span class="drop-ico">{I.image}</span>
               <span><strong>Upload Photos</strong><small>Add property images<br />(JPG, PNG - Max 10MB each)</small></span>
             </label>
@@ -200,7 +200,10 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
               <small class="muted">e.g. https://www.youtube.com/watch?v=xxxx</small>
             </div>
           </div>
-          {photos.filter((x) => x.r2_key).length > 0 && <div class="thumbs">{photos.filter((x) => x.r2_key && x.media_type === 'image').map((x) => <img src={mediaUrl(x.r2_key, 200)} alt="" />)}</div>}
+          <p class="muted small" role="status" aria-live="polite" data-common-photo-status>{p ? 'Select photos to upload and preview them here.' : 'Selected photos will appear here before saving.'}</p>
+          <div class="thumbs" data-common-photo-thumbs>
+            {photos.filter((x) => x.r2_key && x.media_type === 'image').map((x) => <span class="common-photo" data-photo-id={x.id}><img src={mediaUrl(x.r2_key, 200)} alt={x.caption || 'Common property photo'} /><button type="button" class="thumb-x" data-remove-common-photo={x.id} aria-label="Remove common property photo">×</button><small>Saved</small></span>)}
+          </div>
         </div>
         <div class="wf">
           <span class="wl">Facilities and Activities <b>*</b></span>
@@ -273,6 +276,46 @@ async function storePhotos(c: Context<AppEnv>, propertyId: number, files: File[]
   }
   return n
 }
+
+// Scoped common-photo uploads do not save property fields or touch room photos.
+wizardRoutes.post('/admin/properties/:id/common-photos', requirePerm('manage_properties'), async (c) => {
+  const p = await loadProperty(c)
+  if (!p) return c.json({ error: 'Property not found.' }, 404)
+  const body = await c.req.parseBody()
+  const file = body.photo
+  const token = String(body.upload_key ?? '')
+  if (!(file instanceof File) || !file.size || !IMAGE.test(file.type) || file.size > 10 * 1024 * 1024) return c.json({ error: 'Choose a JPG, PNG or WebP image up to 10 MB.' }, 400)
+  if (!/^[a-f0-9-]{36}$/i.test(token)) return c.json({ error: 'Invalid upload identifier.' }, 400)
+  const key = `properties/${p.id}/common/${token}.${file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1]}`
+  const find = () => first<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND r2_key = ? AND room_id IS NULL AND media_type = 'image'", p.id, key)
+  try {
+    let photo = await find()
+    if (!photo) {
+      await c.env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: file.type } })
+      const sort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', p.id))?.m ?? 0
+      // Reusing an upload identifier after a lost response must not insert a second record.
+      await run(c.env, "INSERT INTO property_photos (property_id,r2_key,sort,category,room_id,media_type) SELECT ?,?,?,'common',NULL,'image' WHERE NOT EXISTS (SELECT 1 FROM property_photos WHERE property_id = ? AND r2_key = ?)", p.id, key, sort + 1, p.id, key)
+      photo = await find()
+      if (!photo) throw new Error('Photo record was not saved.')
+      await enqueue(c.env, { type: 'photo_tags', photoId: photo.id })
+      await afterPropertySave(c, p.id)
+    }
+    return c.json({ id: photo.id, url: mediaUrl(photo.r2_key, 200) })
+  } catch {
+    return c.json({ error: 'Photo upload failed. Please retry this photo.' }, 500)
+  }
+})
+
+wizardRoutes.post('/admin/properties/:id/common-photos/:photoId/remove', requirePerm('manage_properties'), async (c) => {
+  const p = await loadProperty(c)
+  if (!p) return c.json({ error: 'Property not found.' }, 404)
+  const photo = await first<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE id = ? AND property_id = ? AND room_id IS NULL AND media_type = 'image'", int(c.req.param('photoId')), p.id)
+  if (!photo) return c.json({ error: 'Common photo not found.' }, 404)
+  // Detach only this gallery record; retain its object so any other references remain safe.
+  await run(c.env, 'DELETE FROM property_photos WHERE id = ? AND property_id = ? AND room_id IS NULL', photo.id, p.id)
+  await afterPropertySave(c, p.id)
+  return c.json({ ok: true })
+})
 
 // ---------- Step 2: Room categories ----------
 const RoomBlock: FC<{ i: string; r?: RoomRow; amenities: [string, string][] }> = ({ i, r, amenities }) => {

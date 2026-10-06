@@ -426,6 +426,100 @@
       $$('[data-autosubmit]', last).forEach(autoSubmit)
     })
   })
+  // Common photos: preview selection; upload to the existing property's gallery without resaving fields.
+  $$('[data-common-photos]').forEach(function (area) {
+    var form = area.closest('form'), input = $('[data-common-photo-input]', area), thumbs = $('[data-common-photo-thumbs]', area), status = $('[data-common-photo-status]', area);
+    var pending = [], busy = false;
+    function state(text) { status.textContent = text; }
+    function request(url, data, progress, create) {
+      return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest(); xhr.open('POST', url); xhr.timeout = 120000;
+        if (progress) xhr.upload.onprogress = function (event) { if (event.lengthComputable) { progress.value = event.loaded; progress.max = event.total; } };
+        xhr.onload = function () {
+          if (xhr.status < 200 || xhr.status >= 300) return reject(new Error('Upload failed. Please retry.'));
+          if (create) {
+            var target = new URL(xhr.responseURL, location.href), error = target.searchParams.get('err');
+            if (error) return reject(new Error(error));
+            var match = target.pathname.match(/^\/admin\/properties\/(\d+)\/setup\/2$/);
+            return match ? resolve(match[1]) : reject(new Error('Unable to save property details. Please try again.'));
+          }
+          try { var result = JSON.parse(xhr.responseText); if (result.error) throw new Error(result.error); resolve(result); }
+          catch (error) { reject(error); }
+        };
+        xhr.onerror = xhr.ontimeout = function () { reject(new Error('Upload interrupted. Please retry.')); };
+        xhr.send(data);
+      });
+    }
+    function bindRemove(button, card) {
+      button.addEventListener('click', async function () {
+        if (busy || !confirm('Remove this common photo?')) return;
+        busy = true; button.disabled = true; input.disabled = true;
+        try { await request(area.dataset.uploadUrl + '/' + button.dataset.removeCommonPhoto + '/remove', new FormData()); card.remove(); pending = pending.filter(function (item) { return item.card !== card; }); state('Photo removed. Other photos are unchanged.'); }
+        catch (error) { state(error.message); }
+        finally { busy = false; button.disabled = false; input.disabled = false; }
+      });
+    }
+    $$('[data-remove-common-photo]', area).forEach(function (button) { bindRemove(button, button.closest('[data-photo-id]')); });
+    async function uploadAll() {
+      busy = true; input.disabled = true;
+      var failures = 0;
+      for (var item of pending.slice()) {
+        if (item.saved) continue;
+        item.note.className = ''; item.note.textContent = 'Uploading…'; item.progress.hidden = false; item.retry.hidden = true;
+        state('Uploading common photos… Please wait before leaving this step.');
+        var data = new FormData(); data.append('photo', item.file); data.append('upload_key', item.token);
+        try {
+          var photo = await request(area.dataset.uploadUrl, data, item.progress);
+          item.saved = true; item.card.dataset.photoId = String(photo.id); item.image.src = photo.url;
+          URL.revokeObjectURL(item.preview); item.note.textContent = 'Saved'; item.remove.dataset.removeCommonPhoto = String(photo.id);
+          bindRemove(item.remove, item.card);
+        } catch (error) { failures++; item.note.textContent = error.message; item.note.className = 'photo-failed'; item.retry.hidden = false; }
+        item.progress.hidden = true;
+      }
+      busy = false; input.disabled = false;
+      state(failures ? failures + ' photo(s) failed. Use Retry or remove the failed selection.' : 'Common photos saved.');
+      return failures === 0;
+    }
+    input.addEventListener('change', function () {
+      var files = Array.from(input.files); input.value = '';
+      files.forEach(function (file) {
+        if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 10 * 1024 * 1024 || !file.size) { state(file.name + ': choose JPG, PNG or WebP up to 10 MB.'); return; }
+        if (pending.some(function (item) { return item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified; })) return;
+        var card = document.createElement('span'); card.className = 'common-photo';
+        var image = document.createElement('img'), preview = URL.createObjectURL(file); image.src = preview; image.alt = file.name;
+        var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'thumb-x'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove ' + file.name);
+        var note = document.createElement('small'); note.textContent = 'Selected — saved with Save & Continue';
+        var progress = document.createElement('progress'); progress.hidden = true; progress.setAttribute('aria-label', 'Upload progress for ' + file.name);
+        var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-sm btn-outline'; retry.textContent = 'Retry'; retry.hidden = true;
+        var item = {file:file,token:crypto.randomUUID(),card:card,image:image,preview:preview,remove:remove,note:note,progress:progress,retry:retry,saved:false};
+        card.append(image, remove, note, progress, retry); thumbs.appendChild(card); pending.push(item);
+        remove.addEventListener('click', function () { if (busy || item.saved) return; pending = pending.filter(function (x) { return x !== item; }); URL.revokeObjectURL(preview); card.remove(); state('Selected photo removed.'); });
+        retry.addEventListener('click', function () { if (!busy) uploadAll(); });
+      });
+      if (area.dataset.uploadUrl && !busy && pending.some(function (item) { return !item.saved; })) uploadAll();
+    });
+    form.addEventListener('submit', async function (event) {
+      if (busy) { event.preventDefault(); state('Please wait for the current photo operation to finish.'); return; }
+      if (!pending.some(function (item) { return !item.saved; })) return;
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      if (!area.dataset.uploadUrl) {
+        busy = true; state('Saving property details before uploading photos…');
+        try {
+          var data = new FormData(form); data.delete('photos');
+          var id = await request(form.action, data, null, true);
+          area.dataset.uploadUrl = '/admin/properties/' + id + '/common-photos';
+          form.action = '/admin/properties/' + id + '/setup/1';
+          history.replaceState(null, '', form.action);
+        } catch (error) { busy = false; state(error.message); return; }
+        busy = false;
+      }
+      if (await uploadAll()) form.requestSubmit();
+    });
+    document.addEventListener('click', function (event) { if (busy && event.target.closest('.wiz a')) { event.preventDefault(); state('Please wait for the current photo operation to finish.'); } });
+    window.addEventListener('beforeunload', function (event) { if (busy || pending.some(function (item) { return !item.saved; })) { event.preventDefault(); event.returnValue = ''; } });
+  });
+
   // Best For: checkboxes remain the submitted source of truth; chips only mirror them.
   $$('[data-best-for]').forEach(function (field) {
     var inputs = $$('input[name="best_for"]', field), summary = $('summary', field), tags = $('[data-best-for-tags]', field);
