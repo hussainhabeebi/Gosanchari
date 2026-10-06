@@ -31,13 +31,9 @@ async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv
 
 // ---------- 1. Home ----------
 publicRoutes.get('/', async (c) => {
-  const [content, settings, dests, featured, offers, saved] = await Promise.all([
+  const [content, settings, featured, offers, saved] = await Promise.all([
     getContent(c.env),
     getSettings(c.env),
-    all<{ name: string; slug: string; image: string | null; blurb: string | null; n: number }>(
-      c.env,
-      "SELECT d.name, d.slug, d.image, d.blurb, (SELECT COUNT(*) FROM properties p WHERE p.destination = d.name AND p.status = 'live') AS n FROM destinations d WHERE d.popular = 1 ORDER BY d.sort, d.name LIMIT 8",
-    ),
     featuredCards(c.env, 8),
     all<{ code: string; title: string; description: string; discount_type: string; discount_value: number; valid_to: string }>(
       c.env,
@@ -72,7 +68,6 @@ publicRoutes.get('/', async (c) => {
         <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
         <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
       </section>
-      <section class="wrap section" id="destinations"><h2>Popular destinations</h2><div class="grid grid-4">{dests.map((d) => <a class="dest" href={`/search?destination=${encodeURIComponent(d.name)}`}><img src={mediaUrl(d.image, 500, settings.images_transform)} alt={d.name} loading="lazy" /><div class="dest-label"><strong>{d.name}</strong><span>{d.n} stays</span></div></a>)}</div></section>
 
       {(offers.length > 0 || content.banners.length > 0) && (
         <section class="wrap section">
