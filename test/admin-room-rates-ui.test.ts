@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { wizardRoutes } from '../src/routes/admin-wizard'
 
 // Exercise the shipped client handler with a small DOM fixture, including tab navigation/reload.
-function rateStep(storage: Map<string, string>, ids = [101, 102, 103]) {
+function rateStep(storage: Map<string, string>, ids = [101, 102, 103], restored: Record<string,string> = {}) {
   const events = (obj: any) => Object.assign(obj, {
     listeners: {} as Record<string, () => void>,
     addEventListener(name: string, fn: () => void) { this.listeners[name] = fn },
@@ -18,10 +18,11 @@ function rateStep(storage: Map<string, string>, ids = [101, 102, 103]) {
   const panels = ids.map(id => {
     const inputs: any[] = []
     for (const period of ['off', 'sea']) {
-      for (const suffix of ['from', 'to']) inputs.push({name: `r${id}_${period}_${suffix}`, type: 'date', value: ''})
-      for (const day of ['wk', 'we']) for (const plan of ['CP', 'MAP', 'AP', 'EP']) for (const tier of ['direct', 'staff', 'b2b']) inputs.push({name: `r${id}_${period}_${day}_${plan}_${tier}`, type: 'number', value: ''})
+      for (const suffix of ['from', 'to']) inputs.push({name: `r${id}_${period}_${suffix}`, type: 'date', value: '', defaultValue: ''})
+      for (const day of ['wk', 'we']) for (const plan of ['CP', 'MAP', 'AP', 'EP']) for (const tier of ['direct', 'staff', 'b2b']) inputs.push({name: `r${id}_${period}_${day}_${plan}_${tier}`, type: 'number', value: '', defaultValue: ''})
     }
-    const peak = () => ({inputs: ['from', 'to', 'amt', 'desc'].map(s => ({name: `r${id}_peak_${s}`, type: s === 'amt' ? 'number' : 'text', value: ''})), cloneNode() { return peak() }})
+    const peak = () => ({inputs: ['from', 'to', 'amt', 'desc'].map(s => ({name: `r${id}_peak_${s}`, type: s === 'amt' ? 'number' : 'text', value: '', defaultValue: ''})), cloneNode() { return peak() }})
+    inputs.forEach(input => { input.value = restored[input.name] ?? '' })
     const peaks: any = {children: [peak()], appendChild(row: any) { this.children.push(row) }, get lastElementChild() { return this.children.at(-1) }}
     return {dataset: {rateRoom: String(id)}, hidden: false, inputs, peaks}
   })
@@ -50,6 +51,38 @@ function rateStep(storage: Map<string, string>, ids = [101, 102, 103]) {
 }
 
 describe('Admin room rate step', () => {
+  it.each(['dropdown','View/Edit'])('hydrates exact visible Room A inputs via %s after a partial browser restore', via => {
+    const storage = new Map<string,string>()
+    let ui = rateStep(storage)
+    ui.fields().filter(i=>i.name.startsWith('r101_')).forEach((input,index)=>{
+      // Both periods, all plans/tiers/day types, peaks and intentional blanks.
+      const value = input.name.endsWith('_from') ? '2030-01-01' : input.name.endsWith('_to') ? '2030-01-31' : input.name.endsWith('_desc') ? 'Peak holiday' : index % 3 ? String(7000 + index) : ''
+      ui.set(input.name,value)
+    })
+    const original = ui.fields().filter(i=>i.name.startsWith('r101_')).map(i=>[i.name,i.value])
+    ui.next.fire('click'); ui.set('r102_off_wk_CP_direct','9000')
+    // A hidden form panel is not the source of truth. Reopening must hydrate
+    // its actual inputs even if the browser has cleared those hidden controls.
+    ui.fields().filter(i=>i.name.startsWith('r101_')).forEach(input=>{input.value=''})
+    if (via === 'dropdown') {ui.select.value='101'; ui.select.fire('change')}
+    else ui.buttons[0].fire('click')
+    expect(ui.panels[0].hidden).toBe(false)
+    expect(ui.fields().filter(i=>i.name.startsWith('r101_')).map(i=>[i.name,i.value])).toEqual(original)
+    ui.next.fire('click')
+    expect(ui.fields().find(i=>i.name==='r102_off_wk_CP_direct')!.value).toBe('9000')
+    ui.window.fire('pagehide')
+    // Browsers can restore only part of a form before the script runs. This is
+    // current DOM state, not a changed saved server value/defaultValue.
+    ui = rateStep(storage,[101,102,103],{r101_sea_we_AP_staff:'9999'})
+    expect(ui.statuses[0].textContent).toBe('Rates added ✓')
+    if (via === 'dropdown') {ui.select.value='101'; ui.select.fire('change')}
+    else ui.buttons[0].fire('click')
+    const visible = ui.panels.filter(p=>!p.hidden)
+    expect(visible.map(p=>p.dataset.rateRoom)).toEqual(['101'])
+    expect([...visible[0].inputs,...visible[0].peaks.children.flatMap((r:any)=>r.inputs)].map(i=>[i.name,i.value])).toEqual(original)
+    // Never read values from hidden Room B to satisfy Room A's assertion.
+    expect(ui.fields().find(i=>i.name==='r102_off_wk_CP_direct')!.value).toBe('9000')
+  })
   it('retains exact independent room values, status, blank cells and Previous/Next drafts', () => {
     const storage = new Map<string, string>()
     let ui = rateStep(storage)
