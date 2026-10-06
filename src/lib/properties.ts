@@ -346,7 +346,7 @@ export async function syncContentKb(env: Env): Promise<void> {
 }
 
 /** Ask AI Search to re-read the bucket now (it also syncs on its own schedule). */
-async function reindexKb(env: Env): Promise<void> {
+export async function reindexKb(env: Env): Promise<void> {
   if (!env.AI_SEARCH) return
   // Debounce: at most one re-index request every 5 minutes.
   if (await env.KV.get('kb:reindex')) return

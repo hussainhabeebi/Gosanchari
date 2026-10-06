@@ -16,7 +16,7 @@ import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShor
 import { form, pageNum, redirectMsg } from './helpers'
 import { renderBookings, renderQuotes } from './staff-ops'
 import { renderGuests, renderInbox } from './staff'
-import { destinations } from '../lib/properties'
+import { destinations, reindexKb } from '../lib/properties'
 
 export const adminRoutes = new Hono<AppEnv>()
 adminRoutes.use('/admin', requireStaff)
@@ -122,7 +122,7 @@ adminRoutes.get('/admin/properties', requirePerm('manage_properties'), async (c)
       <div class="row-between"><h1>Properties</h1><a class="btn btn-go" href="/admin/properties/new">+ Add New Property</a></div>
       <form method="get" class="row filters-inline wrap-row">
         <input name="q" value={q} placeholder="Search name" />
-        <Select name="status" value={status} options={[['', 'Any status'], ['live', 'Live'], ['hidden', 'Hidden'], ['draft', 'Draft']]} />
+        <Select name="status" value={status} options={[['', 'Any status'], ['live', 'Live'], ['hidden', 'Disabled'], ['draft', 'Draft']]} />
         <Select name="destination" value={dest} options={[['', 'Any destination'], ...dests.map((d) => [d, d] as [string, string])]} />
         <button class="btn btn-sm">Filter</button>
       </form>
@@ -131,14 +131,15 @@ adminRoutes.get('/admin/properties', requirePerm('manage_properties'), async (c)
           <tr>
             <td><img class="thumb" src={mediaUrl(p.photo, 120)} alt="" /></td>
             <td><a href={`/admin/properties/${p.id}/setup/1`}><strong>{p.name}</strong></a>{p.featured ? <span class="pill pill-accepted">featured</span> : null}</td>
-            <td>{p.destination}</td><td>{stayTypeLabel(p)}</td><td><Pill s={p.status} /></td>
+            <td>{p.destination}</td><td>{stayTypeLabel(p)}</td><td><Pill s={p.status === 'hidden' ? 'disabled' : p.status} /></td>
             <td>★ {p.rating_avg.toFixed(1)} ({p.rating_count})</td><td>{p.bookings}</td>
             <td class="nowrap">
               <a class="btn btn-sm" href={`/admin/properties/${p.id}/setup/1`}>Edit</a>
               <a class="btn btn-sm btn-outline" href={`/admin/properties/${p.id}`} title="All fields, rate sheet import, B2B contract">Advanced</a>
               <a class="btn btn-sm btn-outline" href={`/stay/${p.slug}`} target="_blank">View</a>
-              <form method="post" action={`/admin/properties/${p.id}/status`} class="inline"><input type="hidden" name="status" value={p.status === 'live' ? 'hidden' : 'live'} /><button class="btn btn-sm btn-outline">{p.status === 'live' ? 'Hide' : 'Publish'}</button></form>
+              <form method="post" action={`/admin/properties/${p.id}/status`} class="inline"><input type="hidden" name="status" value={p.status === 'live' ? 'hidden' : 'live'} /><button class="btn btn-sm btn-outline" title={p.status === 'live' ? 'Take off the website and staff search (can be enabled again)' : 'Show on the website'}>{p.status === 'live' ? 'Disable' : p.status === 'hidden' ? 'Enable' : 'Publish'}</button></form>
               <form method="post" action={`/admin/properties/${p.id}/duplicate`} class="inline"><button class="btn btn-sm btn-outline">Duplicate</button></form>
+              <form method="post" action={`/admin/properties/${p.id}/delete`} class="inline" data-confirm={`Delete “${p.name}” permanently? Its rooms, rates and photos will be removed. This cannot be undone.`}><button class="btn btn-sm btn-danger">Delete</button></form>
             </td>
           </tr>
         ))}
@@ -157,6 +158,33 @@ adminRoutes.post('/admin/properties/:id/status', requirePerm('manage_properties'
   await enqueue(c.env, { type: 'sync_kb', what: 'property', id })
   await logActivity(c.env, c.get('user')!.id, 'property.status', 'property', id, { status: s })
   return c.redirect(c.req.header('referer') ?? '/admin/properties', 303)
+})
+
+// Delete a property for good. Properties with bookings, quotes, reviews or payouts keep their history:
+// those can only be disabled.
+adminRoutes.post('/admin/properties/:id/delete', requirePerm('manage_properties'), async (c) => {
+  const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', int(c.req.param('id')))
+  if (!p) return c.notFound()
+  const used = await first<{ b: number; q: number; r: number; o: number }>(c.env,
+    `SELECT (SELECT COUNT(*) FROM bookings WHERE property_id = ?1) AS b, (SELECT COUNT(*) FROM quotation_options WHERE property_id = ?1) AS q,
+            (SELECT COUNT(*) FROM reviews WHERE property_id = ?1) AS r, (SELECT COUNT(*) FROM payouts WHERE property_id = ?1) AS o`, p.id)
+  const refs = [used?.b && `${used.b} booking(s)`, used?.q && `${used.q} quotation option(s)`, used?.r && `${used.r} review(s)`, used?.o && `${used.o} payout(s)`].filter(Boolean)
+  if (refs.length) {
+    return redirectMsg(c, '/admin/properties', { err: `“${p.name}” has ${refs.join(', ')}, so it can't be deleted (that history must stay). Use Disable to take it off the website instead.` })
+  }
+  const photos = await all<{ r2_key: string }>(c.env, "SELECT r2_key FROM property_photos WHERE property_id = ? AND r2_key != ''", p.id)
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE enquiries SET property_id = NULL WHERE property_id = ?').bind(p.id),
+    c.env.DB.prepare('UPDATE insights SET property_id = NULL WHERE property_id = ?').bind(p.id),
+    c.env.DB.prepare('DELETE FROM properties WHERE id = ?').bind(p.id),
+  ])
+  for (const ph of photos) if (!ph.r2_key.startsWith('http')) await c.env.MEDIA.delete(ph.r2_key).catch(() => {})
+  await c.env.KB.delete(`properties/${p.slug}/details.md`).catch(() => {})
+  await reindexKb(c.env).catch(() => {})
+  await c.env.KV.delete(`similar:${p.id}`).catch(() => {})
+  await enqueue(c.env, { type: 'embed_property', propertyId: p.id }) // removes it from AI search
+  await logActivity(c.env, c.get('user')!.id, 'property.deleted', 'property', p.id, { name: p.name, slug: p.slug })
+  return redirectMsg(c, '/admin/properties', { ok: `Deleted “${p.name}”.` })
 })
 
 adminRoutes.post('/admin/properties/:id/duplicate', requirePerm('manage_properties'), async (c) => {
@@ -514,7 +542,7 @@ adminRoutes.get('/admin/payments', requirePerm('manage_payments'), async (c) => 
         <Table head={['Property', 'Booking', 'Amount', 'Status', 'Reference', '']}>
           {payouts.map((p) => (
             <tr>
-              <td>{p.property_name}</td><td>{p.code}</td><td>{money(p.amount)}</td><td><Pill s={p.status} /></td><td>{p.reference ?? ''}</td>
+              <td>{p.property_name}</td><td>{p.code}</td><td>{money(p.amount)}</td><td><Pill s={p.status === 'hidden' ? 'disabled' : p.status} /></td><td>{p.reference ?? ''}</td>
               <td>{p.status === 'pending' && <form method="post" action={`/admin/payouts/${p.id}`} class="row"><input name="reference" placeholder="UTR / reference" required /><button class="btn btn-sm">Mark paid</button></form>}</td>
             </tr>
           ))}

@@ -157,7 +157,7 @@ legend { font-weight: 600; font-size: .9rem; margin-bottom: 4px; }
 .pill-in_progress, .pill-viewed, .pill-partial, .pill-pending_approval, .pill-changes_requested { background: var(--amber-soft); color: var(--amber); }
 .pill-quoted { background: #f3f0ff; color: #6d4ae0; }
 .pill-booked, .pill-confirmed, .pill-paid, .pill-accepted, .pill-approved, .pill-live, .pill-processed, .pill-checked_in, .pill-completed { background: #e8f6ec; color: var(--ok); }
-.pill-lost, .pill-cancelled, .pill-failed, .pill-declined, .pill-expired, .pill-hidden, .pill-rejected, .pill-unpaid, .pill-urgent { background: var(--red-soft); color: var(--red); }
+.pill-lost, .pill-cancelled, .pill-failed, .pill-declined, .pill-expired, .pill-hidden, .pill-disabled, .pill-rejected, .pill-unpaid, .pill-urgent { background: var(--red-soft); color: var(--red); }
 
 /* Search page */
 .search-page { display: grid; gap: 20px; padding-top: 20px; padding-bottom: 40px; }

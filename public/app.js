@@ -470,6 +470,11 @@
   function autoSubmit(inp) { inp.addEventListener('change', function () { if (inp.files.length) inp.form.submit() }) }
   $$('[data-autosubmit]').forEach(autoSubmit)
 
+  // Forms that need a yes before they run (e.g. delete)
+  $$('form[data-confirm]').forEach(function (f) {
+    f.addEventListener('submit', function (e) { if (!confirm(f.dataset.confirm)) e.preventDefault() })
+  })
+
   // Share a link: phone share sheet when available, otherwise copy to clipboard
   $$('[data-share]').forEach(function (b) {
     b.addEventListener('click', function () {
