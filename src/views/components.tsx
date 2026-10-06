@@ -1,4 +1,3 @@
-import { STAY_TYPES } from '../lib/catalog'
 import { CUSTOM_ICONS } from '../lib/taxonomy'
 import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
@@ -43,30 +42,32 @@ export const PinIcon = () => raw('<svg class="ico" viewBox="0 0 24 24" width="14
 export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean; reasons?: string[] }> = ({ p, saved, qs, transform, reasons }) => {
   const fac = parseJson<string[]>(p.facilities, []).slice(0, 3)
   const price = p.stay_price ?? p.from_price
-  const href = `/stay/${p.slug}${qs ? '?' + qs : ''}`
   return (
     <article class="card pcard">
-      <a href={href} class="pcard-img">
+      <a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`} class="pcard-img">
         <img src={mediaUrl(p.photo, 600, transform)} alt={p.name} loading="lazy" width="600" height="400" />
-        <span class="pcard-loc"><PinIcon /> {p.destination}</span>
+        <span class="pcard-type">⌖ {p.destination}</span>
       </a>
       <form method="post" action={`/saved/${p.id}`} class="pcard-heart">
         <button title={saved ? 'Remove from saved' : 'Save'} aria-label="Save property" class={saved ? 'on' : ''}>{saved ? '♥' : '♡'}</button>
       </form>
       <div class="pcard-body">
-        <div class="row-between pcard-head">
-          <h3><a href={href}>{p.name}</a></h3>
-          <Stars value={p.rating_avg} />
+        <div class="row-between">
+          <h3><a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>{p.name}</a></h3>
+          <Stars value={p.rating_avg} count={p.rating_count} />
         </div>
-        <div class="muted small pcard-where"><PinIcon /> {p.destination}, Kerala · {STAY_TYPES[p.type] ?? p.type}</div>
+        <div class="muted small">📍 {p.destination}</div>
         {reasons && reasons.length > 0
           ? <div class="match-why small">{reasons.map((r) => <span>✓ {r}</span>)}</div>
-          : fac.length > 0 && <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
-        <div class="pcard-price">
-          <span class="muted">{p.stay_price ? 'Avg' : 'From'}</span> <strong>{money(price)}</strong> <span class="muted">/ night</span>
-          {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
+          : <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
+        <div class="row-between pcard-foot">
+          <div>
+            <span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>
+            <div class="price">{money(price)}</div>
+            {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
+          </div>
+          <a class="btn btn-sm btn-outline" data-stay-preview href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View Details →</a>
         </div>
-        <a class="btn btn-outline btn-block pcard-cta" href={href}>View Details →</a>
       </div>
     </article>
   )

@@ -470,14 +470,6 @@
   function autoSubmit(inp) { inp.addEventListener('change', function () { if (inp.files.length) inp.form.submit() }) }
   $$('[data-autosubmit]').forEach(autoSubmit)
 
-  // Card carousels (home "Popular Stays")
-  $$('[data-carousel]').forEach(function (car) {
-    var track = $('.car-track', car)
-    $$('[data-car]', car).forEach(function (b) {
-      b.addEventListener('click', function () { track.scrollBy({ left: +b.dataset.car * track.clientWidth * 0.9, behavior: 'smooth' }) })
-    })
-  })
-
   // Share a link: phone share sheet when available, otherwise copy to clipboard
   $$('[data-share]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -531,4 +523,65 @@
     if (a) new Chart($('#ch-ask'), { type: 'bar', data: { labels: a.labels, datasets: [{ label: a.label, data: a.values, backgroundColor: green }] }, options: { plugins: { legend: { display: false } } } })
   }
 
-})()
+})();
+
+// Reference navigation, stay preview and quote review. Existing URLs remain usable without JS.
+(function () {
+  document.querySelectorAll('.nav-dropdown').forEach(function (item) {
+    item.addEventListener('toggle', function () { if (item.open) document.querySelectorAll('.nav-dropdown').forEach(function (other) { if (other !== item) other.open = false; }); });
+  });
+  document.addEventListener('click', function (event) { document.querySelectorAll('.nav-dropdown,.guest-picker').forEach(function (item) { if (!item.contains(event.target)) item.open = false; }); });
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape') document.querySelectorAll('.nav-dropdown,.guest-picker').forEach(function (item) { item.open = false; }); });
+  var search = document.querySelector('[data-stay-search]');
+  if (search) {
+    search.addEventListener('input', function () {
+      var start = search.elements.checkIn, end = search.elements.checkOut;
+      end.min = start.value || start.min;
+      end.setCustomValidity(start.value && end.value && end.value <= start.value ? 'Check-out must be after check-in.' : '');
+      search.querySelector('[data-guest-summary]').textContent = search.elements.guests.value + ' Adults, ' + search.elements.children.value + ' Kids';
+    });
+  }
+  document.querySelectorAll('[data-carousel]').forEach(function (button) { button.addEventListener('click', function () { var track = button.parentElement.querySelector('[data-stay-track]'); track.scrollBy({ left: Number(button.dataset.carousel) * track.clientWidth }); }); });
+  function closeDialog(dialog) { dialog.close(); dialog.remove(); }
+  document.querySelectorAll('[data-stay-preview]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      var dialog = document.createElement('dialog'); dialog.className = 'stay-dialog'; dialog.setAttribute('aria-label', 'Property details');
+      var close = document.createElement('button'); close.className = 'dialog-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close property details');
+      var frame = document.createElement('iframe'); var url = new URL(link.href); url.searchParams.set('preview', '1'); frame.src = url.href; frame.title = 'Property details and room selection';
+      dialog.append(close, frame); document.body.append(dialog); dialog.showModal(); close.focus();
+      close.onclick = function () { closeDialog(dialog); link.focus(); };
+      dialog.addEventListener('cancel', function (e) { e.preventDefault(); close.click(); });
+    });
+  });
+  var quoteButton = document.querySelector('[data-trip-quote]');
+  if (quoteButton) quoteButton.addEventListener('click', async function () {
+    var form = quoteButton.form, start = form.elements.check_in, end = form.elements.check_out;
+    start.required = true; end.required = true;
+    end.setCustomValidity(start.value && end.value && end.value <= start.value ? 'Check-out must be after check-in.' : '');
+    // A preview needs dates and occupancy; contact information is requested when sending the enquiry.
+    if (!start.reportValidity() || !end.reportValidity()) return;
+    var data = new FormData(form); data.set('checkIn', start.value); data.set('checkOut', end.value);
+    quoteButton.disabled = true; quoteButton.textContent = 'Calculating…';
+    try {
+      var response = await fetch(form.dataset.priceUrl, { method: 'POST', body: data });
+      if (!response.ok) throw new Error('Unable to calculate the quote. Please try again.');
+      var estimate = await response.json();
+      if (estimate.errors && estimate.errors.length) throw new Error(estimate.errors.join('. '));
+      var dialog = document.createElement('dialog'); dialog.className = 'trip-dialog'; dialog.setAttribute('aria-label', 'Your trip quote');
+      dialog.innerHTML = '<button class="dialog-close" aria-label="Close trip quote">×</button><div class="trip-layout"><div class="trip-photo"><img alt="Selected property"><h2></h2></div><div class="trip-content"><div class="quote-notice"><strong>This is not the confirmation voucher.</strong><br>This is an estimated quote. Our team will confirm availability and final rates.</div><h2>Your Trip Quote</h2><div class="trip-facts"></div><div class="trip-estimate"></div><div class="trip-actions"><button class="btn btn-outline" data-back>← Back to Search</button><a class="btn btn-wa" target="_blank" rel="noopener">Proceed on WhatsApp →</a></div></div></div>';
+      var title = document.querySelector('.prop-main h1').textContent, photo = document.querySelector('.gallery img');
+      if (photo) dialog.querySelector('img').src = photo.src;
+      dialog.querySelector('.trip-photo h2').textContent = title;
+      var room = form.elements.room;
+      [['Property', title], ['Check-in', start.value], ['Check-out', end.value], ['Adults', form.elements.adults.value], ['Children', form.elements.children.value], ['Selected room', room.options[room.selectedIndex].text]].forEach(function (fact) { var item = document.createElement('div'); item.textContent = fact[0]; var value = document.createElement('strong'); value.textContent = fact[1]; item.append(value); dialog.querySelector('.trip-facts').append(item); });
+      var box = form.querySelector('.price-box');
+      dialog.querySelector('.trip-estimate').textContent = 'Estimated quote (subject to availability): ' + (estimate.total != null ? new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR' }).format(estimate.total) + ' including GST' : box.textContent);
+      var wa = document.querySelector('.wa-float'); var href = new URL(wa.href); href.searchParams.set('text', 'Please confirm availability and final rates for ' + title + ', ' + room.options[room.selectedIndex].text + ', ' + start.value + ' to ' + end.value + ', ' + form.elements.adults.value + ' adults and ' + form.elements.children.value + ' children.'); dialog.querySelector('.btn-wa').href = href.href;
+      document.body.append(dialog); dialog.showModal();
+      var close = dialog.querySelector('.dialog-close'); close.onclick = function () { closeDialog(dialog); quoteButton.focus(); }; dialog.querySelector('[data-back]').onclick = close.onclick; dialog.addEventListener('cancel', function (e) { e.preventDefault(); close.click(); });
+    } catch (error) { form.querySelector('.price-box').textContent = error.message; }
+    finally { quoteButton.disabled = false; quoteButton.textContent = 'Get Quote →'; }
+  });
+})();

@@ -1,7 +1,6 @@
 // Public pages (1–9) and the public quotation link (14).
 
 import { Hono, type Context } from 'hono'
-import { raw } from 'hono/html'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import { seasonKindLabel, seasonRates, weekendLabel, type SeasonRate } from '../lib/pricing'
 import type { AppEnv } from '../env'
@@ -30,17 +29,6 @@ async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv
   return new Set(rows.map((r) => r.property_id))
 }
 
-const ICONS: Record<string, string> = {
-  pin: '<path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/>',
-  cal: '<path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm-2 7h14v10H5V9z"/>',
-  user: '<path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4 0-8 2-8 5v2h16v-2c0-3-4-5-8-5z"/>',
-  search: '<path d="M10 3a7 7 0 1 0 4.2 12.6l5.1 5.1 1.4-1.4-5.1-5.1A7 7 0 0 0 10 3zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z"/>',
-  shield: '<path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3zm-1.2 14.2-3.5-3.5 1.4-1.4 2.1 2.1 4.9-4.9 1.4 1.4-6.3 6.3z"/>',
-  headset: '<path d="M12 2a9 9 0 0 0-9 9v6a3 3 0 0 0 3 3h2v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h3v1h-6v2h6a2 2 0 0 0 2-2v-9a9 9 0 0 0-9-9z"/>',
-  check: '<path d="M12 2 3 6v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V6l-9-4zm-1 15-4-4 1.4-1.4 2.6 2.6 6.6-6.6L19 9l-8 8z"/>',
-  star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
-}
-const icon = (k: string) => raw(`<svg class="ico" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor">${ICONS[k] ?? ''}</svg>`)
 
 // ---------- 1. Home ----------
 publicRoutes.get('/', async (c) => {
@@ -66,67 +54,26 @@ publicRoutes.get('/', async (c) => {
   const destNames = await destinations(c.env)
   const today = todayIST()
 
-  // Installs that still have the old banner text get the new wording.
-  const hero = content.hero.title === 'Find your stay in Kerala' ? { ...content.hero, title: 'Discover Kerala,', script: 'Your Way', kicker: 'Explore · Stay · Unwind' } : content.hero
-  const searchSlot = (
+  return page(c, { title: settings.business.name, description: content.hero.subtitle, canonical: c.env.SITE_URL + '/' }, (
     <>
-      <form class="hero-search" method="get" action="/search" role="search">
-        <label class="hs-field">
-          {icon('pin')}
-          <span><small>Destination</small>
-            <select name="destination" aria-label="Destination"><option value="">Anywhere in Kerala</option>{destNames.map((d) => <option value={d}>{d}</option>)}</select>
-          </span>
-        </label>
-        <label class="hs-field">{icon('cal')}<span><small>Check-in</small><input type="date" name="checkIn" min={today} aria-label="Check-in" /></span></label>
-        <label class="hs-field">{icon('cal')}<span><small>Check-out</small><input type="date" name="checkOut" min={today} aria-label="Check-out" /></span></label>
-        <label class="hs-field">{icon('user')}<span><small>Guests</small>
-          <select name="guests" aria-label="Guests">{[1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20].map((n) => <option value={n} selected={n === 2}>{n} {n === 1 ? 'guest' : 'guests'}</option>)}</select>
-        </span></label>
-        <button class="btn btn-cta">{icon('search')} Find My Stay</button>
-      </form>
-      <form class="hero-ai" method="get" action="/search" role="search">
-        <span class="ai-badge">AI</span>
-        <input name="ai" maxlength={200} placeholder="Or just tell us: “Munnar this weekend for 4, with a pool”" aria-label="Describe your stay" required />
-        <button class="linklike">Ask</button>
-      </form>
-      <div class="trust-row">
-        {[['shield', 'Best Price Guarantee', 'Unbeatable deals'], ['headset', '24/7 Support', "We're always here"], ['check', 'Trusted Partner', 'Verified resorts'], ['star', 'Curated Experiences', 'Handpicked stays']].map(([i, t, d]) => (
-          <div class="trust">{icon(i)}<span><strong>{t}</strong><small>{d}</small></span></div>
-        ))}
-      </div>
-    </>
-  )
-
-  return page(c, {
-    title: settings.business.name, description: hero.subtitle, canonical: c.env.SITE_URL + '/', nav: 'home',
-    hero: { mood: 'sunset', size: 'home', kicker: hero.kicker, title: hero.title, script: hero.script, subtitle: hero.subtitle, slot: searchSlot },
-  }, (
-    <>
-      {featured.length > 0 && (
-        <section class="wrap section">
-          <div class="section-head">
-            <div><h2 class="display">Popular <em>Stays</em></h2><p class="muted">Handpicked stays for your perfect getaway</p></div>
-            <a class="btn btn-outline btn-pill" href="/search">View All Stays →</a>
-          </div>
-          <div class="carousel" data-carousel>
-            <button type="button" class="car-btn prev" aria-label="Previous" data-car="-1">←</button>
-            <div class="car-track">{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div>
-            <button type="button" class="car-btn next" aria-label="Next" data-car="1">→</button>
-          </div>
-        </section>
-      )}
-
-      <section class="wrap section">
-        <div class="section-head"><div><h2 class="display">Popular <em>Destinations</em></h2><p class="muted">Hills, backwaters, beaches and forests</p></div></div>
-        <div class="grid grid-4">
-          {dests.map((d) => (
-            <a class="dest" href={`/search?destination=${encodeURIComponent(d.name)}`}>
-              <img src={mediaUrl(d.image, 500, settings.images_transform)} alt={d.name} loading="lazy" />
-              <div class="dest-label"><strong>{d.name}</strong><span>{d.n} stays</span></div>
-            </a>
-          ))}
+      <section class="hero reference-hero">
+        <div class="wrap">
+          <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
+          <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
+            <Field label="⌖ Destination"><Select name="destination" value={destNames.includes('Munnar') ? 'Munnar' : ''} options={[['', 'Anywhere in Kerala'], ...destNames.map((d) => [d, d] as [string, string])]} /></Field>
+            <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
+            <Field label="▣ Check-out"><input type="date" name="checkOut" min={today} /></Field>
+            <details class="guest-picker"><summary><span class="field-label">♙ Guests</span><strong data-guest-summary>2 Adults, 0 Kids</strong></summary><div class="guest-panel"><Field label="Adults"><input name="guests" type="number" min="1" max="40" value="2" /></Field><Field label="Children"><input name="children" type="number" min="0" max="20" value="0" /></Field></div></details>
+            <button class="btn find-stay">⌕ &nbsp; Find My Stay</button>
+          </form>
+          <div class="trust-strip"><span>✦ <strong>Best Price Guarantee</strong><small>Unbeatable Deals</small></span><span>♧ <strong>24/7 Support</strong><small>We're always here</small></span><span>◇ <strong>Trusted Partner</strong><small>Verified Resorts</small></span><span>★ <strong>Curated Experiences</strong><small>Handpicked Stays</small></span></div>
         </div>
       </section>
+      <section class="wrap section popular-stays">
+        <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
+        <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
+      </section>
+      <section class="wrap section" id="destinations"><h2>Popular destinations</h2><div class="grid grid-4">{dests.map((d) => <a class="dest" href={`/search?destination=${encodeURIComponent(d.name)}`}><img src={mediaUrl(d.image, 500, settings.images_transform)} alt={d.name} loading="lazy" /><div class="dest-label"><strong>{d.name}</strong><span>{d.n} stays</span></div></a>)}</div></section>
 
       {(offers.length > 0 || content.banners.length > 0) && (
         <section class="wrap section">
@@ -145,7 +92,7 @@ publicRoutes.get('/', async (c) => {
       )}
 
       <section class="wrap section">
-        <div class="section-head"><div><h2 class="display">Why travel <em>with us</em></h2></div></div>
+        <h2>Why book with us</h2>
         <div class="grid grid-4">
           {content.why_us.map((w) => (
             <div class="why"><div class="why-icon">{w.icon}</div><strong>{w.title}</strong><p class="muted">{w.text}</p></div>
@@ -155,7 +102,7 @@ publicRoutes.get('/', async (c) => {
 
       {reviews.length > 0 && (
         <section class="wrap section">
-          <div class="section-head"><div><h2 class="display">What travellers <em>say</em></h2></div></div>
+          <h2>What guests say</h2>
           <div class="grid grid-4">
             {reviews.slice(0, 4).map((r) => (
               <blockquote class="card review-card">
@@ -195,6 +142,7 @@ publicRoutes.get('/search', async (c) => {
   if (f.checkIn) qs.set('checkIn', f.checkIn)
   if (f.checkOut) qs.set('checkOut', f.checkOut)
   if (f.guests) qs.set('guests', String(f.guests))
+  if (c.req.query('children')) qs.set('children', String(Math.max(0, Math.min(20, int(c.req.query('children'))))))
   const view = c.req.query('view') === 'map' ? 'map' : 'list'
   const baseParams = filtersToParams(f)
   const mapParams = new URLSearchParams(baseParams); mapParams.set('view', view === 'map' ? 'list' : 'map')
@@ -238,12 +186,12 @@ publicRoutes.get('/search', async (c) => {
   }
 
   return page(c, { title: f.destination ? `Stays in ${f.destination}` : 'Find a stay', description: `Homestays, villas, resorts and houseboats${f.destination ? ' in ' + f.destination : ' in Kerala'}.`, head: view === 'map' ? <LeafletHead /> : undefined }, (
-    <div class="wrap search-page">
+    <><section class="destination-hero"><div class="wrap"><span class="eyebrow">DESTINATION</span><h1>{f.destination || 'Kerala'}</h1><p>MISTY MOUNTAINS, ENDLESS MEMORIES</p></div></section><div class="wrap search-page">
       <input type="checkbox" id="filters-toggle" class="nav-toggle" />
       <aside class="filters">
         <label for="filters-toggle" class="filters-close">✕ Close</label>
         <form method="get" action="/search" class="stack">
-          <h3>Filters</h3>
+          <h3>Filter by</h3>
           <Field label="Location">
             <Select name="destination" value={f.destination} options={[['', 'Anywhere in Kerala'], ...dests.map((d) => [d, d] as [string, string])]} />
           </Field>
@@ -340,7 +288,7 @@ publicRoutes.get('/search', async (c) => {
           </>
         )}
       </section>
-    </div>
+    </div></>
   ))
 })
 
@@ -360,6 +308,9 @@ publicRoutes.get('/stay/:slug', async (c) => {
     all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
   const photos = media.filter((m) => m.media_type !== 'video' && m.r2_key).sort((a, b) => COVER_ORDER.indexOf(a.category) - COVER_ORDER.indexOf(b.category) || a.sort - b.sort)
+  // Promote the existing exterior cover once; retain all other photo ordering.
+  const facadeIndex = photos.findIndex((photo) => photo.category === 'facade')
+  if (facadeIndex > 0) photos.unshift(...photos.splice(facadeIndex, 1))
   const videos = media.filter((m) => m.media_type === 'video')
   const mediaGroups = Object.keys(PHOTO_CATEGORIES).map((k) => [k, photos.filter((m) => m.category === k)] as const).filter(([k, list]) => list.length && k !== 'room')
   const seasonTable = seasonRates(rooms, seasonRows, p.rate_meal_plan)
@@ -402,9 +353,11 @@ publicRoutes.get('/stay/:slug', async (c) => {
     image: photos[0] ? (photos[0].r2_key.startsWith('http') ? photos[0].r2_key : c.env.SITE_URL + mediaUrl(photos[0].r2_key, 1200)) : undefined,
     canonical: `${c.env.SITE_URL}/stay/${p.slug}`,
     head: <LeafletHead />,
+    hideJourneyBanner: true,
   }, (
     <div class="wrap property-page">
       {p.status !== 'live' && <div class="flash flash-err">Preview — this property is {p.status} and not visible to guests.</div>}
+      <h1 class="property-title">{p.name}</h1>
       <div class="gallery" data-gallery>
         {gallery.slice(0, 5).map((ph, i) => (
           <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} class={`g-item g-${i}`} data-full>
@@ -419,7 +372,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
         <div class="prop-main">
           <div class="row-between">
             <div>
-              <h1>{p.name}</h1>
               <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
               {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
             </div>
@@ -468,7 +420,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                     <div class="room-price">
                       <div class="price">{money(r.base_rate)}</div>
                       <div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div>
-                      <button class="btn btn-sm" data-pick-room={r.id}>Enquire</button>
+                      <button class="btn btn-sm" data-pick-room={r.id}>Book</button>
                     </div>
                   </div>
                 )
@@ -632,7 +584,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
         <aside class="booking-box card" id="book">
           <div class="price-line"><span class="price">{money(rooms[0]?.base_rate ?? 0)}</span> <span class="muted">/ night onwards</span></div>
-          <h3>Send an enquiry</h3>
+          <span class="eyebrow">CHAT WITH YOUR</span><h3>Personal <span class="advisor-green">Advisor</span></h3>
           <p class="muted small">Tell us your dates — our team will confirm availability and send you a quote on WhatsApp.</p>
           <form method="post" action="/enquiry" class="stack" data-price-url={`/stay/${p.slug}/price`}>
             <input type="hidden" name="property_id" value={p.id} />
@@ -649,14 +601,14 @@ publicRoutes.get('/stay/:slug', async (c) => {
             </div>
             <div class="row">
               <Field label="Adults"><input type="number" name="adults" min="1" max="40" value={Math.max(1, guests)} /></Field>
-              <Field label="Children"><input type="number" name="children" min="0" max="20" value="0" /></Field>
+              <Field label="Children"><input type="number" name="children" min="0" max="20" value={Math.max(0, Math.min(20, int(c.req.query('children'))))} /></Field>
               <Field label="Rooms"><input type="number" name="rooms" min="1" max="20" value="1" /></Field>
             </div>
             <div class="price-box" aria-live="polite"><span class="muted small">Pick dates to see an estimated price.</span></div>
             <Field label="Message (optional)"><textarea name="message" rows={2} maxlength={2000} placeholder="Special requests, questions…"></textarea></Field>
             <input type="hidden" name="whatsapp_optin" value="1" />
             <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
-            <button class="btn btn-lg">Send Enquiry</button>
+            <button type="button" class="btn btn-lg" data-trip-quote>Get Quote →</button><button class="btn btn-outline">Send Enquiry</button>
             <p class="muted small">No payment now. Final price is confirmed in your quote.</p>
           </form>
         </aside>

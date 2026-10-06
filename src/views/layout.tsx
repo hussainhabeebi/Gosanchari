@@ -11,6 +11,9 @@ export type Area = 'public' | 'guest' | 'staff' | 'admin'
 
 export interface PageOpts {
   title: string
+  journey?: JourneyTheme
+  embedded?: boolean
+  hideJourneyBanner?: boolean
   description?: string
   area?: Area
   active?: string
@@ -36,6 +39,31 @@ interface LayoutProps extends PageOpts {
   bell?: number
   children?: Child
 }
+
+
+interface JourneyTheme { mood: string; label: string; description: string; nativeHero?: boolean }
+/** A shared visual story, selected by route so all pages receive a consistent theme. */
+export function journeyTheme(path: string, area: Area = 'public'): JourneyTheme {
+  if (path === '/') return { mood: 'adventure', label: 'Your journey begins', description: 'Explore · Stay · Unwind', nativeHero: true }
+  if (path === '/search') return { mood: 'curiosity', label: 'Follow your curiosity', description: 'Find a place that feels like you', nativeHero: true }
+  if (path.startsWith('/stay/')) return { mood: 'unwind', label: 'Pause. Breathe. Stay.', description: 'A little comfort along your journey' }
+  if (path === '/offers') return { mood: 'anticipation', label: 'Something to look forward to', description: 'Make your next escape a little more memorable' }
+  if (path === '/about') return { mood: 'reflection', label: 'Every journey has a story', description: 'Travel more. Worry less.' }
+  if (path === '/contact' || path === '/help') return { mood: 'connection', label: 'You are never travelling alone', description: 'A friendly guide, whenever you need one' }
+  if (path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot') || path.startsWith('/reset')) return { mood: 'welcome', label: 'Welcome to your next chapter', description: 'Your journey, all in one place' }
+  if (path.startsWith('/enquiry')) return { mood: 'hope', label: 'Let us plan your next escape', description: 'Tell us your dream. We will help with the details.' }
+  if (path.startsWith('/q/')) return { mood: 'anticipation', label: 'Your escape is taking shape', description: 'The next chapter is almost here' }
+  if (path.startsWith('/policies')) return { mood: 'clarity', label: 'Travel with peace of mind', description: 'Clear details for a carefree journey' }
+  if (area === 'guest' || path.startsWith('/my')) return { mood: 'memories', label: 'Your travel story', description: 'Plans to look forward to. Memories to keep.' }
+  if (area === 'staff' || area === 'admin') return { mood: 'focus', label: 'Make every journey count', description: 'Thoughtful service, one traveller at a time' }
+  return { mood: 'discovery', label: 'Keep exploring', description: 'There is always another story waiting' }
+}
+
+const JourneyBanner: FC<{ theme: JourneyTheme; title: string }> = ({ theme, title }) => (
+  <section class="journey-banner" aria-label={theme.label}>
+    <div class="wrap journey-copy"><span class="eyebrow">{theme.label}</span><h2>{title}</h2><p>{theme.description}</p></div>
+  </section>
+)
 
 const STAFF_NAV: { key: string; href: string; label: string; perm?: keyof Permissions }[] = [
   { key: 'dashboard', href: '/staff', label: 'Dashboard' },
@@ -184,56 +212,39 @@ const GUEST_NAV = [
   { key: 'help', href: '/help', label: 'Help & chat' },
 ]
 
-const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: string }> = ({ user, settings, nav }) => {
-  const staff = !!user && isStaff(user.role)
-  const portal = user ? (staff ? (user.role === 'sales' ? '/staff' : '/admin') : '/my') : null
-  const link = (key: string, href: string, label: string) => <a href={href} class={nav === key ? 'active' : ''}>{label}</a>
-  return (
-    <header class="topbar">
-      <div class="wrap topbar-in">
-        <a href="/" class="logo" aria-label={settings.business.name}>
-          <img src="/brand/logo-wide.webp" alt={settings.business.name} width="181" height="48" class="logo-img" />
-          <span class="logo-tag">Travel more, worry less</span>
+const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, settings }) => (
+  <header class="topbar">
+    <div class="wrap topbar-in">
+      <a href="/" class="logo" aria-label={settings.business.name}>
+        <img src="/brand/logo-wide.webp" alt={settings.business.name} width="181" height="48" class="logo-img" />
+      </a>
+      <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
+      <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
+      <nav class="topnav">
+        <a href="/">Home</a>
+        <details class="nav-dropdown"><summary>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
+        <a href="/offers">Packages</a>
+        <a href="/about">About Us</a>
+        <details class="nav-dropdown"><summary>Contact</summary><div class="nav-panel contact-panel"><a href={`tel:${settings.business.phone}`}>{settings.business.phone}</a><a href={`mailto:${settings.business.email}`}>{settings.business.email}</a></div></details>
+        {user ? (
+          <>
+            <a href={isStaff(user.role) ? (user.role === 'sales' ? '/staff' : '/admin') : '/my'} class="btn btn-sm btn-outline">
+              {isStaff(user.role) ? 'Dashboard' : 'My trips'}
+            </a>
+            <form method="post" action="/logout" class="inline">
+              <button class="linklike">Log out</button>
+            </form>
+          </>
+        ) : (
+          <details class="nav-dropdown portal-dropdown"><summary class="btn btn-sm">Portal Login ⌄</summary><div class="nav-panel"><a href="/login?next=%2Fmy"><strong>Guest Login</strong><small>For travel agents &amp; guests</small></a><a href="/login?tab=email&amp;next=%2Fstaff"><strong>Staff Login</strong><small>For team members</small></a></div></details>
+        )}
+        <a class="btn btn-sm btn-wa" href={`https://wa.me/${settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">
+          WhatsApp
         </a>
-        <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
-        <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
-        <nav class="topnav">
-          {link('home', '/', 'Home')}
-          {link('stays', '/search', 'Stays')}
-          {link('offers', '/offers', 'Offers')}
-          {link('about', '/about', 'About Us')}
-          <details class={`nav-drop ${nav === 'contact' ? 'active' : ''}`}>
-            <summary>Contact</summary>
-            <div class="drop-panel">
-              <a href={`tel:${settings.business.phone.replace(/\s/g, '')}`}>📞 {settings.business.phone}</a>
-              <a href={`mailto:${settings.business.email}`}>✉️ {settings.business.email}</a>
-              <a href={`https://wa.me/${settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">💬 WhatsApp us</a>
-              <a href="/contact">Contact page →</a>
-            </div>
-          </details>
-          <details class="nav-drop portal">
-            <summary class="btn-portal">{user ? (staff ? 'Dashboard' : 'My portal') : 'Portal Login'}</summary>
-            <div class="drop-panel">
-              {user ? (
-                <>
-                  <a href={portal!}>{staff ? 'Open dashboard' : 'My trips'}</a>
-                  {!staff && <a href="/my/enquiries">Enquiries & quotes</a>}
-                  <form method="post" action="/logout"><button class="linklike">Log out</button></form>
-                </>
-              ) : (
-                <>
-                  <a href="/login">Guest login (phone OTP)</a>
-                  <a href="/login?tab=email">Staff / partner login</a>
-                  <a href="/signup">Create an account</a>
-                </>
-              )}
-            </div>
-          </details>
-        </nav>
-      </div>
-    </header>
-  )
-}
+      </nav>
+    </div>
+  </header>
+)
 
 const Footer: FC<{ settings: Settings }> = ({ settings }) => (
   <footer class="footer">
@@ -336,9 +347,9 @@ export const Layout: FC<LayoutProps> = (p) => {
           {p.turnstileSiteKey && <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
           {p.head}
         </head>
-        <body class={`area-${area}${p.hero && !dash ? ` has-hero hero-text-${p.moodPhoto ? 'dark' : MOODS[p.hero.mood].text}` : ''}`}>
+        <body class={`area-${area}${p.embedded ? ' embedded-stay' : ''} journey-${p.journey?.mood ?? 'discovery'}${p.hero && !dash ? ` has-hero hero-text-${p.moodPhoto ? 'dark' : MOODS[p.hero.mood].text}` : ''}`}>
           <a class="skip" href="#main">Skip to content</a>
-          {!(dash && area !== 'guest') && <TopBar user={p.user} settings={p.settings} nav={p.nav} />}
+          {!(dash && area !== 'guest') && <TopBar user={p.user} settings={p.settings} />}
           {dash && area !== 'guest' ? (
             <div class="app-shell">
               <AppSide active={p.active} perms={p.perms} settings={p.settings} />
@@ -357,6 +368,7 @@ export const Layout: FC<LayoutProps> = (p) => {
               <main id="main" class="dash-main">
                 {p.hero && <PageHero {...p.hero} photo={p.moodPhoto} size="strip">{p.hero.slot}</PageHero>}
                 <Flash {...p.flash} />
+                {p.journey && !p.embedded && <JourneyBanner theme={p.journey} title={p.title} />}
                 {p.children}
               </main>
             </div>
@@ -364,13 +376,14 @@ export const Layout: FC<LayoutProps> = (p) => {
             <main id="main">
               {p.hero && <PageHero {...p.hero} photo={p.moodPhoto}>{p.hero.slot}</PageHero>}
               <Flash {...p.flash} />
+              {p.journey && !p.hideJourneyBanner && !p.journey.nativeHero && !p.embedded && <JourneyBanner theme={p.journey} title={p.title} />}
               {p.children}
             </main>
           )}
           {area === 'public' && <Footer settings={p.settings} />}
           {area !== 'staff' && area !== 'admin' && (
             <a class="wa-float" href={`https://wa.me/${p.settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener" aria-label="Chat on WhatsApp">
-              💬
+              💬 Need Help?
             </a>
           )}
           <script src="/app.js" defer></script>
@@ -400,7 +413,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
     ? (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM enquiries WHERE status = 'new'").first<{ n: number }>().catch(() => null))?.n ?? 0
     : 0
   return c.html(
-    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
+    <Layout {...opts} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
       {body}
     </Layout>,
     status as 200,
