@@ -429,12 +429,65 @@
   var roomSel = $('[data-room-select]')
   function showRoom(id) { $$('[data-rate-room]').forEach(function (p) { p.hidden = p.dataset.rateRoom !== String(id) }) }
   if (roomSel) {
-    roomSel.addEventListener('change', function () { showRoom(roomSel.value) })
+    var rateForm = roomSel.closest('form'), panels = $$('[data-rate-room]', rateForm)
+    var draftKey = 'room-rates:' + rateForm.dataset.ratesDraft + ':' + rateForm.getAttribute('action')
+    function rateValues() {
+      return panels.map(function (panel) {
+        return { id: panel.dataset.rateRoom, fields: $$('input', panel).map(function (input) { return { name: input.name, value: input.value } }) }
+      })
+    }
+    var savedValues = JSON.stringify(rateValues())
+    function rateStatus() {
+      panels.forEach(function (panel) {
+        var added = $$('input[type="number"]', panel).some(function (input) { return input.value.trim() !== '' })
+        $('[data-rate-status="' + panel.dataset.rateRoom + '"]', rateForm).textContent = added ? 'Rates added ✓' : 'Not added'
+      })
+    }
+    function retainRates() {
+      rateStatus()
+      try { sessionStorage.setItem(draftKey, JSON.stringify({ base: savedValues, rooms: rateValues(), selected: roomSel.value })) } catch (e) {}
+    }
+    // Drafts stay in this tab, scoped to the operator/property. Discard them if saved server values changed.
+    try {
+      var draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null')
+      if (draft) {
+        var baseline = JSON.parse(draft.base), current = rateValues()
+        panels.forEach(function (panel) {
+          var before = baseline.find(function (room) { return room.id === panel.dataset.rateRoom })
+          var now = current.find(function (room) { return room.id === panel.dataset.rateRoom })
+          if (JSON.stringify(before) !== JSON.stringify(now)) return
+          var room = draft.rooms.find(function (room) { return room.id === panel.dataset.rateRoom })
+          if (!room) return
+          var peaks = $('[data-peaks]', panel)
+          var count = room.fields.filter(function (field) { return field.name === 'r' + room.id + '_peak_from' }).length
+          while (peaks.children.length < count) peaks.appendChild(peaks.lastElementChild.cloneNode(true))
+          var offsets = {}
+          $$('input', panel).forEach(function (input) {
+            var matches = room.fields.filter(function (field) { return field.name === input.name })
+            var index = offsets[input.name] || 0; offsets[input.name] = index + 1
+            if (matches[index]) input.value = matches[index].value
+          })
+        })
+        if (Array.prototype.some.call(roomSel.options, function (option) { return option.value === draft.selected })) roomSel.value = draft.selected
+      } else sessionStorage.removeItem(draftKey)
+    } catch (e) {}
+    rateStatus(); showRoom(roomSel.value)
+    rateForm.addEventListener('input', retainRates)
+    window.addEventListener('pagehide', retainRates)
+    rateForm.addEventListener('submit', retainRates)
+    $$('[data-view-rate-room]', rateForm).forEach(function (button) {
+      button.addEventListener('click', function () {
+        retainRates(); roomSel.value = button.dataset.viewRateRoom; showRoom(roomSel.value); retainRates()
+        roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    })
+    roomSel.addEventListener('change', function () { showRoom(roomSel.value); retainRates() })
     var nx = $('[data-next-room]')
     if (nx) nx.addEventListener('click', function () {
+      retainRates()
       var i = roomSel.selectedIndex + 1
       if (i >= roomSel.options.length) { alert('All room categories are listed. Add more in Room Categories.'); return }
-      roomSel.selectedIndex = i; showRoom(roomSel.value); roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      roomSel.selectedIndex = i; showRoom(roomSel.value); retainRates(); roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
   }
   $$('[data-add-peak]').forEach(function (b) {

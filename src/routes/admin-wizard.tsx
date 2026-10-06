@@ -352,7 +352,7 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
   const perms = await permissionsFor(c.env, c.get('user')!.role)
   return page(c, { title: `Rates · ${p.name}`, area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={3} done={done} icon={I.coins} title="Room Rates" sub="Set different rates for off season, season and peak times. Enter rates for weekdays and weekends with CP, MAP, AP and EP plans.">
-      <form method="post" action={`/admin/properties/${p.id}/setup/3`} class="stack wiz-form" data-rates>
+      <form method="post" action={`/admin/properties/${p.id}/setup/3`} class="stack wiz-form" data-rates data-rates-draft={c.get('user')!.id}>
         <div class="wiz-2 rate-pick">
           <label class="wf">
             <span class="wl">Select Room Category <b>*</b> <a class="linklike add-new" href={`/admin/properties/${p.id}/setup/2`}>{I.plus} Add New Room Category</a></span>
@@ -360,6 +360,13 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
           </label>
           <div class="hint-box">{I.bed}<span><strong>Select a room category to set its rates.</strong><small>You can add rates for each season, off season and peak time separately.</small></span></div>
         </div>
+        <section class="card stack" aria-label="Room rate status">
+          <h3>Room Rates Added</h3>
+          {rooms.map((r) => <div class="row-between">
+            <strong>{r.name}</strong>
+            <span class="row"><span data-rate-status={r.id} aria-live="polite">Not added</span><button type="button" class="btn btn-outline btn-sm" data-view-rate-room={r.id}>View/Edit</button></span>
+          </div>)}
+        </section>
         {rooms.map((r, ri) => {
           const mine: Rates = {}
           for (const x of rows.filter((x) => x.room_id === r.id)) mine[`${x.kind === 'off_season' ? 'off' : x.kind === 'season' ? 'sea' : 'peak'}_${x.meal_plan ?? ''}`] = x
