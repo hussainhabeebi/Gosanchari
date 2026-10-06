@@ -426,6 +426,41 @@
       $$('[data-autosubmit]', last).forEach(autoSubmit)
     })
   })
+  // Best For: checkboxes remain the submitted source of truth; chips only mirror them.
+  $$('[data-best-for]').forEach(function (field) {
+    var inputs = $$('input[name="best_for"]', field), summary = $('summary', field), tags = $('[data-best-for-tags]', field);
+    function update() {
+      var selected = inputs.filter(function (input) { return input.checked; });
+      tags.replaceChildren();
+      selected.forEach(function (input) {
+        var tag = document.createElement('span'); tag.className = 'best-for-tag';
+        var label = input.nextElementSibling.textContent;
+        tag.appendChild(document.createTextNode(label));
+        var remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×';
+        remove.setAttribute('aria-label', 'Remove ' + label);
+        remove.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); input.checked = false; update(); summary.focus(); });
+        tag.appendChild(remove); tags.appendChild(tag);
+      });
+      if (!selected.length) tags.textContent = 'Select best suited options';
+      if (inputs[0]) inputs[0].setCustomValidity(selected.length ? '' : 'Select at least one Best For option.');
+    }
+    inputs.forEach(function (input) {
+      input.addEventListener('change', update);
+      input.addEventListener('invalid', function () { field.open = true; });
+    });
+    field.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { field.open = false; summary.focus(); }
+      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault(); field.open = true;
+        var index = inputs.indexOf(document.activeElement), direction = event.key === 'ArrowDown' ? 1 : -1;
+        if (inputs.length) inputs[index < 0 ? (direction > 0 ? 0 : inputs.length - 1) : (index + direction + inputs.length) % inputs.length].focus();
+      }
+    });
+    document.addEventListener('click', function (event) { if (!field.contains(event.target)) field.open = false; });
+    field.closest('form').addEventListener('reset', function () { setTimeout(update, 0); });
+    update();
+  });
+
   var roomSel = $('[data-room-select]')
   function showRoom(id) { $$('[data-rate-room]').forEach(function (p) { p.hidden = p.dataset.rateRoom !== String(id) }) }
   if (roomSel) {

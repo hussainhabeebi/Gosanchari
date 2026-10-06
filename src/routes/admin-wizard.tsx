@@ -156,6 +156,9 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
   ])
   const done = await progress(c, p)
   const sel = parseJson<string[]>(p?.facilities, [])
+  const selectedThemes = parseJson<string[]>(p?.themes, [])
+  // Keep previously saved options available even if taxonomy later hides them.
+  for (const k of selectedThemes) if (!themes.some(([key]) => key === k)) themes.push([k, THEMES[k] ?? k])
   const video = photos.find((x) => x.video_url)
   return page(c, { title: p ? `Edit ${p.name}` : 'Add Property', area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={1} done={done} icon={I.home} title="Property Details" sub="Add the property details here and AI will fetch additional details (like description, location info, attractions, etc.)">
@@ -169,10 +172,16 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
             <span class="wl">Property Type / Category <b>*</b> <button type="button" class="linklike add-new" data-add-kind="property_type" data-add-select="type">{I.plus} Add New Category</button></span>
             <select name="type" id="type" required><option value="">Select property type</option>{types.map(([k, l]) => <option value={k} selected={p ? (p.stay_type ?? p.type) === k : false}>{l}</option>)}</select>
           </label>
-          <label class="wf">
-            <span class="wl">Best For (Filters for Guest Search) <b>*</b></span>
-            <select name="best_for" required><option value="">Select best suited option</option>{themes.map(([k, l]) => <option value={k} selected={parseJson<string[]>(p?.themes, [])[0] === k}>{l}</option>)}</select>
-          </label>
+          <div class="wf">
+            <span class="wl" id="best-for-label">Best For (Filters for Guest Search) <b>*</b></span>
+            <details class="best-for-select" data-best-for>
+              <summary aria-labelledby="best-for-label" aria-describedby="best-for-help"><span data-best-for-tags>{selectedThemes.length ? selectedThemes.map((k) => <span class="best-for-tag">{THEMES[k] ?? k}</span>) : 'Select best suited options'}</span><span aria-hidden="true">▾</span></summary>
+              <div class="best-for-options" role="group" aria-labelledby="best-for-label">
+                {themes.map(([k, l]) => <label><input type="checkbox" name="best_for" value={k} checked={selectedThemes.includes(k)} /><span>{l}</span></label>)}
+              </div>
+            </details>
+            <small class="muted" id="best-for-help">Select all that apply.</small>
+          </div>
         </div>
         <label class="wf"><span class="wl">Short Highlights about Property (3-4 points) <b>*</b></span>
           <textarea name="highlights" rows={3} maxlength={300} required placeholder="Enter key highlights (e.g. scenic location, private pool, family friendly, etc.)">{parseJson<string[]>(p?.highlights, []).join('\n')}</textarea><Counter max={300} />
@@ -214,7 +223,8 @@ async function saveStep1(c: Context<AppEnv>, existing: PropertyRow | null) {
   if (!name || !destination || !type) return { err: 'Property name, destination and type are required.' }
   const facilities = [...new Set(f.__all.facilities ?? [])].filter((x) => x in KINDS.facility.map)
   if (!facilities.length) return { err: 'Select at least one facility or activity.' }
-  const themes = f.best_for in THEMES ? [f.best_for] : []
+  const themes = [...new Set(f.__all.best_for ?? [])].filter((x) => x in THEMES || parseJson<string[]>(existing?.themes, []).includes(x))
+  if (!themes.length) return { err: 'Select at least one Best For option.' }
   const highlights = str(f.highlights, 300).split(/\n|•|;/).map((x) => x.trim().replace(/^[-*]\s*/, '')).filter(Boolean).slice(0, 6)
   const v = { name, destination, stay_type: type, type: legacyType(type), themes: JSON.stringify(themes), highlights: JSON.stringify(highlights), facilities: JSON.stringify(facilities) }
   let id: number
