@@ -222,6 +222,8 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, se
       <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
       <nav class="topnav">
         <a href="/">Home</a>
+        <a href="/#ai-search" class="nav-ai-link">AI Search</a>
+        <a href="/#ai-insights" class="nav-ai-link">AI Insights</a>
         <details class="nav-dropdown"><summary>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
         <a href="/offers">Packages</a>
         <a href="/about">About Us</a>
