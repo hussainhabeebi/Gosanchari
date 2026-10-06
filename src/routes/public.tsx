@@ -4,7 +4,7 @@ import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
-import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
+import { AiInsights, type StayInsight, AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
 import { closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
@@ -31,7 +31,7 @@ async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv
 
 // ---------- 1. Home ----------
 publicRoutes.get('/', async (c) => {
-  const [content, settings, featured, offers, saved] = await Promise.all([
+  const [content, settings, featured, offers, saved, insights] = await Promise.all([
     getContent(c.env),
     getSettings(c.env),
     featuredCards(c.env, 8),
@@ -41,6 +41,7 @@ publicRoutes.get('/', async (c) => {
       todayIST(), todayIST(),
     ),
     savedIds(c),
+    all<StayInsight>(c.env, "SELECT name, slug, destination, review_summary, rating_count FROM properties WHERE status = 'live' AND rating_count > 0 AND length(trim(review_summary)) > 0 ORDER BY featured DESC, rating_count DESC, id DESC LIMIT 3"),
   ])
   const reviewIds = content.featured_review_ids
   const reviews = reviewIds.length
@@ -54,6 +55,15 @@ publicRoutes.get('/', async (c) => {
       <section class="hero reference-hero">
         <div class="wrap">
           <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
+          <div class="hero-ai-priority" id="ai-search">
+            <div class="hero-ai-heading"><span class="ai-badge">AI</span><strong>AI Search</strong><span>Describe your perfect escape</span></div>
+            <form class="ai-search priority-ai-form" method="get" action="/search" role="search">
+              <label for="hero-ai-query" class="sr-only">Describe your stay</label><input id="hero-ai-query" name="ai" maxlength={200} required placeholder="A peaceful stay in Munnar for 2, with a pool, under ₹8,000" />
+              <button class="btn find-stay">Find with AI →</button>
+            </form>
+            <div class="ai-example-chips" aria-label="Try a search">{['Munnar for 2 with a pool', 'Family stay in Wayanad under ₹6000', 'Alleppey houseboat for 4'].map((example) => <a href={`/search?ai=${encodeURIComponent(example)}`}>{example}</a>)}</div>
+          </div>
+          <details class="manual-search"><summary>Prefer to choose destination, dates &amp; guests?</summary>
           <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
             <Field label="⌖ Destination"><Select name="destination" value={destNames.includes('Munnar') ? 'Munnar' : ''} options={[['', 'Anywhere in Kerala'], ...destNames.map((d) => [d, d] as [string, string])]} /></Field>
             <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
@@ -61,9 +71,11 @@ publicRoutes.get('/', async (c) => {
             <details class="guest-picker"><summary><span class="field-label">♙ Guests</span><strong data-guest-summary>2 Adults, 0 Kids</strong></summary><div class="guest-panel"><Field label="Adults"><input name="guests" type="number" min="1" max="40" value="2" /></Field><Field label="Children"><input name="children" type="number" min="0" max="20" value="0" /></Field></div></details>
             <button class="btn find-stay">⌕ &nbsp; Find My Stay</button>
           </form>
+          </details>
           <div class="trust-strip"><span>✦ <strong>Best Price Guarantee</strong><small>Unbeatable Deals</small></span><span>♧ <strong>24/7 Support</strong><small>We're always here</small></span><span>◇ <strong>Trusted Partner</strong><small>Verified Resorts</small></span><span>★ <strong>Curated Experiences</strong><small>Handpicked Stays</small></span></div>
         </div>
       </section>
+      <div class="wrap home-ai-insights"><AiInsights entries={insights} /></div>
       <section class="wrap section popular-stays">
         <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
         <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
@@ -106,12 +118,11 @@ publicRoutes.get('/', async (c) => {
 // ---------- 2. Search results ----------
 publicRoutes.get('/search', async (c) => {
   const aiText = c.req.query('ai')?.trim().slice(0, 200)
-  if (aiText) {
+  if (aiText && aiText !== '0') {
     if (!(await rateLimit(c.env, `ai-search:${clientIp(c)}`, 30, 3600))) return redirectMsg(c, '/search', { err: 'Too many searches, please use the filters.' })
-    const { filters, usedAi } = await smartSearch(c.env, aiText)
+    const { filters } = await smartSearch(c.env, aiText)
     const p = filtersToParams(filters)
     p.set('understood', aiText)
-    if (usedAi) p.set('ai', '0')
     return c.redirect('/search?' + p.toString())
   }
   const settings = await getSettings(c.env)
@@ -122,6 +133,8 @@ publicRoutes.get('/search', async (c) => {
   f.sort ??= 'recommended'
   const [results, dests, saved] = await Promise.all([searchProperties(c.env, f), destinations(c.env), savedIds(c)])
   const fewer = results.length < 3 ? await closeMatches(c.env, f, results.map((r) => r.id), 4) : []
+  const insightIds = results.slice(0, 12).map((p) => p.id)
+  const insights = insightIds.length ? await all<StayInsight>(c.env, `SELECT name, slug, destination, review_summary, rating_count FROM properties WHERE status = 'live' AND rating_count > 0 AND length(trim(review_summary)) > 0 AND id IN (${insightIds.map(() => '?').join(',')}) ORDER BY rating_count DESC LIMIT 3`, ...insightIds) : []
   const understood = c.req.query('understood')
   const qs = new URLSearchParams()
   if (f.checkIn) qs.set('checkIn', f.checkIn)
@@ -211,10 +224,11 @@ publicRoutes.get('/search', async (c) => {
 
       <section class="results">
         <form class="ai-search search-top" method="get" action="/search" role="search">
-          <span class="ai-badge">AI</span>
+          <span class="ai-badge">AI Search</span>
           <input name="ai" maxlength={200} value={understood ?? ''} placeholder="Describe your stay — place, dates, guests, budget, must-haves" aria-label="Describe your stay" required />
           <button class="btn btn-sm">Search</button>
         </form>
+        <AiInsights entries={insights} search />
         {chips.length > 0 && (
           <div class="filter-chips" aria-label="Your search">
             {understood && <span class="muted small">We understood:</span>}
@@ -347,7 +361,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
           <section class="section-sm">
             <h2>About this property</h2>
-            {p.review_summary && <AiNote label="Guests say">{p.review_summary}</AiNote>}
+            {p.review_summary && <AiNote label="AI Insights · Guest review summary">{p.review_summary}</AiNote>}
             {highlights.length > 0 && <ul class="highlights">{highlights.map((h) => <li>{h}</li>)}</ul>}
             {description.split(/\n{2,}/).map((para) => <p>{para}</p>)}
             {p.built_year && (
