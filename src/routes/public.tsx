@@ -357,7 +357,6 @@ publicRoutes.get('/stay/:slug', async (c) => {
   }, (
     <div class="wrap property-page">
       {p.status !== 'live' && <div class="flash flash-err">Preview — this property is {p.status} and not visible to guests.</div>}
-      <h1 class="property-title">{p.name}</h1>
       <div class="gallery" data-gallery>
         {gallery.slice(0, 5).map((ph, i) => (
           <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} class={`g-item g-${i}`} data-full>
@@ -368,23 +367,18 @@ publicRoutes.get('/stay/:slug', async (c) => {
         {(photos.length > 5 || videos.length > 0) && <a class="btn btn-sm g-all" href="#photos">See all {photos.length} photos{videos.length ? ` & ${videos.length} video${videos.length > 1 ? 's' : ''}` : ''}</a>}
       </div>
 
+      <h1 class="property-title">{p.name}</h1>
       <div class="prop-layout">
         <div class="prop-main">
-          <div class="row-between">
-            <div>
-              <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
-              {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
-            </div>
-            <form method="post" action={`/saved/${p.id}`}><button class="btn btn-outline btn-sm">{saved.has(p.id) ? '♥ Saved' : '♡ Save'}</button></form>
+          <div class="property-summary">
+            <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
+            {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
           </div>
-          <nav class="media-tabs mt-sm">
-            {['Rooms|rooms', 'Photos|photos', 'Rates|rates', 'Dining|dining', 'Facilities|facilities', 'Policies|policies', 'Location|location', 'Reviews|reviews'].map((x) => { const [l, h] = x.split('|'); return <a href={`#${h}`}>{l}</a> })}
-          </nav>
-          {p.review_summary && <AiNote label="Guests say">{p.review_summary}</AiNote>}
-          {highlights.length > 0 && <ul class="highlights">{highlights.map((h) => <li>{h}</li>)}</ul>}
 
           <section class="section-sm">
             <h2>About this property</h2>
+            {p.review_summary && <AiNote label="Guests say">{p.review_summary}</AiNote>}
+            {highlights.length > 0 && <ul class="highlights">{highlights.map((h) => <li>{h}</li>)}</ul>}
             {description.split(/\n{2,}/).map((para) => <p>{para}</p>)}
             {p.built_year && (
               <dl class="info-list">

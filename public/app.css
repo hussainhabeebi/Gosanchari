@@ -592,9 +592,5 @@ code { overflow-wrap: anywhere; }
 .dash-main .journey-banner { min-height:145px;border-radius:16px;margin-bottom:24px; }.dash-main .journey-copy { padding-top:20px;padding-bottom:20px; }.dash-main .journey-copy h2 { font-size:26px; }.dash-main .journey-copy .eyebrow { letter-spacing:2px; }
 @media(max-width:650px) { .journey-banner { min-height:230px; }.journey-copy { padding-left:38%;padding-right:16px; }.journey-copy h2 { font-size:27px; }.journey-copy .eyebrow { font-size:9px;letter-spacing:1px; }.journey-copy p { font-size:12px; }.journey-banner:before { background-position:30% center; }.journey-banner:after { background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--journey-tint) 82%,transparent) 72%); }.area-public .reference-hero { background-position:32% center; }.area-public .reference-hero:before { background:linear-gradient(#fff1d867,#fff1d8d9); }.area-public .reference-hero .hero-copy { padding-top:50px; }.area-public .destination-hero { background-position:35% center; }.area-public .destination-hero .wrap { padding-left:35%; }.area-public .destination-hero h1 { font-size:42px; }.dash-main .journey-copy { padding-left:30%; }.dash-main .journey-copy h2 { font-size:22px; } }
 
-/* Property details: title, gallery, then enquiry before details on small screens. */
+/* Property details: gallery, title, summary and details; enquiry remains sticky. */
 .property-page > .property-title { margin: 24px 0 12px; overflow-wrap: anywhere; }
-@media (max-width: 959px) {
-  .property-page > .prop-layout > .booking-box { grid-row: 1; }
-  .property-page > .prop-layout > .prop-main { grid-row: 2; }
-}
