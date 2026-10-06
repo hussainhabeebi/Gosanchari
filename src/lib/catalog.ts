@@ -243,7 +243,15 @@ export function guestsText(r: { capacity: number; base_guests?: number | null; e
 }
 
 /** Extras a property sells (campfire, candle-light dinner…): guest price, and the B2B net cost (management only). */
+export interface ActivityItem {
+  name: string
+  price: number
+  complimentary: boolean
+}
+
 export interface Addon {
+  /** Optional children belonging only to this property activity; not quote selections. */
+  items?: ActivityItem[]
   name: string
   price: number
   net?: number | null
@@ -265,7 +273,7 @@ export function parseAddonLines(text: string, previous: Addon[], withNet: boolea
     const p = withNet ? per : net
     const perV = (['stay', 'night', 'person'].includes((p ?? '').toLowerCase()) ? (p ?? '').toLowerCase() : 'stay') as Addon['per']
     const old = previous.find((a) => a.name.toLowerCase() === name.toLowerCase())
-    out.push({ name: name.slice(0, 80), price: n(price) ?? 0, net: withNet ? n(net) : old?.net ?? null, per: perV })
+    out.push({ name: name.slice(0, 80), price: n(price) ?? 0, net: withNet ? n(net) : old?.net ?? null, per: perV, ...(old?.items ? { items: old.items } : {}) })
   }
   return out.slice(0, 40)
 }

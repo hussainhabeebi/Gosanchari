@@ -649,29 +649,35 @@
   }
   var acts = $('[data-acts]')
   if (acts) {
-    var activityTemplate = document.getElementById('activity-row-tpl');
-    $('[data-add-activity]').addEventListener('click', function () { acts.appendChild(activityTemplate.content.firstElementChild.cloneNode(true)); $('[data-activity-select]', acts.lastElementChild).focus(); });
-    var newActivity = $('[data-new-activity]');
-    newActivity.addEventListener('click', async function () {
-      var name = prompt('Name of the new activity');
-      if (!name || !name.trim()) return;
-      newActivity.disabled = true;
-      try {
-        var data = new FormData(); data.append('kind', 'activity'); data.append('label', name.trim());
-        var response = await fetch('/admin/taxonomy/add', { method: 'POST', body: data, credentials: 'same-origin', headers: { Accept: 'application/json' } });
-        var option = await response.json();
-        if (!response.ok || option.error) throw new Error(option.error || 'Unable to save activity.');
-        $$('[data-activity-select]', acts).concat($$('[data-activity-select]', activityTemplate.content)).forEach(function (select) {
-          if (!Array.from(select.options).some(function (existing) { return existing.value.toLowerCase() === option.label.toLowerCase(); })) select.add(new Option(option.label, option.label));
-        });
-      } catch (error) { alert(error.message || 'Unable to save activity. Please try again.'); }
-      finally { newActivity.disabled = false; }
-    });
+    var nextActivity = Math.max.apply(null, $$('[data-act-row]', acts).map(function (row) { return Number(row.dataset.actRow); })) + 1;
+    $('[data-add-activity]').addEventListener('click', function () {
+      cloneClean(acts, acts.firstElementChild);
+      var row = acts.lastElementChild; row.dataset.actRow = String(nextActivity++);
+      $('input[name=act_key]', row).value = row.dataset.actRow;
+      $('[data-act-items]', row).replaceChildren();
+    })
     acts.addEventListener('click', function (e) {
+      var removeItem = e.target.closest('[data-del-act-item]');
+      if (removeItem) { removeItem.closest('[data-act-item]').remove(); return; }
+      var addItem = e.target.closest('[data-add-act-item]');
+      if (addItem) {
+        var parent = addItem.closest('[data-act-row]'), name = $('input[name=act_name]', parent);
+        if (!name.value.trim()) { alert('Select an activity before adding an item.'); name.focus(); return; }
+        var item = document.getElementById('activity-item-tpl').content.firstElementChild.cloneNode(true);
+        $$('input[name]', item).forEach(function (input) { input.name = input.name.replace('__ACT__', parent.dataset.actRow); });
+        $('[data-act-items]', parent).appendChild(item); $('input', item).focus(); return;
+      }
       var d = e.target.closest('[data-del-row]'); if (!d) return
-      d.closest('tr').remove()
+      var tr = d.closest('tr'); if (acts.children.length > 1) tr.remove(); else { $('[data-act-items]', tr).replaceChildren(); $$('input', tr).forEach(function (i) { if (i.type === 'checkbox') i.checked = false; else if (i.name === 'act_free') i.value = '0'; else if (i.type !== 'hidden') i.value = '' }); }
     })
     acts.addEventListener('change', function (e) {
+      var item = e.target.closest('[data-act-item]');
+      if (item) {
+        var free = $('.act-item-free', item), charge = $('.act-item-charge', item), amount = $('.act-item-amount', item), state = $('.act-item-state', item);
+        if (e.target === free && free.checked) { charge.checked = false; amount.value = ''; }
+        if (e.target === charge && charge.checked) { free.checked = false; amount.focus(); }
+        state.value = free.checked ? '1' : '0'; return;
+      }
       var tr = e.target.closest('tr'); if (!tr) return
       if (e.target.classList.contains('act-free')) {
         $('input[name=act_free]', tr).value = e.target.checked ? '1' : '0'

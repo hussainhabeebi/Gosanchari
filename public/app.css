@@ -847,3 +847,10 @@ code { overflow-wrap: anywhere; }
 .common-photos .common-photo small { overflow-wrap: anywhere; font-size: .75rem; }
 .common-photos .photo-failed { color: #ad2430; }
 .common-photos progress { width: 100%; height: 6px; }
+
+/* Optional items remain visually nested beneath their parent activity. */
+.activity-items { display: grid; gap: 8px; margin: 8px 0; }
+.activity-item { display: grid; gap: 6px; padding: 10px; border-left: 3px solid #d8b676; border-radius: 6px; background: #fffaf0; }
+.activity-item .wf { min-width: 0; }
+.activity-item input:not([type=checkbox]) { width: 100%; }
+.activity-item [data-del-act-item] { justify-self: start; }

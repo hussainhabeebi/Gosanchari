@@ -12,7 +12,7 @@ import { page } from '../views/layout'
 import { iconFor } from '../views/components'
 import { permissionsFor, requirePerm } from '../lib/auth'
 import { all, enqueue, first, insertId, logActivity, placeholders, run } from '../lib/db'
-import { addons as readAddons, contact as readContact, legacyType, STAY_TYPES, THEMES, videoEmbedUrl, type Addon, type Contact } from '../lib/catalog'
+import { addons as readAddons, contact as readContact, legacyType, STAY_TYPES, THEMES, videoEmbedUrl, type ActivityItem, type Addon, type Contact } from '../lib/catalog'
 import { addItem, allRows, KINDS, listFor, removeItem, restoreItem, type Kind } from '../lib/taxonomy'
 import { mediaUrl } from '../lib/integrations'
 import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
@@ -549,18 +549,21 @@ async function step4(c: Context<AppEnv>, p: PropertyRow) {
   const [room1, acts] = await Promise.all([first<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? ORDER BY id LIMIT 1', p.id), listFor(c.env, 'activity')])
   const done = await progress(c, p)
   const adds = readAddons(p.addons)
-  const activityNames = [...new Set([...acts.map(([, label]) => label), ...adds.map((a) => a.name)])]
-  const ActivityRow: FC<{ a?: Addon }> = ({ a }) => (
-    <tr>
-      <td><select name="act_name" data-activity-select><option value="">Select activity</option>{activityNames.map((name) => <option value={name} selected={a?.name === name}>{name}</option>)}</select></td>
-      <td><label class="check"><input type="checkbox" class="act-free" checked={!!a?.complimentary} /> Complimentary</label><input type="hidden" name="act_free" value={a?.complimentary ? '1' : '0'} /></td>
-      <td><span class="row"><input type="checkbox" class="act-charge" checked={!!a && !a.complimentary && a.price > 0} aria-label="Chargeable" /><input type="number" min="0" name="act_amt" value={a && !a.complimentary ? val(a.price) : ''} placeholder="Enter amount" /></span></td>
-      <td><button type="button" class="icon-btn" data-del-row aria-label="Remove activity row">{I.trash}</button></td>
-    </tr>
+  const rows: (Addon | null)[] = adds.length ? adds : [null, null, null, null]
+  const Item: FC<{ keyId: string; item?: ActivityItem }> = ({ keyId, item }) => (
+    <div class="activity-item" data-act-item>
+      <label class="wf"><span class="small">Item / add-on name</span><input name={`act_${keyId}_item_name`} value={item?.name ?? ''} maxlength={80} placeholder="e.g. Music" /></label>
+      <label class="check"><input type="checkbox" class="act-item-free" checked={!!item?.complimentary} /> Complimentary</label>
+      <input type="hidden" class="act-item-state" name={`act_${keyId}_item_free`} value={item?.complimentary ? '1' : '0'} />
+      <label class="check"><input type="checkbox" class="act-item-charge" checked={!!item && !item.complimentary} /> Chargeable</label>
+      <label class="wf"><span class="small">Charge Amount (₹)</span><input type="number" class="act-item-amount" name={`act_${keyId}_item_amt`} min="0" value={item && !item.complimentary ? item.price : ''} /></label>
+      <button type="button" class="linklike" data-del-act-item aria-label="Remove activity item">Remove item</button>
+    </div>
   )
   return page(c, { title: `Charges · ${p.name}`, area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={4} done={done} icon={I.coins} title="Additional Charges & Kids Policies" sub="Set extra person charges, child policies and activity charges for this property.">
       <form method="post" action={`/admin/properties/${p.id}/setup/4`} class="stack wiz-form">
+        <datalist id="activities">{acts.map(([, l]) => <option value={l} />)}</datalist>
         <div class="tint tint-blue">
           <div class="tint-head">{I.kids}<div><h3>Kids Policies</h3><small class="muted">Set child age limits and charges.</small></div></div>
           <div class="tint-body wiz-2">
@@ -578,16 +581,25 @@ async function step4(c: Context<AppEnv>, p: PropertyRow) {
         </div>
         <div class="tint tint-amber">
           <div class="tint-head">{I.hike}<div><h3>Activities Charge</h3><small class="muted">Add activities available at the property and set charges.</small></div>
-            <button type="button" class="linklike add-new" data-new-activity>{I.plus} Add New Activity</button></div>
+            <button type="button" class="linklike add-new" data-add-activity>{I.plus} Add New Activity</button></div>
           <div class="tint-body">
             <table class="act-table">
               <thead><tr><th>Activity</th><th>Complimentary</th><th>Charge Amount (₹)</th><th>Action</th></tr></thead>
               <tbody data-acts>
-                {adds.map((a) => <ActivityRow a={a} />)}
+                {rows.map((a, index) => (
+                  <tr data-act-row={index}>
+                    <td><input type="hidden" name="act_key" value={index} /><input name="act_name" list="activities" value={a?.name ?? ''} placeholder="Select activity" />
+                      <div class="activity-items" data-act-items>{(a?.items ?? []).map((item) => <Item keyId={String(index)} item={item} />)}</div>
+                      <button type="button" class="linklike small" data-add-act-item>{I.plus} Add Item</button>
+                    </td>
+                    <td><label class="check"><input type="checkbox" class="act-free" checked={!!a?.complimentary} /> Complimentary</label><input type="hidden" name="act_free" value={a?.complimentary ? '1' : '0'} /></td>
+                    <td><span class="row"><input type="checkbox" class="act-charge" checked={!!a && !a.complimentary && a.price > 0} aria-label="Chargeable" /><input type="number" min="0" name="act_amt" value={a && !a.complimentary ? val(a.price) : ''} placeholder="Enter amount" /></span></td>
+                    <td><button type="button" class="icon-btn" data-del-row aria-label="Remove">{I.trash}</button></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-            <template id="activity-row-tpl"><ActivityRow /></template>
-            <div class="row wrap-row mt-sm"><button type="button" class="btn btn-soft" data-add-activity>{I.plus} Add Another Activity</button><small class="muted">Add New Activity creates a reusable name. Add Another Activity adds a charge row to this property.</small></div>
+            <template id="activity-item-tpl"><Item keyId="__ACT__" /></template>
           </div>
         </div>
         <Nav p={p} step={4} />
@@ -599,6 +611,9 @@ async function step4(c: Context<AppEnv>, p: PropertyRow) {
 async function saveStep4(c: Context<AppEnv>, p: PropertyRow) {
   const f = await form(c)
   const opt = (k: string) => (f[k] === '' || f[k] == null ? null : Math.max(0, int(f[k])))
+  const keys = f.__all.act_key ?? []
+  if (keys.some((key) => !/^\d+$/.test(key)) || new Set(keys).size !== keys.length) return { err: 'Invalid activity rows. Reopen this step and try again.' }
+  if (keys.some((key, index) => !str(f.__all.act_name?.[index], 80) && (f.__all[`act_${key}_item_name`] ?? []).some((name) => name.trim()))) return { err: 'Select a parent activity for each item.' }
   const adult = opt('extra_adult'), childBed = opt('child_bed'), noBed = opt('child_nobed')
   await run(c.env, 'UPDATE rooms SET extra_adult_rate = ?, extra_child_rate = ?, child_no_bed_rate = ?, extra_bed = ?, extra_bed_rate = ? WHERE property_id = ?', adult, childBed, noBed, adult ? 1 : 0, adult, p.id)
   const names = f.__all.act_name ?? [], free = f.__all.act_free ?? [], amts = f.__all.act_amt ?? []
@@ -610,7 +625,14 @@ async function saveStep4(c: Context<AppEnv>, p: PropertyRow) {
     const complimentary = free[i] === '1'
     const price = complimentary ? 0 : Math.max(0, int(amts[i]))
     const prev = old.find((a) => a.name.toLowerCase() === name.toLowerCase())
-    list.push({ name, price, net: prev?.net ?? null, per: prev?.per ?? 'stay', complimentary })
+    const key = f.__all.act_key?.[i]
+    const items = key != null && /^\d+$/.test(key) ? (f.__all[`act_${key}_item_name`] ?? []).slice(0, 40).map((value, itemIndex) => {
+      const itemName = str(value, 80)
+      const itemFree = f.__all[`act_${key}_item_free`]?.[itemIndex] === '1'
+      return { name: itemName, price: itemFree ? 0 : Math.max(0, int(f.__all[`act_${key}_item_amt`]?.[itemIndex])), complimentary: itemFree }
+    }).filter((item) => item.name) : prev?.items ?? []
+    list.push({ name, price, net: prev?.net ?? null, per: prev?.per ?? 'stay', complimentary, ...(items.length || prev?.items ? { items } : {}) })
+    if (!Object.values(KINDS.activity.map as Record<string, string>).some((l) => l.toLowerCase() === name.toLowerCase())) await addItem(c.env, 'activity', name).catch(() => {})
   }
   await run(c.env, 'UPDATE properties SET child_free_below = ?, addons = ? WHERE id = ?', opt('child_free'), JSON.stringify(list), p.id)
   await afterPropertySave(c, p.id)
