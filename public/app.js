@@ -390,6 +390,86 @@
     draw()
   })()
 
+  // ---------- Admin property wizard ----------
+  $$('[data-counter]').forEach(function (cnt) {
+    var ta = cnt.previousElementSibling
+    var upd = function () { cnt.textContent = ta.value.length + '/' + cnt.dataset.counter }
+    if (ta) { ta.addEventListener('input', upd); upd() }
+  })
+  function nextIndex(sel, attr) { var m = -1; $$(sel).forEach(function (b) { var v = parseInt(b.getAttribute(attr), 10); if (v > m) m = v }); return m + 1 }
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest ? e.target.closest('[data-add-kind]') : null
+    if (!t) return
+    e.preventDefault()
+    var label = prompt('Name of the new item')
+    if (!label) return
+    var fd = new FormData(); fd.append('kind', t.dataset.addKind); fd.append('label', label)
+    fetch('/admin/taxonomy/add', { method: 'POST', body: fd, credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) { return r.json() }).then(function (r) {
+      if (r.error) return alert(r.error)
+      if (t.dataset.addSelect) { var s = document.getElementById(t.dataset.addSelect); var o = new Option(r.label, r.key, true, true); s.add(o) }
+      if (t.dataset.addInput) { var inp = document.getElementById(t.dataset.addInput); inp.value = r.label; var dl = document.getElementById(inp.getAttribute('list')); if (dl) dl.appendChild(new Option(r.label)) }
+      if (t.dataset.addTarget) {
+        var wrap = t.closest('.tiles-wrap'), tiles = $('.tiles', wrap)
+        tiles.insertAdjacentHTML('beforeend', '<label class="tile"><input type="checkbox" name="' + esc(t.dataset.addTarget) + '" value="' + esc(r.key) + '" checked><span class="tile-ico">' + esc(r.icon) + '</span><span>' + esc(r.label) + '</span></label>')
+      }
+    })
+  })
+  $$('[data-add-block]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var kind = b.dataset.addBlock
+      var tpl = document.getElementById(kind === 'room' ? 'room-block-tpl' : 'img-block-tpl')
+      var list = document.getElementById(kind === 'room' ? 'room-blocks' : 'img-blocks')
+      var i = kind === 'room' ? nextIndex('[data-room-block]', 'data-room-block') : $$('.img-block', list).length + 100
+      list.insertAdjacentHTML('beforeend', tpl.innerHTML.replace(/__I__/g, String(i)))
+      var last = list.lastElementChild; var h = $('h3', last); if (h && kind === 'img') h.textContent = 'Room Category ' + $$('.img-block', list).length
+      var f = $('input:not([type=hidden]),select', last); if (f) f.focus()
+      $$('[data-autosubmit]', last).forEach(autoSubmit)
+    })
+  })
+  var roomSel = $('[data-room-select]')
+  function showRoom(id) { $$('[data-rate-room]').forEach(function (p) { p.hidden = p.dataset.rateRoom !== String(id) }) }
+  if (roomSel) {
+    roomSel.addEventListener('change', function () { showRoom(roomSel.value) })
+    var nx = $('[data-next-room]')
+    if (nx) nx.addEventListener('click', function () {
+      var i = roomSel.selectedIndex + 1
+      if (i >= roomSel.options.length) { alert('All room categories are listed. Add more in Room Categories.'); return }
+      roomSel.selectedIndex = i; showRoom(roomSel.value); roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
+  $$('[data-add-peak]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var box = $('[data-peaks="' + b.dataset.addPeak + '"]'), row = box.lastElementChild.cloneNode(true)
+      $$('input', row).forEach(function (i) { i.value = '' }); box.appendChild(row)
+    })
+  })
+  function cloneClean(container, first) {
+    var row = first.cloneNode(true)
+    $$('input', row).forEach(function (i) { if (i.type === 'checkbox') i.checked = false; else if (i.type === 'hidden') i.value = '0'; else i.value = ''; i.required = false })
+    $$('b', row).forEach(function (x) { x.remove() })
+    container.appendChild(row)
+  }
+  var acts = $('[data-acts]')
+  if (acts) {
+    $('[data-add-activity]').addEventListener('click', function () { cloneClean(acts, acts.firstElementChild) })
+    acts.addEventListener('click', function (e) {
+      var d = e.target.closest('[data-del-row]'); if (!d) return
+      var tr = d.closest('tr'); if (acts.children.length > 1) tr.remove(); else $$('input', tr).forEach(function (i) { if (i.type === 'checkbox') i.checked = false; else if (i.type !== 'hidden') i.value = '' })
+    })
+    acts.addEventListener('change', function (e) {
+      var tr = e.target.closest('tr'); if (!tr) return
+      if (e.target.classList.contains('act-free')) {
+        $('input[name=act_free]', tr).value = e.target.checked ? '1' : '0'
+        if (e.target.checked) { $('.act-charge', tr).checked = false; $('input[name=act_amt]', tr).value = '' }
+      }
+      if (e.target.classList.contains('act-charge') && e.target.checked) { $('.act-free', tr).checked = false; $('input[name=act_free]', tr).value = '0'; $('input[name=act_amt]', tr).focus() }
+    })
+  }
+  var contacts = $('[data-contacts]')
+  if (contacts) $('[data-add-contact]').addEventListener('click', function () { cloneClean(contacts, contacts.firstElementChild) })
+  function autoSubmit(inp) { inp.addEventListener('change', function () { if (inp.files.length) inp.form.submit() }) }
+  $$('[data-autosubmit]').forEach(autoSubmit)
+
   // Card carousels (home "Popular Stays")
   $$('[data-carousel]').forEach(function (car) {
     var track = $('.car-track', car)

@@ -78,9 +78,9 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
   const [rooms, photos, seasonRows] = await Promise.all([
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', p.id),
     all<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND media_type = 'image' AND r2_key != '' ORDER BY sort, id", p.id),
-    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
+    all<SeasonRate>(c.env, 'SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND end_date >= ? ORDER BY start_date', p.id, todayIST()),
   ])
-  const seasons = seasonRates(rooms, seasonRows)
+  const seasons = seasonRates(rooms, seasonRows, p.rate_meal_plan)
   const addonList = readAddons(p.addons)
   const t = settings.images_transform
   const abs = (path: string) => new URL(path, c.req.url).toString()
@@ -113,7 +113,7 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
         {perms.view_net_rates && (p.b2b_valid_from || p.b2b_valid_to || p.b2b_terms) && <div class="internal">📄 B2B contract{p.b2b_valid_from || p.b2b_valid_to ? ` valid ${p.b2b_valid_from ? fmtDate(p.b2b_valid_from) : '…'} – ${p.b2b_valid_to ? fmtDate(p.b2b_valid_to) : '…'}` : ''}{p.b2b_terms ? <div class="pre-line">{p.b2b_terms}</div> : null}</div>}
         {p.cancellation_policy && <div>↩ Cancellation: {p.cancellation_policy}</div>}
       </div>
-      {rooms.length === 0 && <Empty>No room categories yet. {perms.manage_properties && <a href={`/admin/properties/${p.id}#rooms`}>Add room categories</a>}</Empty>}
+      {rooms.length === 0 && <Empty>No room categories yet. {perms.manage_properties && <a href={`/admin/properties/${p.id}/setup/2`}>Add room categories</a>}</Empty>}
       {rooms.map((r) => {
         const rp = photos.filter((m) => m.room_id === r.id)
         const url = abs(`/stay/${p.slug}/room/${r.id}`)
@@ -127,7 +127,7 @@ staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
             </div>
             {rp.length > 0
               ? <div class="share-thumbs" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, t)} data-full><img src={mediaUrl(m.r2_key, 300, t)} alt={m.caption ?? r.name} loading="lazy" /></a>)}</div>
-              : <p class="muted small">No photos for this room category yet.{perms.manage_properties && <> <a href={`/admin/properties/${p.id}#media`}>Add room photos</a></>}</p>}
+              : <p class="muted small">No photos for this room category yet.{perms.manage_properties && <> <a href={`/admin/properties/${p.id}/setup/6`}>Add room photos</a></>}</p>}
             <div class="grid grid-2">
               <div>
                 <h3 class="small">Prices per night</h3>

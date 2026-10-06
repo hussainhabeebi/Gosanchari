@@ -52,30 +52,55 @@ export const PHOTO_CATEGORIES: Record<string, string> = {
 export const COVER_ORDER = ['facade', 'common', 'pool', 'view', 'room', 'restaurant', 'activities', 'other']
 
 export const ROOM_AMENITIES: Record<string, string> = {
-  ac: 'Air conditioning',
-  fan: 'Ceiling fan',
-  tv: 'TV',
+  ac: 'AC',
+  non_ac: 'Non AC',
   wifi: 'Wi-Fi',
-  kettle: 'Kettle / tea & coffee',
-  minibar: 'Minibar',
-  fridge: 'Fridge',
-  balcony: 'Balcony',
-  sitout: 'Private sit-out',
-  private_pool: 'Private pool',
-  jacuzzi: 'Jacuzzi / bathtub',
-  hot_water: 'Hot water',
-  safe: 'In-room safe',
-  hairdryer: 'Hair dryer',
-  work_desk: 'Work desk',
+  tv: 'TV',
+  king_bed: 'King size bed',
+  queen_bed: 'Queen size bed',
+  extra_bed: 'Extra bed',
+  study_table: 'Study table',
   wardrobe: 'Wardrobe',
+  sofa: 'Sofa',
+  balcony: 'Balcony',
+  mountain_view: 'Mountain view',
+  valley_view: 'Valley view',
+  pool_view: 'Pool view',
+  garden_view: 'Garden view',
+  private_pool: 'Private pool',
+  jacuzzi: 'Jacuzzi',
+  bathtub: 'Bathtub',
+  hot_water: 'Hot water',
+  fridge: 'Mini fridge',
+  coffee_maker: 'Coffee maker',
+  kettle: 'Kettle',
+  heater: 'Room heater',
+  safe: 'In-room safe',
+  intercom: 'Intercom',
+  living_area: 'Living area',
+  dining_area: 'Dining area',
+  fireplace: 'Private fireplace',
+  work_desk: 'Work desk',
+  hairdryer: 'Hair dryer',
+  // older keys still used by existing rooms
+  fan: 'Ceiling fan',
+  minibar: 'Minibar',
+  sitout: 'Private sit-out',
   toiletries: 'Toiletries',
   slippers: 'Slippers & bathrobe',
-  intercom: 'Intercom',
   room_service: 'Room service',
-  sofa: 'Sofa / seating',
   kitchenette: 'Kitchenette',
   mosquito_net: 'Mosquito net',
-  heater: 'Room heater',
+}
+/** Amenities shown in the wizard (the list on the Room Categories screen). */
+export const WIZARD_AMENITIES = ['ac', 'non_ac', 'wifi', 'tv', 'king_bed', 'queen_bed', 'extra_bed', 'study_table', 'wardrobe', 'sofa', 'balcony', 'mountain_view', 'valley_view', 'pool_view', 'garden_view', 'private_pool', 'jacuzzi', 'bathtub', 'hot_water', 'fridge', 'coffee_maker', 'kettle', 'heater', 'safe', 'intercom', 'living_area', 'dining_area', 'fireplace', 'work_desk', 'hairdryer']
+/** Facilities shown in the wizard (the list on the Property Details screen). */
+export const WIZARD_FACILITIES = ['pool', 'wifi', 'restaurant', 'parking', 'nature_walk', 'bonfire', 'indoor_games', 'outdoor_games', 'spa', 'kids_play', 'trekking', 'jeep_safari', 'campfire', 'jacuzzi', 'gym', 'conference', 'banquet', 'valley_view', 'tea_view', 'pet_friendly']
+/** Activities that can carry a charge (Additional Charges step). */
+export const ACTIVITIES: Record<string, string> = {
+  campfire: 'Campfire', bonfire: 'Bonfire', trekking: 'Trekking', jeep_safari: 'Jeep safari', boating: 'Boating', kayaking: 'Kayaking',
+  plantation_tour: 'Plantation tour', cycling: 'Cycling', fishing: 'Fishing', spa: 'Spa / massage', ayurveda: 'Ayurveda treatment',
+  candle_dinner: 'Candle-light dinner', cultural_show: 'Cultural show', bird_watching: 'Bird watching', zipline: 'Zip line', bbq: 'Barbecue',
 }
 
 /** Suggested room category names (staff can still type their own). */
@@ -224,6 +249,8 @@ export interface Addon {
   net?: number | null
   /** "stay" = once per stay (default), "night" = per night, "person" = per person */
   per?: 'stay' | 'night' | 'person'
+  /** Included free with the stay (shown as "complimentary"). */
+  complimentary?: boolean
 }
 export const ADDON_PER: Record<string, string> = { stay: 'per stay', night: 'per night', person: 'per person' }
 export const addons = (s: string | null | undefined) => parseJson<Addon[]>(s, []).filter((a) => a && a.name)

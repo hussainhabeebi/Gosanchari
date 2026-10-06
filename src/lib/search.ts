@@ -46,6 +46,15 @@ export const FACILITIES: Record<string, string> = {
   plantation_tour: 'Plantation tour',
   cycling: 'Bicycles',
   fishing: 'Fishing',
+  // Wizard list (as on the Add Property screens)
+  nature_walk: 'Nature walks',
+  outdoor_games: 'Outdoor games',
+  jeep_safari: 'Jeep safari',
+  jacuzzi: 'Jacuzzi',
+  banquet: 'Banquet hall',
+  valley_view: 'Valley view',
+  tea_view: 'Tea estate view',
+  pet_friendly: 'Pet friendly',
 }
 export const MEAL_PLANS: Record<string, string> = {
   EP: 'Room only',

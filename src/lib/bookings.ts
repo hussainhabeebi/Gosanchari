@@ -37,7 +37,7 @@ export async function findCoupon(env: Env, code: string | null | undefined): Pro
   return first<Coupon>(env, 'SELECT * FROM coupons WHERE code = ? COLLATE NOCASE', code.trim().toUpperCase())
 }
 
-export async function priceStay(env: Env, roomId: number, checkIn: string, checkOut: string, roomsCount: number, couponCode?: string | null, guests?: { adults: number; children: number }): Promise<PriceResult> {
+export async function priceStay(env: Env, roomId: number, checkIn: string, checkOut: string, roomsCount: number, couponCode?: string | null, guests?: { adults: number; children: number; mealPlan?: string | null }): Promise<PriceResult> {
   const pr = await loadPricing(env, roomId)
   if (!pr) return { nights: 0, roomsCount, lines: [], extraGuests: null, roomCharges: 0, subtotal: 0, discount: 0, discountLabel: null, extraCharges: 0, taxable: 0, taxRate: 0, taxes: 0, total: 0, minNights: 1, errors: ['Room not found'] }
   const s = await getSettings(env)
@@ -59,7 +59,7 @@ export async function createBooking(env: Env, b: NewBooking): Promise<{ id: numb
   if (b.fixedPrice) {
     price = { ...b.fixedPrice, nights: Math.round((Date.parse(b.checkOut) - Date.parse(b.checkIn)) / 86400000) }
   } else {
-    const p = await priceStay(env, b.roomId, b.checkIn, b.checkOut, b.roomsCount, b.couponCode, { adults: b.adults, children: b.children })
+    const p = await priceStay(env, b.roomId, b.checkIn, b.checkOut, b.roomsCount, b.couponCode, { adults: b.adults, children: b.children, mealPlan: b.mealPlan })
     if (p.errors.length) return { error: p.errors[0] }
     price = p
   }

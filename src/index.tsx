@@ -15,9 +15,11 @@ import { staffRoutes } from './routes/staff'
 import { opsRoutes } from './routes/staff-ops'
 import { staffRoomRoutes } from './routes/staff-rooms'
 import { rateSheetRoutes } from './routes/admin-ratesheet'
+import { applyTaxonomy } from './lib/taxonomy'
 import { assistantRoutes } from './routes/staff-assistant'
 import { adminRoutes } from './routes/admin'
 import { propertyEditorRoutes } from './routes/admin-properties'
+import { wizardRoutes } from './routes/admin-wizard'
 import { admin2Routes } from './routes/admin2'
 import { webhookRoutes } from './routes/webhooks'
 import { handleQueue } from './jobs/queue'
@@ -44,6 +46,11 @@ const security = secureHeaders({
   crossOriginEmbedderPolicy: false,
 })
 // WebSocket upgrade responses (101) have immutable headers, so skip them.
+// Lists extended by the team (categories, facilities, amenities…) are merged in before each request.
+app.use('*', async (c, next) => {
+  if (!c.req.path.startsWith('/app.') && !c.req.path.startsWith('/brand/')) await applyTaxonomy(c.env).catch(() => {})
+  await next()
+})
 app.use('*', (c, next) => (c.req.path === '/chat/ws' ? next() : security(c, next)))
 // Form posts must come from our own pages (webhooks use JSON and verify signatures).
 app.use('*', csrf())
@@ -81,6 +88,7 @@ app.route('/', opsRoutes)
 app.route('/', staffRoomRoutes)
 app.route('/', rateSheetRoutes)
 app.route('/', assistantRoutes)
+app.route('/', wizardRoutes)
 app.route('/', propertyEditorRoutes)
 app.route('/', adminRoutes)
 app.route('/', admin2Routes)

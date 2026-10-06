@@ -205,3 +205,15 @@ describe('guests included in the rate and extra-guest charges', () => {
     expect(a[0].extra).toBe(2000)
   })
 })
+
+describe('rates per meal plan (Add Property wizard)', () => {
+  const room: RoomRates = { id: 1, property_id: 1, base_rate: 5500, weekend_rate: 6500, min_nights: 1, capacity: 4, units: 6, weekend_nights: '5,6,0', rate_meal_plan: 'CP' }
+  const row = (plan: string, rate: number, we: number): SeasonRate => ({ property_id: 1, room_id: 1, name: 'Season', start_date: '2026-10-01', end_date: '2027-05-31', rate, weekend_rate: we, pct_adjust: null, min_nights: null, kind: 'season', meal_plan: plan })
+  const rows = [row('CP', 5500, 6500), row('MAP', 7000, 8000)]
+  it('uses the rate for the meal plan asked for, CP by default', () => {
+    // 2026-11-02 is a Monday night
+    expect(calculatePrice({ room, seasons: rows, checkIn: '2026-11-02', checkOut: '2026-11-03' }).lines[0].rate).toBe(5500)
+    expect(calculatePrice({ room, seasons: rows, checkIn: '2026-11-02', checkOut: '2026-11-03', mealPlan: 'MAP' }).lines[0].rate).toBe(7000)
+    expect(calculatePrice({ room, seasons: rows, checkIn: '2026-11-06', checkOut: '2026-11-07', mealPlan: 'MAP' }).lines[0].rate).toBe(8000)
+  })
+})

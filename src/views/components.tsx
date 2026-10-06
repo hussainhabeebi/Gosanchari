@@ -1,4 +1,5 @@
 import { STAY_TYPES } from '../lib/catalog'
+import { CUSTOM_ICONS } from '../lib/taxonomy'
 import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
 import { FACILITIES } from '../lib/search'
@@ -17,7 +18,14 @@ export const FACILITY_ICONS: Record<string, string> = {
   // room amenities
   fan: '🌀', kettle: '☕', minibar: '🍾', fridge: '🧊', balcony: '🌅', sitout: '🪑', private_pool: '🏊', jacuzzi: '🛁', safe: '🔐', hairdryer: '💨',
   work_desk: '💻', wardrobe: '🚪', toiletries: '🧴', slippers: '🥿', intercom: '📞', sofa: '🛋', kitchenette: '🍳', mosquito_net: '🦟', heater: '♨️',
+  // wizard lists
+  nature_walk: '🌿', outdoor_games: '⚽', jeep_safari: '🚙', banquet: '🥂', valley_view: '🏞', tea_view: '🍃', pet_friendly: '🐾',
+  non_ac: '🌀', king_bed: '🛏', queen_bed: '🛏', extra_bed: '➕', study_table: '📚', mountain_view: '⛰', pool_view: '🏊', garden_view: '🌷',
+  bathtub: '🛁', coffee_maker: '☕', living_area: '🛋', dining_area: '🍽', fireplace: '🔥', kayaking: '🛶', candle_dinner: '🕯', cultural_show: '💃',
+  bird_watching: '🐦', zipline: '🧗',
 }
+/** Icon for a facility / amenity / activity key, including ones the team added. */
+export const iconFor = (k: string) => FACILITY_ICONS[k] ?? CUSTOM_ICONS[k] ?? '✦'
 
 export const Stars: FC<{ value: number; count?: number }> = ({ value, count }) =>
   value > 0 ? (

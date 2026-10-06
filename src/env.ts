@@ -3,6 +3,7 @@ import type { Role } from './lib/permissions'
 export type JobMessage =
   | { type: 'enquiry_ai'; enquiryId: number }
   | { type: 'embed_property'; propertyId: number }
+  | { type: 'enrich_property'; propertyId: number }
   | { type: 'photo_tags'; photoId: number }
   | { type: 'review_check'; reviewId: number }
   | { type: 'transcribe'; messageId: number }

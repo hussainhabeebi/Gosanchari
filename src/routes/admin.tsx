@@ -119,7 +119,7 @@ adminRoutes.get('/admin/properties', requirePerm('manage_properties'), async (c)
   const dests = await destinations(c.env)
   return page(c, { title: 'Properties', area: 'admin', active: 'properties' }, (
     <div class="stack-lg">
-      <div class="row-between"><h1>Properties</h1><a class="btn" href="/admin/properties/new">+ Add property</a></div>
+      <div class="row-between"><h1>Properties</h1><a class="btn btn-go" href="/admin/properties/new">+ Add New Property</a></div>
       <form method="get" class="row filters-inline wrap-row">
         <input name="q" value={q} placeholder="Search name" />
         <Select name="status" value={status} options={[['', 'Any status'], ['live', 'Live'], ['hidden', 'Hidden'], ['draft', 'Draft']]} />
@@ -130,11 +130,12 @@ adminRoutes.get('/admin/properties', requirePerm('manage_properties'), async (c)
         {rows.map((p) => (
           <tr>
             <td><img class="thumb" src={mediaUrl(p.photo, 120)} alt="" /></td>
-            <td><a href={`/admin/properties/${p.id}`}><strong>{p.name}</strong></a>{p.featured ? <span class="pill pill-accepted">featured</span> : null}</td>
+            <td><a href={`/admin/properties/${p.id}/setup/1`}><strong>{p.name}</strong></a>{p.featured ? <span class="pill pill-accepted">featured</span> : null}</td>
             <td>{p.destination}</td><td>{stayTypeLabel(p)}</td><td><Pill s={p.status} /></td>
             <td>★ {p.rating_avg.toFixed(1)} ({p.rating_count})</td><td>{p.bookings}</td>
             <td class="nowrap">
-              <a class="btn btn-sm" href={`/admin/properties/${p.id}`}>Edit</a>
+              <a class="btn btn-sm" href={`/admin/properties/${p.id}/setup/1`}>Edit</a>
+              <a class="btn btn-sm btn-outline" href={`/admin/properties/${p.id}`} title="All fields, rate sheet import, B2B contract">Advanced</a>
               <a class="btn btn-sm btn-outline" href={`/stay/${p.slug}`} target="_blank">View</a>
               <form method="post" action={`/admin/properties/${p.id}/status`} class="inline"><input type="hidden" name="status" value={p.status === 'live' ? 'hidden' : 'live'} /><button class="btn btn-sm btn-outline">{p.status === 'live' ? 'Hide' : 'Publish'}</button></form>
               <form method="post" action={`/admin/properties/${p.id}/duplicate`} class="inline"><button class="btn btn-sm btn-outline">Duplicate</button></form>

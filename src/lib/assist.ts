@@ -8,7 +8,8 @@ import { propertyDoc, semanticScores, cardsByIds } from './properties'
 import { getContent, getSettings } from './settings'
 import { guardSql, schemaForPrompt } from './sqlguard'
 import type { EnquiryRow, MessageRow, PropertyCard, PropertyRow, QuotationRow, QuoteOptionRow, ReviewRow } from './types'
-import { fmtDate, money, nightsBetween, sha256Hex, todayIST } from './util'
+import { fmtDate, money, nightsBetween, parseJson, sha256Hex, todayIST } from './util'
+import { STAY_TYPES } from './catalog'
 import { roomAvailability } from './db'
 import { roomsNeeded } from './pricing'
 
@@ -450,4 +451,35 @@ export async function askAi(env: Env, question: string): Promise<AskAiResult> {
   const result: AskAiResult = { question, sql: sqlText, columns, rows, explanation, chart }
   await env.KV.put(key, JSON.stringify(result), { expirationTtl: 3600 })
   return result
+}
+
+/**
+ * After the wizard's first step: AI fills in what the data-entry team didn't type — a description (English and
+ * Malayalam), how to reach, best-known nearby attractions — only where those fields are still empty, and notes it in
+ * the internal remarks so staff know to check. Facts come from the name, place, category and highlights given.
+ */
+export async function enrichProperty(env: Env, id: number): Promise<void> {
+  const p = await first<PropertyRow>(env, 'SELECT * FROM properties WHERE id = ?', id)
+  if (!p) return
+  const highlights = parseJson<string[]>(p.highlights, []).join('; ')
+  const set: Record<string, string> = {}
+  if (!p.description) {
+    const d = await writeDescription(env, p.name, STAY_TYPES[p.stay_type ?? p.type] ?? p.type, p.destination, highlights || p.name)
+    if (d?.en) { set.description = d.en; if (d.ml) set.description_ml = d.ml }
+  }
+  if (!p.how_to_reach || p.nearby === '[]' || !p.nearby) {
+    const r = await aiJson<{ how_to_reach?: string; nearby?: { name: string; kind?: string; km?: number; time?: string }[] }>(env, 'description_writer', {
+      size: 'large', maxTokens: 700,
+      prompt: `A holiday property "${p.name}" is in ${p.destination}, Kerala, India. Reply with JSON {"how_to_reach": "2 short sentences: nearest railway station and airport with approximate road distance/time", "nearby": [{"name": "well-known attraction or useful place near ${p.destination}", "kind": "attraction|railway|airport|bus|hospital|waterfall|viewpoint|beach", "km": approximate km from ${p.destination} town, "time": "approx. drive time"}]} with 5-8 nearby items. Use only well-known real places; if unsure, leave the list shorter. JSON only.`,
+    })
+    if (r?.how_to_reach && !p.how_to_reach) set.how_to_reach = String(r.how_to_reach).slice(0, 600)
+    if (Array.isArray(r?.nearby) && (!p.nearby || p.nearby === '[]')) {
+      const list = r!.nearby.filter((x) => x && x.name).slice(0, 8).map((x) => ({ name: String(x.name).slice(0, 80), kind: String(x.kind ?? 'attraction').slice(0, 20), km: Number(x.km) || 0, ...(x.time ? { time: String(x.time).slice(0, 30) } : {}) }))
+      if (list.length) set.nearby = JSON.stringify(list)
+    }
+  }
+  const cols = Object.keys(set)
+  if (!cols.length) return
+  const note = `AI filled ${cols.filter((c) => c !== 'description_ml').map((c) => c.replace('_', ' ')).join(', ')} — please check.`
+  await run(env, `UPDATE properties SET ${cols.map((k) => `${k} = ?`).join(', ')}, internal_notes = TRIM(COALESCE(internal_notes, '') || char(10) || ?) WHERE id = ?`, ...Object.values(set), note, id)
 }

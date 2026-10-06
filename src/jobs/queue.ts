@@ -1,7 +1,7 @@
 // Background jobs (Cloudflare Queues): anything the user does not need to wait for.
 
 import type { Env, JobMessage } from '../env'
-import { buildQuoteExplainer, checkReview, extractGuestPrefs, followupDraft, processEnquiryAI, refreshReviewSummary, reviewReplyDraft } from '../lib/assist'
+import { buildQuoteExplainer, checkReview, enrichProperty, extractGuestPrefs, followupDraft, processEnquiryAI, refreshReviewSummary, reviewReplyDraft } from '../lib/assist'
 import { aiImageTags, aiTranscribe, detectLanguage } from '../lib/ai'
 import { first, notifyStaff, run } from '../lib/db'
 import { sendWhatsApp } from '../lib/integrations'
@@ -16,6 +16,8 @@ export async function runJob(env: Env, job: JobMessage): Promise<void> {
       return processEnquiryAI(env, job.enquiryId)
     case 'embed_property':
       return embedProperty(env, job.propertyId)
+    case 'enrich_property':
+      return enrichProperty(env, job.propertyId)
     case 'photo_tags': {
       const ph = await first<{ id: number; r2_key: string }>(env, 'SELECT id, r2_key FROM property_photos WHERE id = ?', job.photoId)
       if (!ph || ph.r2_key.startsWith('http')) return

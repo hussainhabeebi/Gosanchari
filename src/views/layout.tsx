@@ -33,6 +33,7 @@ interface LayoutProps extends PageOpts {
   turnstileSiteKey: string
   siteUrl: string
   moodPhoto?: string | null
+  bell?: number
   children?: Child
 }
 
@@ -68,6 +69,111 @@ const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permiss
   { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
   { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
 ]
+
+type NavItem = { key: string; href: string; label: string; perm?: keyof Permissions }
+type NavGroup = { label: string; icon: string; items: NavItem[] }
+const ICO: Record<string, string> = {
+  dash: '<path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/>',
+  ai: '<path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
+  prop: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h3M13 7h3M8 11h3M13 11h3M10 21v-4h4v4"/>',
+  enq: '<path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
+  quote: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  book: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
+  people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2 .8 3.5 2.8 3.5 6"/>',
+  offer: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',
+  star: '<path d="m12 3 2.8 5.8 6.2.9-4.5 4.4 1.1 6.2L12 17.4l-5.6 2.9 1.1-6.2L3 9.7l6.2-.9z"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
+}
+const ico = (k: string) => raw(`<svg class="ico" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICO[k] ?? ''}</svg>`)
+
+const NAV_GROUPS: NavGroup[] = [
+  { label: 'Dashboard', icon: 'dash', items: [{ key: 'admin', href: '/admin', label: 'Overview', perm: 'view_reports' }, { key: 'dashboard', href: '/staff', label: 'My day' }] },
+  { label: 'AI assistant', icon: 'ai', items: [{ key: 'assistant', href: '/staff/assistant', label: 'AI assistant', perm: 'manage_quotes' }] },
+  { label: 'Properties', icon: 'prop', items: [
+    { key: 'properties', href: '/admin/properties', label: 'All Properties', perm: 'manage_properties' },
+    { key: 'prop_new', href: '/admin/properties/new', label: 'Add New Property', perm: 'manage_properties' },
+    { key: 'prop_cats', href: '/admin/lists/property_type', label: 'Categories', perm: 'manage_properties' },
+    { key: 'prop_facilities', href: '/admin/lists/facility', label: 'Facilities & Activities', perm: 'manage_properties' },
+    { key: 'rates', href: '/admin/rates', label: 'Rates & availability', perm: 'manage_rates' },
+    { key: 'rooms', href: '/staff/rooms', label: 'Rooms & photos' },
+    { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
+  ] },
+  { label: 'Enquiries', icon: 'enq', items: [
+    { key: 'inbox', href: '/staff/enquiries', label: 'My enquiries', perm: 'manage_enquiries' },
+    { key: 'all-enquiries', href: '/admin/enquiries', label: 'All enquiries', perm: 'view_all_enquiries' },
+    { key: 'tasks', href: '/staff/tasks', label: 'Follow-ups', perm: 'manage_enquiries' },
+  ] },
+  { label: 'Quotations', icon: 'quote', items: [
+    { key: 'quotes', href: '/staff/quotes', label: 'My quotations', perm: 'manage_quotes' },
+    { key: 'all-quotes', href: '/admin/quotes', label: 'All quotations', perm: 'approve_discounts' },
+  ] },
+  { label: 'Bookings', icon: 'book', items: [
+    { key: 'bookings', href: '/staff/bookings', label: 'My bookings', perm: 'manage_bookings' },
+    { key: 'all-bookings', href: '/admin/bookings', label: 'All bookings', perm: 'approve_cancellations' },
+    { key: 'calendar', href: '/staff/calendar', label: 'Availability', perm: 'manage_bookings' },
+    { key: 'payments', href: '/admin/payments', label: 'Payments & refunds', perm: 'manage_payments' },
+  ] },
+  { label: 'Customers', icon: 'people', items: [
+    { key: 'guests', href: '/staff/guests', label: 'Guests', perm: 'manage_enquiries' },
+    { key: 'all-guests', href: '/admin/guests', label: 'All guests', perm: 'manage_guests' },
+  ] },
+  { label: 'Offers & Packages', icon: 'offer', items: [{ key: 'offers', href: '/admin/offers', label: 'Offers & coupons', perm: 'manage_offers' }] },
+  { label: 'Reviews', icon: 'star', items: [{ key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' }] },
+  { label: 'Reports', icon: 'chart', items: [
+    { key: 'reports', href: '/admin/reports', label: 'Reports', perm: 'view_reports' },
+    { key: 'ask', href: '/admin/ask', label: 'Ask AI', perm: 'ask_ai' },
+  ] },
+  { label: 'Website Settings', icon: 'gear', items: [
+    { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
+    { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
+    { key: 'staff', href: '/admin/staff', label: 'Staff & roles', perm: 'manage_staff' },
+    { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
+  ] },
+  { label: 'My profile', icon: 'user', items: [{ key: 'profile', href: '/staff/profile', label: 'My profile' }] },
+]
+
+const AppSide: FC<{ active?: string; perms: Permissions | null; settings: Settings }> = ({ active, perms, settings }) => (
+  <aside class="app-side">
+    <a href="/" class="side-logo"><img src="/brand/logo-wide-light.webp" alt={settings.business.name} width="150" height="40" /><span>Travel more, worry less</span></a>
+    <input type="checkbox" id="side-toggle" class="nav-toggle" />
+    <label for="side-toggle" class="side-burger">☰ Menu</label>
+    <nav class="side-nav">
+      {NAV_GROUPS.map((g) => {
+        const items = g.items.filter((i) => !i.perm || perms?.[i.perm])
+        if (!items.length) return null
+        const on = items.some((i) => i.key === active)
+        if (items.length === 1) return <a href={items[0].href} class={`side-link ${on ? 'active' : ''}`}>{ico(g.icon)}<span>{g.label}</span></a>
+        return (
+          <details class="side-group" open={on}>
+            <summary class={`side-link ${on ? 'active' : ''}`}>{ico(g.icon)}<span>{g.label}</span></summary>
+            <div class="side-sub">{items.map((i) => <a href={i.href} class={i.key === active ? 'active' : ''}>{i.label}</a>)}</div>
+          </details>
+        )
+      })}
+    </nav>
+  </aside>
+)
+
+const AppTop: FC<{ user: SessionUser; perms: Permissions | null; bell: number }> = ({ user, perms, bell }) => (
+  <header class="app-top">
+    <form class="app-search" method="get" action="/admin/search" role="search">
+      {ico('quote')}<input name="q" placeholder="Search properties, bookings, or customers..." aria-label="Search" />
+    </form>
+    <div class="app-top-right">
+      {perms?.manage_enquiries && <a href="/staff/enquiries?status=new" class="bell" aria-label={`${bell} new enquiries`}>{raw('<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>')}{bell > 0 && <span class="bell-dot">{bell > 99 ? '99+' : bell}</span>}</a>}
+      <details class="nav-drop me">
+        <summary><span class="avatar">{(user.name || 'A').trim().slice(0, 1).toUpperCase()}</span><span class="me-txt"><strong>{user.name || 'Account'}</strong><small>{user.role === 'admin' ? 'Admin' : user.role}</small></span></summary>
+        <div class="drop-panel">
+          <a href="/staff/profile">My profile</a>
+          <a href="/" target="_blank">View website</a>
+          <form method="post" action="/logout"><button class="linklike">Log out</button></form>
+        </div>
+      </details>
+    </div>
+  </header>
+)
 
 const GUEST_NAV = [
   { key: 'trips', href: '/my', label: 'My trips' },
@@ -232,8 +338,20 @@ export const Layout: FC<LayoutProps> = (p) => {
         </head>
         <body class={`area-${area}${p.hero && !dash ? ` has-hero hero-text-${p.moodPhoto ? 'dark' : MOODS[p.hero.mood].text}` : ''}`}>
           <a class="skip" href="#main">Skip to content</a>
-          <TopBar user={p.user} settings={p.settings} nav={p.nav} />
-          {dash ? (
+          {!(dash && area !== 'guest') && <TopBar user={p.user} settings={p.settings} nav={p.nav} />}
+          {dash && area !== 'guest' ? (
+            <div class="app-shell">
+              <AppSide active={p.active} perms={p.perms} settings={p.settings} />
+              <div class="app-main">
+                <AppTop user={p.user!} perms={p.perms} bell={p.bell ?? 0} />
+                <main id="main" class="dash-main">
+                  {p.hero && <PageHero {...p.hero} photo={p.moodPhoto} size="strip">{p.hero.slot}</PageHero>}
+                  <Flash {...p.flash} />
+                  {p.children}
+                </main>
+              </div>
+            </div>
+          ) : dash ? (
             <div class="dash">
               <SideNav area={area} active={p.active} perms={p.perms} user={p.user!} />
               <main id="main" class="dash-main">
@@ -277,8 +395,12 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
   const flash = { ok: c.req.query('ok')?.slice(0, 200), err: c.req.query('err')?.slice(0, 200) }
   const photoKey = opts.hero ? (await getContent(c.env)).mood_photos?.[opts.hero.mood] : null
   const moodPhoto = photoKey ? mediaUrl(photoKey, 1800, settings.images_transform) : null
+  const area = opts.area ?? 'public'
+  const bell = perms?.manage_enquiries && (area === 'staff' || area === 'admin')
+    ? (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM enquiries WHERE status = 'new'").first<{ n: number }>().catch(() => null))?.n ?? 0
+    : 0
   return c.html(
-    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto}>
+    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
       {body}
     </Layout>,
     status as 200,

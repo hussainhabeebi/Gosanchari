@@ -150,20 +150,20 @@ async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   return q
 }
 
-async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; extra_charges: number; guest_rate?: number | null; adults?: number; children?: number }) {
+async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; extra_charges: number; guest_rate?: number | null; adults?: number; children?: number; meal_plan?: string | null }) {
   const pr = await loadPricing(c.env, o.room_id)
   if (!pr) return null
   const s = await getSettings(c.env)
   // A guest rate set by staff replaces the website price (weekday, weekend and seasons) for every night.
   const room = o.guest_rate ? { ...pr.room, base_rate: o.guest_rate, weekend_rate: o.guest_rate } : pr.room
   const seasons = o.guest_rate ? [] : pr.seasons
-  return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount_pct, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0 })
+  return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount_pct, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0, mealPlan: o.meal_plan })
 }
 
 /** Staff rate benchmark for an option's room and dates (season staff rates apply). */
-async function optionStaffRate(c: Context<AppEnv>, o: Pick<QuoteOptionRow, 'room_id' | 'check_in' | 'check_out'>) {
+async function optionStaffRate(c: Context<AppEnv>, o: Pick<QuoteOptionRow, 'room_id' | 'check_in' | 'check_out' | 'meal_plan'>) {
   const pr = await loadPricing(c.env, o.room_id)
-  return pr ? staffRateForStay(pr.room, pr.seasons, o.check_in, o.check_out) : null
+  return pr ? staffRateForStay(pr.room, pr.seasons, o.check_in, o.check_out, o.meal_plan) : null
 }
 
 /** Per-night price the guest actually pays for the room (after discount, before extras and GST). */
@@ -242,7 +242,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
     o.staff_rate = await optionStaffRate(c, o)
     if (perms.view_net_rates) {
       const pr = await loadPricing(c.env, o.room_id)
-      netStay.set(o.id, pr ? netRateForStay(pr.room, pr.seasons, o.check_in, o.check_out) : null)
+      netStay.set(o.id, pr ? netRateForStay(pr.room, pr.seasons, o.check_in, o.check_out, o.meal_plan) : null)
     }
   }
   const weekendOf = new Map((await all<{ id: number; weekend_nights: string }>(c.env, `SELECT id, weekend_nights FROM properties WHERE id IN (${placeholders(Math.max(1, options.length))})`, ...(options.length ? options.map((o) => o.property_id) : [0]))).map((x) => [x.id, x.weekend_nights]))
@@ -419,12 +419,13 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
         room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
         discount_pct: disc, extra_charges: Math.max(0, int(f[`extra_${oid}`])) + addonTotal, guest_rate: grate,
         adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
+        meal_plan: f[`meal_${oid}`] || null,
       }
       const p = await priceOption(c, next)
       if (!p) continue
       // Approval is needed for a discount above the limit or a price below the staff rate; any price change asks again.
       const pr = await loadPricing(c.env, next.room_id)
-      const staffRate = pr ? staffRateForStay(pr.room, pr.seasons, checkIn, checkOut) : null
+      const staffRate = pr ? staffRateForStay(pr.room, pr.seasons, checkIn, checkOut, f[`meal_${oid}`] || null) : null
       const needs = optionNeedsApproval({ ...next, subtotal: p.subtotal, discount: p.discount }, staffRate, perms.max_discount_pct)
       const changed = disc !== o.discount_pct || grate !== o.guest_rate || next.room_id !== o.room_id
       const approved = !needs ? null : !changed ? o.discount_approved_by : perms.approve_discounts ? u.id : null
