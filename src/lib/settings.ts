@@ -163,7 +163,9 @@ export async function saveSetting(env: Env, key: keyof Settings, value: unknown)
 export interface Faq { q: string; a: string }
 export interface Banner { title: string; text: string; link: string; image?: string }
 export interface Content {
-  hero: { title: string; subtitle: string; image: string }
+  hero: { title: string; subtitle: string; image: string; script?: string; kicker?: string }
+  /** Photo per "mood" hero (replaces the drawn scene), R2 keys or URLs. */
+  mood_photos: Partial<Record<string, string>>
   banners: Banner[]
   why_us: { title: string; text: string; icon: string }[]
   faqs: Faq[]
@@ -174,10 +176,13 @@ export interface Content {
 
 export const DEFAULT_CONTENT: Content = {
   hero: {
-    title: 'Find your stay in Kerala',
-    subtitle: 'Homestays, villas, resorts and houseboats — checked by our team. Tell us what you need and we will send you a quote.',
-    image: '/demo/backwater.svg',
+    title: 'Discover Kerala,',
+    script: 'Your Way',
+    kicker: 'Explore · Stay · Unwind',
+    subtitle: 'Handpicked stays, scenic destinations and unforgettable experiences across Kerala.',
+    image: '',
   },
+  mood_photos: {},
   banners: [],
   why_us: [
     { icon: '✔', title: 'Personally checked stays', text: 'Our team visits every property before it goes live.' },

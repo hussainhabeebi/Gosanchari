@@ -15,6 +15,8 @@ import type { ReviewRow } from '../lib/types'
 import { addDays, fmtDate, fmtDateTime, int, isDate, money, normalizePhone, parseJson, slugify, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
 import { destinations } from '../lib/properties'
+import { MOODS, sceneSvg, type Mood } from '../views/moods'
+import { raw } from 'hono/html'
 import { geminiKey, maskKey, setGeminiKey, testGeminiKey } from '../lib/gemini'
 
 export const admin2Routes = new Hono<AppEnv>()
@@ -336,12 +338,33 @@ admin2Routes.get('/admin/content', requirePerm('manage_content'), async (c) => {
   return page(c, { title: 'Website content', area: 'admin', active: 'content' }, (
     <div class="stack-lg">
       <h1>Website content</h1>
+      <section class="card stack" id="moods">
+        <h2>Page moods — the solo traveller</h2>
+        <p class="muted small">Each page opens with the same solo traveller in a different mood. They are drawn by default; upload a photo (wide, at least 1600 px, the traveller on the left) to use it instead.</p>
+        <div class="mood-admin">
+          {(Object.keys(MOODS) as Mood[]).map((m) => (
+            <form method="post" action={`/admin/content/mood/${m}`} enctype="multipart/form-data" class="mood-card">
+              <div class="mood-thumb">{content.mood_photos[m] ? <img src={mediaUrl(content.mood_photos[m]!, 600)} alt="" /> : raw(sceneSvg(m))}</div>
+              <strong class="small">{MOODS[m].label}</strong>
+              <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" />
+              <div class="row wrap-row">
+                <button class="btn btn-sm">Upload</button>
+                {content.mood_photos[m] && <button class="btn btn-sm btn-outline" name="remove" value="1">Use drawing</button>}
+              </div>
+            </form>
+          ))}
+        </div>
+      </section>
       <form method="post" action="/admin/content" class="stack">
         <section class="card stack">
           <h2>Home page banner</h2>
-          <Field label="Title"><input name="hero_title" value={content.hero.title} /></Field>
+          <div class="row wrap-row">
+            <Field label="Small line above"><input name="hero_kicker" value={content.hero.kicker ?? ''} placeholder="Explore · Stay · Unwind" /></Field>
+            <Field label="Title" class="grow"><input name="hero_title" value={content.hero.title} /></Field>
+            <Field label="Handwritten words"><input name="hero_script" value={content.hero.script ?? ''} placeholder="Your Way" /></Field>
+          </div>
           <Field label="Subtitle"><input name="hero_subtitle" value={content.hero.subtitle} /></Field>
-          <Field label="Background image URL"><input name="hero_image" value={content.hero.image} /></Field>
+          <input type="hidden" name="hero_image" value={content.hero.image} />
           <Field label="Offer banners (one per line: Title | text | link)"><textarea name="banners" rows={3}>{content.banners.map((b) => `${b.title} | ${b.text} | ${b.link}`).join('\n')}</textarea></Field>
           <Field label="Why book with us (one per line: icon | title | text)"><textarea name="why_us" rows={4}>{content.why_us.map((w) => `${w.icon} | ${w.title} | ${w.text}`).join('\n')}</textarea></Field>
         </section>
@@ -397,7 +420,7 @@ admin2Routes.post('/admin/content', requirePerm('manage_content'), async (c) => 
     else if (cur) cur.a += (cur.a ? ' ' : '') + l
   }
   if (cur) faqs.push(cur)
-  await saveContent(c.env, 'hero', { title: str(f.hero_title, 120), subtitle: str(f.hero_subtitle, 240), image: str(f.hero_image, 500) })
+  await saveContent(c.env, 'hero', { title: str(f.hero_title, 120), script: str(f.hero_script, 40), kicker: str(f.hero_kicker, 60), subtitle: str(f.hero_subtitle, 240), image: str(f.hero_image, 500) })
   await saveContent(c.env, 'banners', lines(f.banners).map((l) => { const [title, text, link] = l.split('|').map((x) => x.trim()); return { title, text: text ?? '', link: link || '/offers' } }))
   await saveContent(c.env, 'why_us', lines(f.why_us).map((l) => { const [icon, title, text] = l.split('|').map((x) => x.trim()); return { icon, title, text: text ?? '' } }))
   await saveContent(c.env, 'faqs', faqs.filter((x) => x.q && x.a))
@@ -633,4 +656,21 @@ admin2Routes.get('/admin/activity', requirePerm('view_activity'), async (c) => {
   ))
 })
 
-
+admin2Routes.post('/admin/content/mood/:mood', requirePerm('manage_content'), async (c) => {
+  const mood = c.req.param('mood') as Mood
+  if (!(mood in MOODS)) return c.notFound()
+  const body = await c.req.parseBody()
+  const content = await getContent(c.env)
+  const photos = { ...content.mood_photos }
+  const up = body.photo
+  if (body.remove) delete photos[mood]
+  else if (up instanceof File && up.size > 0) {
+    if (!/^image\/(jpeg|png|webp)$/.test(up.type) || up.size > 15 * 1024 * 1024) return redirectMsg(c, '/admin/content#moods', { err: 'Please upload a JPG, PNG or WebP photo under 15 MB.' })
+    const key = `site/moods/${mood}-${crypto.randomUUID()}.${up.type === 'image/jpeg' ? 'jpg' : up.type.split('/')[1]}`
+    await c.env.MEDIA.put(key, up.stream(), { httpMetadata: { contentType: up.type } })
+    photos[mood] = key
+  } else return redirectMsg(c, '/admin/content#moods', { err: 'Choose a photo first.' })
+  await saveContent(c.env, 'mood_photos', photos)
+  await logActivity(c.env, c.get('user')!.id, 'content.mood_photo', 'content', null, { mood, removed: !!body.remove })
+  return redirectMsg(c, '/admin/content#moods', { ok: body.remove ? 'Back to the drawn scene.' : 'Photo saved for this mood.' })
+})

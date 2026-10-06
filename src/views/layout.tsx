@@ -2,7 +2,9 @@ import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
 import type { Context } from 'hono'
 import type { AppEnv, SessionUser } from '../env'
-import { getSettings, type Settings } from '../lib/settings'
+import { getContent, getSettings, type Settings } from '../lib/settings'
+import { mediaUrl } from '../lib/integrations'
+import { MOODS, PageHero, type HeroProps } from './moods'
 import { isStaff, resolvePermissions, type Permissions } from '../lib/permissions'
 
 export type Area = 'public' | 'guest' | 'staff' | 'admin'
@@ -17,6 +19,10 @@ export interface PageOpts {
   noindex?: boolean
   image?: string
   canonical?: string
+  /** Mood hero at the top of the page (public / guest pages). */
+  hero?: Omit<HeroProps, 'photo' | 'children'> & { slot?: Child }
+  /** Which top-menu item to underline. */
+  nav?: 'home' | 'stays' | 'offers' | 'about' | 'contact'
 }
 
 interface LayoutProps extends PageOpts {
@@ -26,6 +32,7 @@ interface LayoutProps extends PageOpts {
   flash: { ok?: string; err?: string }
   turnstileSiteKey: string
   siteUrl: string
+  moodPhoto?: string | null
   children?: Child
 }
 
@@ -71,38 +78,56 @@ const GUEST_NAV = [
   { key: 'help', href: '/help', label: 'Help & chat' },
 ]
 
-const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, settings }) => (
-  <header class="topbar">
-    <div class="wrap topbar-in">
-      <a href="/" class="logo" aria-label={settings.business.name}>
-        <img src="/brand/logo-wide.webp" alt={settings.business.name} width="181" height="48" class="logo-img" />
-      </a>
-      <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
-      <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
-      <nav class="topnav">
-        <a href="/search">Stays</a>
-        <a href="/offers">Offers</a>
-        <a href="/about">About</a>
-        <a href="/contact">Contact</a>
-        {user ? (
-          <>
-            <a href={isStaff(user.role) ? (user.role === 'sales' ? '/staff' : '/admin') : '/my'} class="btn btn-sm btn-outline">
-              {isStaff(user.role) ? 'Dashboard' : 'My trips'}
-            </a>
-            <form method="post" action="/logout" class="inline">
-              <button class="linklike">Log out</button>
-            </form>
-          </>
-        ) : (
-          <a href="/login" class="btn btn-sm">Login / Sign up</a>
-        )}
-        <a class="btn btn-sm btn-wa" href={`https://wa.me/${settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">
-          WhatsApp
+const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: string }> = ({ user, settings, nav }) => {
+  const staff = !!user && isStaff(user.role)
+  const portal = user ? (staff ? (user.role === 'sales' ? '/staff' : '/admin') : '/my') : null
+  const link = (key: string, href: string, label: string) => <a href={href} class={nav === key ? 'active' : ''}>{label}</a>
+  return (
+    <header class="topbar">
+      <div class="wrap topbar-in">
+        <a href="/" class="logo" aria-label={settings.business.name}>
+          <img src="/brand/logo-wide.webp" alt={settings.business.name} width="181" height="48" class="logo-img" />
+          <span class="logo-tag">Travel more, worry less</span>
         </a>
-      </nav>
-    </div>
-  </header>
-)
+        <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
+        <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
+        <nav class="topnav">
+          {link('home', '/', 'Home')}
+          {link('stays', '/search', 'Stays')}
+          {link('offers', '/offers', 'Offers')}
+          {link('about', '/about', 'About Us')}
+          <details class={`nav-drop ${nav === 'contact' ? 'active' : ''}`}>
+            <summary>Contact</summary>
+            <div class="drop-panel">
+              <a href={`tel:${settings.business.phone.replace(/\s/g, '')}`}>📞 {settings.business.phone}</a>
+              <a href={`mailto:${settings.business.email}`}>✉️ {settings.business.email}</a>
+              <a href={`https://wa.me/${settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">💬 WhatsApp us</a>
+              <a href="/contact">Contact page →</a>
+            </div>
+          </details>
+          <details class="nav-drop portal">
+            <summary class="btn-portal">{user ? (staff ? 'Dashboard' : 'My portal') : 'Portal Login'}</summary>
+            <div class="drop-panel">
+              {user ? (
+                <>
+                  <a href={portal!}>{staff ? 'Open dashboard' : 'My trips'}</a>
+                  {!staff && <a href="/my/enquiries">Enquiries & quotes</a>}
+                  <form method="post" action="/logout"><button class="linklike">Log out</button></form>
+                </>
+              ) : (
+                <>
+                  <a href="/login">Guest login (phone OTP)</a>
+                  <a href="/login?tab=email">Staff / partner login</a>
+                  <a href="/signup">Create an account</a>
+                </>
+              )}
+            </div>
+          </details>
+        </nav>
+      </div>
+    </header>
+  )
+}
 
 const Footer: FC<{ settings: Settings }> = ({ settings }) => (
   <footer class="footer">
@@ -198,23 +223,28 @@ export const Layout: FC<LayoutProps> = (p) => {
           <meta name="theme-color" content="#0f5e57" />
           <link rel="icon" href="/favicon.png" type="image/png" />
           <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+          <link rel="preconnect" href="https://fonts.googleapis.com" />
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Great+Vibes&family=Poppins:wght@400;500;600;700&display=swap" />
           <link rel="stylesheet" href="/app.css" />
           {p.turnstileSiteKey && <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
           {p.head}
         </head>
-        <body class={`area-${area}`}>
+        <body class={`area-${area}${p.hero && !dash ? ` has-hero hero-text-${p.moodPhoto ? 'dark' : MOODS[p.hero.mood].text}` : ''}`}>
           <a class="skip" href="#main">Skip to content</a>
-          <TopBar user={p.user} settings={p.settings} />
+          <TopBar user={p.user} settings={p.settings} nav={p.nav} />
           {dash ? (
             <div class="dash">
               <SideNav area={area} active={p.active} perms={p.perms} user={p.user!} />
               <main id="main" class="dash-main">
+                {p.hero && <PageHero {...p.hero} photo={p.moodPhoto} size="strip">{p.hero.slot}</PageHero>}
                 <Flash {...p.flash} />
                 {p.children}
               </main>
             </div>
           ) : (
             <main id="main">
+              {p.hero && <PageHero {...p.hero} photo={p.moodPhoto}>{p.hero.slot}</PageHero>}
               <Flash {...p.flash} />
               {p.children}
             </main>
@@ -245,8 +275,10 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
   const settings = await getSettings(c.env)
   const perms = user && isStaff(user.role) ? resolvePermissions(user.role, settings.role_permissions) : null
   const flash = { ok: c.req.query('ok')?.slice(0, 200), err: c.req.query('err')?.slice(0, 200) }
+  const photoKey = opts.hero ? (await getContent(c.env)).mood_photos?.[opts.hero.mood] : null
+  const moodPhoto = photoKey ? mediaUrl(photoKey, 1800, settings.images_transform) : null
   return c.html(
-    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL}>
+    <Layout {...opts} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto}>
       {body}
     </Layout>,
     status as 200,

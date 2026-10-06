@@ -30,35 +30,35 @@ export const Stars: FC<{ value: number; count?: number }> = ({ value, count }) =
 
 export const Pill: FC<{ s: string }> = ({ s }) => <span class={`pill pill-${s.replace(/[^a-z_]/gi, '')}`}>{s.replace(/_/g, ' ')}</span>
 
+export const PinIcon = () => raw('<svg class="ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>')
+
 export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean; reasons?: string[] }> = ({ p, saved, qs, transform, reasons }) => {
   const fac = parseJson<string[]>(p.facilities, []).slice(0, 3)
   const price = p.stay_price ?? p.from_price
+  const href = `/stay/${p.slug}${qs ? '?' + qs : ''}`
   return (
     <article class="card pcard">
-      <a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`} class="pcard-img">
+      <a href={href} class="pcard-img">
         <img src={mediaUrl(p.photo, 600, transform)} alt={p.name} loading="lazy" width="600" height="400" />
-        <span class="pcard-type">{STAY_TYPES[p.type] ?? p.type}</span>
+        <span class="pcard-loc"><PinIcon /> {p.destination}</span>
       </a>
       <form method="post" action={`/saved/${p.id}`} class="pcard-heart">
         <button title={saved ? 'Remove from saved' : 'Save'} aria-label="Save property" class={saved ? 'on' : ''}>{saved ? '♥' : '♡'}</button>
       </form>
       <div class="pcard-body">
-        <div class="row-between">
-          <h3><a href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>{p.name}</a></h3>
-          <Stars value={p.rating_avg} count={p.rating_count} />
+        <div class="row-between pcard-head">
+          <h3><a href={href}>{p.name}</a></h3>
+          <Stars value={p.rating_avg} />
         </div>
-        <div class="muted small">📍 {p.destination}</div>
+        <div class="muted small pcard-where"><PinIcon /> {p.destination}, Kerala · {STAY_TYPES[p.type] ?? p.type}</div>
         {reasons && reasons.length > 0
           ? <div class="match-why small">{reasons.map((r) => <span>✓ {r}</span>)}</div>
-          : <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
-        <div class="row-between pcard-foot">
-          <div>
-            <span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>
-            <div class="price">{money(price)}</div>
-            {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
-          </div>
-          <a class="btn btn-sm" href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View</a>
+          : fac.length > 0 && <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
+        <div class="pcard-price">
+          <span class="muted">{p.stay_price ? 'Avg' : 'From'}</span> <strong>{money(price)}</strong> <span class="muted">/ night</span>
+          {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
         </div>
+        <a class="btn btn-outline btn-block pcard-cta" href={href}>View Details →</a>
       </div>
     </article>
   )

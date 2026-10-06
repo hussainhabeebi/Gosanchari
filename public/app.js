@@ -390,6 +390,14 @@
     draw()
   })()
 
+  // Card carousels (home "Popular Stays")
+  $$('[data-carousel]').forEach(function (car) {
+    var track = $('.car-track', car)
+    $$('[data-car]', car).forEach(function (b) {
+      b.addEventListener('click', function () { track.scrollBy({ left: +b.dataset.car * track.clientWidth * 0.9, behavior: 'smooth' }) })
+    })
+  })
+
   // Share a link: phone share sheet when available, otherwise copy to clipboard
   $$('[data-share]').forEach(function (b) {
     b.addEventListener('click', function () {

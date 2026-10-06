@@ -32,7 +32,8 @@ const security = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
     scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
-    styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
+    styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com', 'https://fonts.googleapis.com'],
+    fontSrc: ["'self'", 'https://fonts.gstatic.com'],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
     connectSrc: ["'self'"],
     frameSrc: ['https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
