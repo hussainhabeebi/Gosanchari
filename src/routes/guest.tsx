@@ -1,3 +1,4 @@
+import { gstLabel } from '../lib/quotation-pricing'
 // Guest pages (10–18): My trips, bookings, enquiries & quotes, saved, reviews, profile, help chat.
 
 import { Hono } from 'hono'
@@ -148,7 +149,7 @@ guestRoutes.get('/my/bookings/:id', async (c) => {
             <tr><td>Guests</td><td>{b.adults} adults{b.children ? `, ${b.children} children` : ''}</td></tr>
             <tr><td>Room charges</td><td>{money(b.subtotal)}</td></tr>
             {b.discount > 0 && <tr><td>Discount</td><td>− {money(b.discount)}</td></tr>}
-            <tr><td>GST</td><td>{money(b.taxes)}</td></tr>
+            <tr><td>{gstLabel(b.apply_gst)}</td><td>{money(b.taxes)}</td></tr>
             <tr class="total"><td>Total</td><td>{money(b.total)}</td></tr>
             <tr><td>Paid</td><td>{money(b.amount_paid)} <Pill s={b.payment_status} /></td></tr>
           </table>

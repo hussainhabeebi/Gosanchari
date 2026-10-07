@@ -4,6 +4,7 @@
 import type { Env } from '../env'
 import { all, enqueue, first, insertId, loadPricing, logActivity, notifyStaff, roomAvailability, run } from './db'
 import { fillTemplate, sendEmail } from './integrations'
+import { gstLabel } from './quotation-pricing'
 import { calculatePrice, type Coupon, type PriceResult } from './pricing'
 import { getSettings } from './settings'
 import type { BookingRow, PropertyRow } from './types'
@@ -28,6 +29,7 @@ export interface NewBooking {
   quotationId?: number | null
   enquiryId?: number | null
   staffId?: number | null
+  applyGst?: boolean
   /** For quotes: the exact price already agreed (built by the same rules). */
   fixedPrice?: { subtotal: number; discount: number; extraCharges: number; taxes: number; total: number }
 }
@@ -57,11 +59,11 @@ export async function createBooking(env: Env, b: NewBooking): Promise<{ id: numb
 
   let price: { subtotal: number; discount: number; extraCharges: number; taxes: number; total: number; nights: number }
   if (b.fixedPrice) {
-    price = { ...b.fixedPrice, nights: Math.round((Date.parse(b.checkOut) - Date.parse(b.checkIn)) / 86400000) }
+    price = { ...b.fixedPrice, ...(b.applyGst === false ? { taxes: 0, total: b.fixedPrice.subtotal - b.fixedPrice.discount + b.fixedPrice.extraCharges } : {}), nights: Math.round((Date.parse(b.checkOut) - Date.parse(b.checkIn)) / 86400000) }
   } else {
     const p = await priceStay(env, b.roomId, b.checkIn, b.checkOut, b.roomsCount, b.couponCode, { adults: b.adults, children: b.children, mealPlan: b.mealPlan })
     if (p.errors.length) return { error: p.errors[0] }
-    price = p
+    price = b.applyGst === false ? { ...p, taxes: 0, total: p.taxable } : p
   }
 
   const s = await getSettings(env)
@@ -71,12 +73,12 @@ export async function createBooking(env: Env, b: NewBooking): Promise<{ id: numb
     env,
     `INSERT INTO bookings (code, user_id, property_id, room_id, check_in, check_out, nights, adults, children, rooms_count, meal_plan,
       subtotal, discount, extra_charges, taxes, total, coupon_code, status, payment_status, source, guest_name, guest_phone, guest_email,
-      id_type, special_requests, quotation_id, enquiry_id, staff_id, hold_expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id_type, special_requests, quotation_id, enquiry_id, staff_id, hold_expires_at, apply_gst)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     code, b.userId, pr.room.property_id, b.roomId, b.checkIn, b.checkOut, price.nights, b.adults, b.children, b.roomsCount, b.mealPlan ?? null,
     price.subtotal, price.discount, price.extraCharges, price.taxes, price.total, b.couponCode?.toUpperCase() ?? null,
     b.source ?? 'website', b.guestName, b.guestPhone, b.guestEmail ?? null, b.idType ?? null, b.specialRequests ?? '',
-    b.quotationId ?? null, b.enquiryId ?? null, b.staffId ?? null, hold,
+    b.quotationId ?? null, b.enquiryId ?? null, b.staffId ?? null, hold, b.applyGst === false ? 0 : 1,
   )
   // Re-check after insert: if two guests raced for the last room, the later one loses.
   if (await oversold(env, id)) {
@@ -227,7 +229,7 @@ export async function invoiceHtml(env: Env, b: BookingRow, p: PropertyRow): Prom
 <tr><td>Accommodation (SAC 996311)</td><td class="r">${money(b.subtotal)}</td></tr>
 ${b.discount ? `<tr><td>Discount${b.coupon_code ? ` (${esc(b.coupon_code)})` : ''}</td><td class="r">− ${money(b.discount)}</td></tr>` : ''}
 ${b.extra_charges ? `<tr><td>Extra charges</td><td class="r">${money(b.extra_charges)}</td></tr>` : ''}
-<tr><td>GST @ ${taxRate}%</td><td class="r">${money(b.taxes)}</td></tr>
+<tr><td>${b.apply_gst === 0 ? gstLabel(b.apply_gst) : `GST @ ${taxRate}%`}</td><td class="r">${money(b.taxes)}</td></tr>
 <tr class="tot"><td>Total</td><td class="r">${money(b.total)}</td></tr>
 <tr><td>Paid</td><td class="r">${money(b.amount_paid)}</td></tr>
 ${b.total - b.amount_paid > 0 ? `<tr><td>Balance due</td><td class="r">${money(b.total - b.amount_paid)}</td></tr>` : ''}

@@ -10,7 +10,8 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
-import { calculatePrice, netRateForStay, occupancy, peaksForQuotedRate, staffRateForStay, weekendLabel } from '../lib/pricing'
+import { gstLabel, quotationInclusions, quotationPrice } from '../lib/quotation-pricing'
+import { calculatePrice, netRateForStay, occupancy, staffRateForStay, weekendLabel } from '../lib/pricing'
 import { quoteFillFromEnquiry, quoteMessageDraft } from '../lib/assist'
 import { cancelBooking, confirmBooking, createBooking, PAYMENT_METHODS, priceStay, recordPayment, storeInvoice } from '../lib/bookings'
 import { fillTemplate, mediaUrl, sendEmail, sendWhatsApp } from '../lib/integrations'
@@ -162,15 +163,16 @@ async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   return q
 }
 
-async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; discount?: number; extra_charges: number; guest_rate?: number | null; adults?: number; children?: number; meal_plan?: string | null }) {
+async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; discount?: number; extra_charges: number; guest_rate?: number | null; adults?: number; children?: number; meal_plan?: string | null; apply_gst?: number }) {
   const pr = await loadPricing(c.env, o.room_id)
   if (!pr) return null
   const s = await getSettings(c.env)
-  // A staff-entered base tariff replaces seasonal base rates; new common peaks still apply.
+  // A staff-entered base tariff replaces seasonal base rates; flat peak supplements still apply.
   // Staff decides the child amount from the property's policy; children still count toward capacity.
   const room = { ...pr.room, ...(o.guest_rate ? { base_rate: o.guest_rate, weekend_rate: o.guest_rate } : {}), extra_child_rate: 0 }
-  const seasons = o.guest_rate ? peaksForQuotedRate(pr.seasons) : pr.seasons
-  return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount == null ? o.discount_pct : 0, discountFlat: o.discount, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0, mealPlan: o.meal_plan })
+  const seasons = o.guest_rate ? pr.seasons.filter(s => s.supplement != null && !(s.rate && s.rate > 0) && s.pct_adjust == null) : pr.seasons
+  const base = calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, mealPlan: o.meal_plan })
+  return quotationPrice({ room, seasons, staffRoom: pr.room, staffSeasons: pr.seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountAmount: o.discount ?? Math.round(base.roomCharges * o.discount_pct / 100), applyGst: o.apply_gst !== 0, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0, mealPlan: o.meal_plan })
 }
 
 /** Staff rate benchmark for an option's room and dates (season staff rates apply). */
@@ -185,11 +187,6 @@ function effectiveNightly(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'che
   return Math.round((o.subtotal - o.discount) / n)
 }
 
-/** Discount above the staff member's limit, or a price below the internal staff rate, needs management approval. */
-function optionNeedsApproval(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'check_in' | 'check_out' | 'rooms_count' | 'discount_pct'>, staffRate: number | null, maxDiscountPct: number) {
-  return o.discount_pct > maxDiscountPct || (!!staffRate && effectiveNightly(o) < staffRate)
-}
-
 async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number, roomId: number | null, checkIn: string | null, checkOut: string | null, adults: number, children: number) {
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', propertyId)
   const room = rooms.find((r) => r.id === roomId) ?? rooms.find((r) => r.capacity >= adults + children) ?? rooms[0]
@@ -197,8 +194,10 @@ async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number
   const ci = checkIn && isDate(checkIn) ? checkIn : addDays(todayIST(), 14)
   const co = checkOut && isDate(checkOut) && checkOut > ci ? checkOut : addDays(ci, 2)
   const roomsCount = Math.max(1, Math.ceil((adults + children) / room.capacity))
-  const p = await priceOption(c, { room_id: room.id, check_in: ci, check_out: co, rooms_count: roomsCount, discount_pct: 0, extra_charges: 0, adults, children })
+  const quote = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE id = ?', quoteId)
   const meals = parseJson<string[]>((await first<{ meal_plans: string }>(c.env, 'SELECT meal_plans FROM properties WHERE id = ?', propertyId))?.meal_plans, [])
+  const p = await priceOption(c, { apply_gst: quote?.apply_gst, meal_plan: meals[0] ?? null, room_id: room.id, check_in: ci, check_out: co, rooms_count: roomsCount, discount_pct: 0, extra_charges: 0, adults, children })
+  if (!p || p.errors.length) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${quoteId}`, { err: p?.errors[0] ?? 'Room rate could not be resolved.' }) })
   await run(
     c.env,
     'INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, taxes, total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -218,7 +217,7 @@ async function createQuote(c: Context<AppEnv>) {
     `INSERT INTO quotations (code, token, enquiry_id, user_id, staff_id, guest_name, phone, email, valid_till, inclusions, payment_terms)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     refCode('QT'), randomToken(18), e?.id ?? null, e?.user_id ?? null, u.id, e?.guest_name ?? 'Guest', e?.phone ?? null, e?.email ?? null,
-    addDays(todayIST(), s.booking.quote_validity_days), 'Accommodation as per room type\nGST', 'Payment by UPI or bank transfer to confirm. Our team will share the details.',
+    addDays(todayIST(), s.booking.quote_validity_days), 'Accommodation as per room type', 'Payment by UPI or bank transfer to confirm. Our team will share the details.',
   )
   const pid = int(c.req.query('property'))
   if (pid) await addOption(c, id, pid, int(c.req.query('room')) || null, c.req.query('checkIn') ?? e?.check_in ?? null, c.req.query('checkOut') ?? e?.check_out ?? null, e?.adults ?? Math.max(1, int(c.req.query('guests'), 2)), e?.children ?? 0)
@@ -261,7 +260,9 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   const weekendOf = new Map((await all<{ id: number; weekend_nights: string }>(c.env, `SELECT id, weekend_nights FROM properties WHERE id IN (${placeholders(Math.max(1, options.length))})`, ...(options.length ? options.map((o) => o.property_id) : [0]))).map((x) => [x.id, x.weekend_nights]))
   const allRooms = options.length ? await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(options.length)})`, ...options.map((o) => o.property_id)) : []
   const editable = ['draft', 'pending_approval', 'changes_requested'].includes(q.status)
-  const needsApproval = options.some((o) => !o.discount_approved_by && optionNeedsApproval(o, o.staff_rate, perms.max_discount_pct))
+  const resolvedPrices = new Map<number, Awaited<ReturnType<typeof priceOption>>>()
+  for (const o of options) resolvedPrices.set(o.id, await priceOption(c, { ...o, apply_gst: q.apply_gst }))
+  const needsApproval = options.some(o => resolvedPrices.get(o.id)?.errors.length)
   const link = `${c.env.SITE_URL}/q/${q.token}`
   return page(c, { title: `Quotation ${q.code}`, area: 'staff', active: 'quotes' }, (
     <div class="stack-lg">
@@ -274,7 +275,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
         </div>
       </div>
       {q.guest_feedback && <div class="flash">Guest said: “{q.guest_feedback}”</div>}
-      {needsApproval && <div class="flash flash-err">A discount is above your limit of {perms.max_discount_pct}%, or a price is below the internal staff rate. An admin or manager must approve before it can be sent.</div>}
+      {needsApproval && <div class="flash flash-err">This quotation has an unresolved rate or a price below the Staff Rate. Correct it before saving or sending.</div>}
 
       <form method="post" action={`/staff/quotes/${q.id}`} class="stack">
         <section class="card stack">
@@ -286,6 +287,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
           </div>
         </section>
 
+        <label class="check"><input type="hidden" name="gst_control" value="1" disabled={!editable} /><input type="checkbox" name="apply_gst" value="1" checked={q.apply_gst !== 0} disabled={!editable} /> Apply GST</label>
         {options.map((o, i) => {
           const rooms = allRooms.filter((r) => r.property_id === o.property_id)
           const meals = parseJson<string[]>(o.meal_plans, [])
@@ -320,7 +322,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Kids Amount ₹" hint="Total child charge for this option's entire stay, after checking the policy."><input type="number" name={`kids_${o.id}`} value={chosenAddons(o.addons).find(a => a.kind === 'kids')?.total ?? ''} min="0" /></Field>
                 <Field label="Meal plan"><Select name={`meal_${o.id}`} value={o.meal_plan ?? ''} options={[['', 'Room only'], ...meals.map((m) => [m, MEAL_PLANS[m] ?? m] as [string, string])]} /></Field>
                 <Field label="Guest rate ₹ / room / night" hint="Your selling price. Blank = website rate."><input type="number" name={`grate_${o.id}`} value={o.guest_rate ?? ''} min="0" placeholder={String(o.base_rate)} /></Field>
-                <Field label="Discount Amount ₹" hint={`Maximum allowed: ${money(Math.floor(o.subtotal * perms.max_discount_pct / 100))} (${perms.max_discount_pct}% of room subtotal; recalculated on save).`}><input type="number" name={`discount_${o.id}`} value={o.discount || ''} min="0" step="1" /></Field>
+                <Field label="Discount Amount ₹" hint={resolvedPrices.get(o.id)?.maximumDiscount != null ? `Maximum accommodation discount: ${money(resolvedPrices.get(o.id)!.maximumDiscount!)} (recalculated for the selected dates on save).` : 'Staff Rate not supplied: a positive discount cannot be applied.'}><input type="number" name={`discount_${o.id}`} value={o.discount || ''} min="0" step="1" /></Field>
                 <Field label="Other extras ₹"><input type="number" name={`extra_${o.id}`} value={Math.max(0, o.extra_charges - chosenAddons(o.addons).reduce((a, x) => a + x.total, 0))} min="0" /></Field>
                 <Field label="Other extras label"><input name={`extralabel_${o.id}`} value={o.extra_label ?? ''} placeholder="e.g. Airport pickup" /></Field>
               </div>
@@ -345,9 +347,9 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
               <div class="rate-strip small">
                 <span class="internal">Staff rate: <strong>{o.staff_rate ? money(o.staff_rate) : 'not set'}</strong></span>
                 <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} ${weekendLabel(weekendOf.get(o.property_id)).replace(' nights', '')}` : ''}</span>
-                <span>Quoted: <strong>{money(effectiveNightly(o))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
+                <span>Quoted: <strong>{money(effectiveNightly({ ...o, subtotal: resolvedPrices.get(o.id)?.roomCharges ?? o.subtotal }))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
                 {perms.view_net_rates && netStay.get(o.id) && <span class="internal">B2B / Net for these dates: {money(netStay.get(o.id)!)} / room / night</span>}
-                {o.staff_rate && effectiveNightly(o) < o.staff_rate && <span class="pill pill-red">Below staff rate{o.discount_approved_by ? ' — approved' : ' — needs approval'}</span>}
+                {resolvedPrices.get(o.id)?.errors.map(error => <span class="pill pill-red">{error}</span>)}
               </div>
               <table class="breakdown narrow-table">
                 {(() => {
@@ -362,9 +364,9 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                     </>
                   )
                 })()}
-                {o.discount > 0 && <tr><td>Discount{o.discount_approved_by ? ' ✓ approved' : ''}</td><td>− {money(o.discount)}</td></tr>}
+                {o.discount > 0 && <tr><td>Accommodation discount</td><td>− {money(o.discount)}</td></tr>}
                 {o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}
-                <tr><td>GST</td><td>{money(o.taxes)}</td></tr>
+                <tr><td>{gstLabel(q.apply_gst)}</td><td>{money(o.taxes)}</td></tr>
                 <tr class="total"><td>Total</td><td>{money(o.total)}</td></tr>
                 {perms.view_net_rates && margin != null && <tr class="internal"><td>Room margin (internal, before GST)</td><td>{money(margin)}</td></tr>}
               </table>
@@ -425,11 +427,11 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
 /** Save all fields and re-price every option by the rate rules. */
 async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
   const u = c.get('user')!
-  const perms = await permissionsFor(c.env, u.role)
   const f = await form(c)
+  const applyGst = f.gst_control === '1' ? (f.apply_gst === '1' ? 1 : 0) : q.apply_gst ?? 1
   if (['draft', 'pending_approval', 'changes_requested'].includes(q.status)) {
-    // Validate every option before writing anything; old percentage discounts restore
-    // from their already-calculated rupee amount, with no production backfill.
+    // Validate every option before writing anything; stored discounts remain fixed rupee amounts.
+    // Management exceptions cannot bypass the current Staff accommodation floor.
     for (const oid of f.__all.opt_id ?? []) {
       const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE id = ? AND quotation_id = ?', int(oid), q.id)
       if (!o) continue
@@ -438,17 +440,23 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       const checkIn = isDate(f[`in_${oid}`]) ? f[`in_${oid}`] : o.check_in
       const checkOut = isDate(f[`out_${oid}`]) && f[`out_${oid}`] > checkIn ? f[`out_${oid}`] : addDays(checkIn, Math.max(1, nightsBetween(o.check_in, o.check_out)))
       const base = await priceOption(c, { room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut,
-        rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)), discount_pct: 0, discount: 0, extra_charges: 0,
+        rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)), apply_gst: applyGst, discount_pct: 0, discount: amount, extra_charges: 0,
         guest_rate: int(f[`grate_${oid}`]) > 0 ? int(f[`grate_${oid}`]) : null,
         adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)), meal_plan: f[`meal_${oid}`] || null })
       if (!base) continue
-      const maximum = Math.floor(base.subtotal * perms.max_discount_pct / 100)
-      // Preserve an unchanged approved exception or legacy percentage-rounding amount.
-      const retainedAllowance = amount === o.discount && base.subtotal === o.subtotal &&
-        (o.discount_approved_by || (o.discount_pct <= perms.max_discount_pct && amount <= Math.round(base.subtotal * perms.max_discount_pct / 100)))
-      if (amount > maximum && !retainedAllowance) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: `Maximum discount allowed for this quotation is ${money(maximum)}.` }) })
+      if (base.errors.length) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: base.errors[0] }) })
     }
-    await run(c.env, 'UPDATE quotations SET guest_name = ?, phone = ?, email = ? WHERE id = ?', str(f.guest_name, 80) || q.guest_name, normalizePhone(f.phone) ?? q.phone, str(f.email, 120) || null, q.id)
+    const untouched = await all<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE quotation_id = ?', q.id)
+    const gstUpdates: { option: QuoteOptionRow; price: NonNullable<Awaited<ReturnType<typeof priceOption>>> }[] = []
+    for (const option of untouched.filter(o => !(f.__all.opt_id ?? []).includes(String(o.id)))) {
+      if (applyGst === q.apply_gst) continue
+      const price = await priceOption(c, { ...option, apply_gst: applyGst })
+      if (!price || price.errors.length) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: price?.errors[0] ?? 'Room rate could not be resolved.' }) })
+      gstUpdates.push({ option, price })
+    }
+    await run(c.env, 'UPDATE quotations SET guest_name = ?, phone = ?, email = ?, apply_gst = ?, explainer = CASE WHEN apply_gst != ? THEN NULL ELSE explainer END WHERE id = ?', str(f.guest_name, 80) || q.guest_name, normalizePhone(f.phone) ?? q.phone, str(f.email, 120) || null, applyGst, applyGst, q.id)
+    q.apply_gst = applyGst
+    for (const { option, price } of gstUpdates) await run(c.env, 'UPDATE quotation_options SET subtotal=?,discount=?,taxes=?,total=? WHERE id=? AND quotation_id=?', price.subtotal, price.discount, price.taxes, price.total, option.id, q.id)
     for (const oid of f.__all.opt_id ?? []) {
       const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE id = ? AND quotation_id = ?', int(oid), q.id)
       if (!o) continue
@@ -469,22 +477,18 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       const addonTotal = picked.reduce((a, x) => a + x.total, 0)
       const next = {
         room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
-        discount_pct: 0, discount: amount, extra_charges: Math.max(0, int(f[`extra_${oid}`])) + addonTotal, guest_rate: grate,
+        apply_gst: applyGst, discount_pct: 0, discount: amount, extra_charges: Math.max(0, int(f[`extra_${oid}`])) + addonTotal, guest_rate: grate,
         adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
         meal_plan: f[`meal_${oid}`] || null,
       }
       const p = await priceOption(c, next)
       if (!p) continue
       const disc = amount === o.discount && p.subtotal === o.subtotal
-        ? o.discount_pct // Keep legacy percentage-rounding authorization unchanged.
+        ? o.discount_pct // Retain legacy descriptive percentage; it no longer controls authorization.
         : p.subtotal > 0 ? p.discount * 100 / p.subtotal : 0
       next.discount_pct = disc
-      // Approval is needed for a discount above the limit or a price below the staff rate; any price change asks again.
-      const pr = await loadPricing(c.env, next.room_id)
-      const staffRate = pr ? staffRateForStay(pr.room, pr.seasons, checkIn, checkOut, f[`meal_${oid}`] || null) : null
-      const needs = optionNeedsApproval({ ...next, subtotal: p.subtotal, discount: p.discount }, staffRate, perms.max_discount_pct)
-      const changed = amount !== o.discount || p.subtotal !== o.subtotal || grate !== o.guest_rate || next.room_id !== o.room_id
-      const approved = !needs ? null : !changed ? o.discount_approved_by : perms.approve_discounts ? u.id : null
+      const staffRate = await optionStaffRate(c, next)
+      const approved = null // Management approval cannot bypass the accommodation floor.
       await run(
         c.env,
         `UPDATE quotation_options SET room_id = ?, check_in = ?, check_out = ?, rooms_count = ?, adults = ?, children = ?, meal_plan = ?, discount_pct = ?, extra_charges = ?, extra_label = ?,
@@ -533,17 +537,19 @@ opsRoutes.post('/staff/quotes/:id/fill', requirePerm('manage_quotes'), async (c)
   await saveQuote(c, q)
   const e = await first<EnquiryRow>(c.env, 'SELECT * FROM enquiries WHERE id = ?', q.enquiry_id)
   const fill = await quoteFillFromEnquiry(c.env, e!)
-  const hasOptions = await first(c.env, 'SELECT 1 FROM quotation_options WHERE quotation_id = ?', q.id)
-  if (fill.propertyId) {
-    if (hasOptions) await run(c.env, 'UPDATE quotation_options SET check_in = COALESCE(?, check_in), check_out = COALESCE(?, check_out), adults = ?, children = ? WHERE quotation_id = ?', fill.checkIn, fill.checkOut, fill.adults, fill.children, q.id)
-    else await addOption(c, q.id, fill.propertyId, null, fill.checkIn, fill.checkOut, fill.adults, fill.children)
-  }
-  // Re-price after AI filled dates — prices always come from the rules.
   const opts = await all<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE quotation_id = ?', q.id)
-  for (const o of opts) {
-    const p = await priceOption(c, o)
-    if (p) await run(c.env, 'UPDATE quotation_options SET subtotal = ?, discount = ?, taxes = ?, total = ?, discount_pct = ? WHERE id = ?', p.subtotal, p.discount, p.taxes, p.total, p.subtotal === o.subtotal ? o.discount_pct : p.subtotal > 0 ? p.discount * 100 / p.subtotal : 0, o.id)
+  if (fill.propertyId && !opts.length) await addOption(c, q.id, fill.propertyId, null, fill.checkIn, fill.checkOut, fill.adults, fill.children)
+  // Validate every prospective date/rate change before updating an existing option.
+  const updates: { option: QuoteOptionRow; price: NonNullable<Awaited<ReturnType<typeof priceOption>>> }[] = []
+  for (const old of opts) {
+    const option = fill.propertyId ? { ...old, check_in: fill.checkIn ?? old.check_in, check_out: fill.checkOut ?? old.check_out, adults: fill.adults, children: fill.children } : old
+    const price = await priceOption(c, { ...option, apply_gst: q.apply_gst })
+    if (!price || price.errors.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: price?.errors[0] ?? 'Room rate could not be resolved.' })
+    updates.push({ option, price })
   }
+  for (const { option: o, price: p } of updates) await run(c.env,
+    'UPDATE quotation_options SET check_in=?,check_out=?,adults=?,children=?,subtotal=?,discount=?,taxes=?,total=?,discount_pct=? WHERE id=?',
+    o.check_in, o.check_out, o.adults, o.children, p.subtotal, p.discount, p.taxes, p.total, p.subtotal === o.subtotal ? o.discount_pct : p.subtotal > 0 ? p.discount * 100 / p.subtotal : 0, o.id)
   return redirectMsg(c, `/staff/quotes/${q.id}`, { ok: `Filled from enquiry${fill.matches.length ? ` — suggested ${fill.matches.map((m) => m.name).join(', ')}` : ''}. Please check.` })
 })
 
@@ -553,7 +559,7 @@ opsRoutes.post('/staff/quotes/:id/draft-message', requirePerm('manage_quotes'), 
   await saveQuote(c, q)
   const opts = await all<QuoteOptionRow & { property_name: string }>(c.env, 'SELECT o.*, p.name AS property_name FROM quotation_options o JOIN properties p ON p.id = o.property_id WHERE quotation_id = ?', q.id)
   const lang = q.enquiry_id ? (await first<{ language: 'en' | 'ml' }>(c.env, 'SELECT language FROM enquiries WHERE id = ?', q.enquiry_id))?.language ?? 'en' : 'en'
-  const msg = await quoteMessageDraft(c.env, q, opts.map((o) => `${o.property_name}, ${fmtDate(o.check_in)}–${fmtDate(o.check_out)}`), lang)
+  const msg = await quoteMessageDraft(c.env, q, opts.map((o) => `${o.property_name}, ${fmtDate(o.check_in)}–${fmtDate(o.check_out)}, ${gstLabel(q.apply_gst)}: ${money(o.taxes)}`), lang)
   if (!msg) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'AI drafting is off or unavailable.' })
   await run(c.env, 'UPDATE quotations SET message = ? WHERE id = ?', msg, q.id)
   return redirectMsg(c, `/staff/quotes/${q.id}`, { ok: 'Message drafted — please review before sending.' })
@@ -577,7 +583,6 @@ opsRoutes.post('/staff/quotes/:id/reopen', requirePerm('manage_quotes'), async (
 
 opsRoutes.post('/staff/quotes/:id/send', requirePerm('manage_quotes'), async (c) => {
   const u = c.get('user')!
-  const perms = await permissionsFor(c.env, u.role)
   let q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   const f = await saveQuote(c, q)
@@ -585,12 +590,16 @@ opsRoutes.post('/staff/quotes/:id/send', requirePerm('manage_quotes'), async (c)
   const opts = await all<QuoteOptionRow & { staff_rate: number | null }>(c.env, 'SELECT o.* FROM quotation_options o WHERE o.quotation_id = ?', q.id)
   for (const o of opts) o.staff_rate = await optionStaffRate(c, o)
   if (!opts.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Add at least one option.' })
-  if (opts.some((o) => !o.discount_approved_by && optionNeedsApproval(o, o.staff_rate, perms.max_discount_pct))) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'This quote needs approval first (discount above your limit or price below the staff rate).' })
+  for (const option of opts) {
+    const price = await priceOption(c, { ...option, apply_gst: q.apply_gst })
+    if (!price || price.errors.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: price?.errors[0] ?? 'Room rate could not be resolved.' })
+  }
   const s = await getSettings(c.env)
   const link = `${c.env.SITE_URL}/q/${q.token}`
   const via = c.req.query('via')
   const prop = await first<{ name: string }>(c.env, 'SELECT p.name FROM quotation_options o JOIN properties p ON p.id = o.property_id WHERE o.quotation_id = ? LIMIT 1', q.id)
-  const text = (q.message ? q.message + '\n\n' : '') + fillTemplate(s.whatsapp_templates.quote, { name: q.guest_name, link, valid: fmtDate(q.valid_till), property: prop?.name })
+  const gstText = q.apply_gst === 0 ? 'GST not applied: ₹0' : `GST: ${opts.map(o => money(o.taxes)).join(' / ')}`
+  const text = (q.message ? q.message + '\n\n' : '') + gstText + '\n' + fillTemplate(s.whatsapp_templates.quote, { name: q.guest_name, link, valid: fmtDate(q.valid_till), property: prop?.name })
   if (via === 'whatsapp') {
     if (!q.phone) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Add the guest phone number.' })
     const r = await sendWhatsApp(c.env, q.phone, text)
@@ -624,8 +633,8 @@ opsRoutes.post('/staff/quotes/:id/duplicate', requirePerm('manage_quotes'), asyn
   if (!q) return c.notFound()
   const id = await insertId(
     c.env,
-    `INSERT INTO quotations (code, token, enquiry_id, user_id, staff_id, guest_name, phone, email, valid_till, inclusions, exclusions, payment_terms, message)
-     SELECT ?, ?, enquiry_id, user_id, ?, guest_name, phone, email, ?, inclusions, exclusions, payment_terms, message FROM quotations WHERE id = ?`,
+    `INSERT INTO quotations (code, token, enquiry_id, user_id, staff_id, guest_name, phone, email, valid_till, inclusions, exclusions, payment_terms, message, apply_gst)
+     SELECT ?, ?, enquiry_id, user_id, ?, guest_name, phone, email, ?, inclusions, exclusions, payment_terms, message, apply_gst FROM quotations WHERE id = ?`,
     refCode('QT'), randomToken(18), u.id, addDays(todayIST(), (await getSettings(c.env)).booking.quote_validity_days), q.id,
   )
   await run(
@@ -643,8 +652,10 @@ opsRoutes.post('/staff/quotes/:id/convert', requirePerm('manage_quotes', 'manage
   if (!q) return c.notFound()
   const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE quotation_id = ? ORDER BY (id = ?) DESC, id LIMIT 1', q.id, q.accepted_option_id ?? 0)
   if (!o || !q.phone) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Quote needs an option and a guest phone.' })
+  const validated = await priceOption(c, { ...o, apply_gst: q.apply_gst })
+  if (!validated || validated.errors.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: validated?.errors[0] ?? 'Room rate could not be resolved.' })
   const r = await createBooking(c.env, {
-    roomId: o.room_id, checkIn: o.check_in, checkOut: o.check_out, adults: o.adults, children: o.children, roomsCount: o.rooms_count,
+    applyGst: q.apply_gst !== 0, roomId: o.room_id, checkIn: o.check_in, checkOut: o.check_out, adults: o.adults, children: o.children, roomsCount: o.rooms_count,
     guestName: q.guest_name, guestPhone: q.phone, guestEmail: q.email, userId: q.user_id, source: 'staff', mealPlan: o.meal_plan,
     quotationId: q.id, enquiryId: q.enquiry_id, staffId: u.id,
     fixedPrice: { subtotal: o.subtotal, discount: o.discount, extraCharges: o.extra_charges, taxes: o.taxes, total: o.total },
@@ -670,7 +681,7 @@ opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (
         <div class="card">
           <h2>{opts.length > 1 ? `Option ${i + 1}: ` : ''}{o.property_name}</h2>
           <p>{o.destination} · {o.room_name} × {o.rooms_count} · {fmtDate(o.check_in)} → {fmtDate(o.check_out)} · {o.adults + o.children} guests</p>
-          <table class="breakdown"><tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>{o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}{o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}<tr><td>GST</td><td>{money(o.taxes)}</td></tr><tr class="total"><td>Total</td><td>{money(o.total)}</td></tr></table>
+          <table class="breakdown"><tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>{o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}{o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}<tr><td>{gstLabel(q.apply_gst)}</td><td>{money(o.taxes)}</td></tr><tr class="total"><td>Total</td><td>{money(o.total)}</td></tr></table>
         </div>
       ))}
       <p class="muted">Valid till {fmtDate(q.valid_till)}</p>
@@ -687,8 +698,8 @@ opsRoutes.get('/staff/quotes/:id/print', requirePerm('manage_quotes'), async (c)
   return c.html(`<!doctype html><html><head><meta charset="utf-8"><title>Quote ${esc(q.code)}</title><style>body{font:14px/1.5 system-ui;max-width:760px;margin:24px auto;padding:0 16px;color:#1d2b2a}table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid #ddd}.r{text-align:right}.t td{font-weight:700}@media print{button{display:none}}</style></head><body>
 <button data-print>Print / Save as PDF</button><script src="/app.js" defer></script><h1>${esc(s.business.name)} — Quotation ${esc(q.code)}</h1><p>For ${esc(q.guest_name)} · valid till ${esc(fmtDate(q.valid_till))}</p>
 ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => `<h2>${opts.length > 1 ? `Option ${i + 1}: ` : ''}${esc(o.property_name)}</h2><p>${esc(o.destination)} · ${esc(o.room_name)} × ${o.rooms_count} · ${esc(fmtDate(o.check_in))} → ${esc(fmtDate(o.check_out))} · ${o.adults + o.children} guests · ${esc(o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only')}</p>
-<table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>GST</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table>`).join('')}
-${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(q.inclusions)}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment terms</h3><p>${esc(q.payment_terms)}</p>` : ''}
+<table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table>`).join('')}
+${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment terms</h3><p>${esc(q.payment_terms)}</p>` : ''}
 <p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p><p>${esc(s.business.phone)} · ${esc(s.business.email)}</p></body></html>`)
 })
 
@@ -875,7 +886,7 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
             <tr><td>Guests</td><td>{b.adults} adults, {b.children} children · ID: {b.id_type ?? 'not given'}</td></tr>
             <tr><td>Meal plan</td><td>{b.meal_plan ? MEAL_PLANS[b.meal_plan] ?? b.meal_plan : 'Room only'}</td></tr>
             <tr><td>Subtotal / discount</td><td>{money(b.subtotal)} / − {money(b.discount)}{b.coupon_code ? ` (${b.coupon_code})` : ''}</td></tr>
-            <tr><td>GST</td><td>{money(b.taxes)}</td></tr>
+            <tr><td>{gstLabel(b.apply_gst)}</td><td>{money(b.taxes)}</td></tr>
             <tr class="total"><td>Total</td><td>{money(b.total)}</td></tr>
             <tr><td>Paid</td><td>{money(b.amount_paid)}</td></tr>
             {perms.view_property_contacts && b.owner_phone && <tr class="internal"><td>Owner</td><td>{b.owner_name} {b.owner_phone}</td></tr>}
@@ -1021,12 +1032,12 @@ export async function applyDateChange(c: Context<AppEnv>, b: BookingRow, roomId:
   // Availability excluding this booking itself.
   const avail = await roomAvailability(c.env, [b.property_id], checkIn, checkOut, undefined, b.id)
   if ((avail.get(roomId)?.free ?? 0) < b.rooms_count) return redirectMsg(c, `/staff/bookings/${b.id}`, { err: 'Not available for those dates.' })
-  const p = await priceStay(c.env, roomId, checkIn, checkOut, b.rooms_count, null, { adults: b.adults, children: b.children })
+  const p = await priceStay(c.env, roomId, checkIn, checkOut, b.rooms_count, null, { adults: b.adults, children: b.children, mealPlan: b.meal_plan })
   if (p.errors.length) return redirectMsg(c, `/staff/bookings/${b.id}`, { err: p.errors[0] })
   // Keep the original discount share; price itself comes from the rules.
   const discount = Math.min(p.subtotal, b.discount)
   const taxable = p.subtotal - discount + b.extra_charges
-  const taxes = Math.round((taxable * p.taxRate) / 100)
+  const taxes = b.apply_gst === 0 ? 0 : Math.round((taxable * p.taxRate) / 100)
   const total = taxable + taxes
   await run(
     c.env,

@@ -1,3 +1,4 @@
+import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
 // Public pages (1–9) and the public quotation link (14).
 
 import { Hono, type Context } from 'hono'
@@ -862,7 +863,7 @@ publicRoutes.get('/q/:token', async (c) => {
             <tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>
             {o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}
             {o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}
-            <tr><td>GST</td><td>{money(o.taxes)}</td></tr>
+            <tr><td>{gstLabel(q.apply_gst)}</td><td>{money(o.taxes)}</td></tr>
             <tr class="total"><td>Total</td><td>{money(o.total)}</td></tr>
           </table>
           <a href={`/stay/${o.slug}`} target="_blank" class="small">View property details →</a>
@@ -876,7 +877,7 @@ publicRoutes.get('/q/:token', async (c) => {
       ))}
       {(q.inclusions || q.exclusions || q.payment_terms) && (
         <div class="card">
-          {q.inclusions && <><h3>Included</h3><p style="white-space:pre-line">{q.inclusions}</p></>}
+          {q.inclusions && <><h3>Included</h3><p style="white-space:pre-line">{quotationInclusions(q.inclusions, q.apply_gst)}</p></>}
           {q.exclusions && <><h3>Not included</h3><p style="white-space:pre-line">{q.exclusions}</p></>}
           {q.payment_terms && <><h3>Payment terms</h3><p style="white-space:pre-line">{q.payment_terms}</p></>}
         </div>

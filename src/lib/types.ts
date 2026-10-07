@@ -165,6 +165,7 @@ export interface MessageRow {
 }
 
 export interface QuotationRow {
+  apply_gst: number
   id: number
   code: string
   token: string
@@ -215,6 +216,7 @@ export interface QuoteOptionRow {
 }
 
 export interface BookingRow {
+  apply_gst: number
   id: number
   code: string
   user_id: number | null
