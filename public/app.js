@@ -917,3 +917,57 @@
     finally { quoteButton.disabled = false; quoteButton.textContent = 'Get Quote →'; }
   });
 })();
+
+// Unsaved Staff quotation price preview. The server remains the pricing authority.
+(function () {
+  var form = document.querySelector('[data-quote-recalculate]');
+  if (!form) return;
+  var timer, controller, revision = 0;
+  function status(message) {
+    form.querySelectorAll('[data-price-status]').forEach(function (node) { node.textContent = message; });
+  }
+  async function update(version) {
+    controller = new AbortController();
+    try {
+      var response = await fetch(form.dataset.quoteRecalculate, { method: 'POST', body: new FormData(form), signal: controller.signal });
+      var data = await response.json();
+      if (version !== revision) return;
+      if (!response.ok) throw new Error(data.error || 'Could not update price. Please try again.');
+      data.options.forEach(function (option) {
+        var section = form.querySelector('[data-quote-option="' + option.id + '"]');
+        if (!section) return;
+        var table = section.querySelector('[data-price-breakdown]');
+        table.replaceChildren();
+        option.rows.forEach(function (row) {
+          var tr = document.createElement('tr');
+          if (row[0] === 'Total') tr.className = 'total';
+          if (row[0] === 'Room margin (internal, before GST)') tr.className = 'internal';
+          row.forEach(function (text) { var td = document.createElement('td'); td.textContent = text; tr.append(td); });
+          table.append(tr);
+        });
+        var benchmarks = section.querySelector('[data-price-benchmarks]');
+        benchmarks.textContent = option.benchmarks.join(' · ');
+        var discount = form.elements['discount_' + option.id];
+        var hint = discount && discount.parentElement.querySelector('.hint');
+        if (hint) hint.textContent = option.maximumDiscount == null ? 'Staff Rate not supplied: a positive discount cannot be applied.' : 'Maximum accommodation discount: ' + money(option.maximumDiscount);
+        section.querySelector('[data-price-status]').textContent = option.errors.length ? option.errors.join(' ') : 'Price updated. Save to retain your changes.';
+      });
+    } catch (error) {
+      if (version === revision && error.name !== 'AbortError') status(error.message || 'Could not update price. Please try again.');
+    }
+  }
+  function money(value) { return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value); }
+  function changed(event) {
+    var field = event.target;
+    if (!/^(apply_gst|(?:room|in|out|rooms|adults|children|kids|meal|grate|discount|extra|extralabel|addon|addonqty)_\d+(?:_\d+)?)$/.test(field.name || '')) return;
+    revision++;
+    clearTimeout(timer);
+    if (controller) controller.abort();
+    status('Updating price…');
+    var version = revision;
+    if (event.type === 'change' && (field.tagName === 'SELECT' || field.type === 'checkbox' || field.type === 'date')) update(version);
+    else timer = setTimeout(function () { update(version); }, 300);
+  }
+  form.addEventListener('input', changed);
+  form.addEventListener('change', changed);
+})();

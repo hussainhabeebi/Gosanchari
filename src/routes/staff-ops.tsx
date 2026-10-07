@@ -19,7 +19,7 @@ import { getSettings } from '../lib/settings'
 import { MEAL_PLANS, PROPERTY_TYPES } from '../lib/search'
 import type { BookingRow, EnquiryRow, PropertyRow, QuotationRow, QuoteOptionRow, RoomRow } from '../lib/types'
 import { addDays, eachNight, fmtDate, fmtDateTime, fmtShortDate, int, isDate, money, nightsBetween, normalizePhone, nowIso, parseJson, randomToken, refCode, str, todayIST } from '../lib/util'
-import { form, pageNum, redirectMsg } from './helpers'
+import { form, pageNum, redirectMsg, type Form } from './helpers'
 import { canSeeEnquiry } from './staff'
 
 export const opsRoutes = new Hono<AppEnv>()
@@ -277,7 +277,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
       {q.guest_feedback && <div class="flash">Guest said: “{q.guest_feedback}”</div>}
       {needsApproval && <div class="flash flash-err">This quotation has an unresolved rate or a price below the Staff Rate. Correct it before saving or sending.</div>}
 
-      <form method="post" action={`/staff/quotes/${q.id}`} class="stack">
+      <form method="post" action={`/staff/quotes/${q.id}`} class="stack" data-quote-recalculate={editable ? `/staff/quotes/${q.id}/recalculate` : undefined}>
         <section class="card stack">
           <div class="row-between"><h2>Guest</h2>{enquiry && editable && <button class="btn btn-sm btn-outline" formaction={`/staff/quotes/${q.id}/fill`} title="AI reads the enquiry and pre-fills dates, guests and a suggested property">✨ Fill from enquiry</button>}</div>
           <div class="row">
@@ -295,7 +295,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
           const net = netStay.get(o.id) ?? null
           const margin = net ? o.subtotal - o.discount - net * nightsBetween(o.check_in, o.check_out) * o.rooms_count : null
           return (
-            <section class="card stack">
+            <section class="card stack" data-quote-option={o.id}>
               <div class="row-between"><h3>Option {i + 1}: {o.property_name}</h3>{editable && <button class="linklike small" formaction={`/staff/quotes/${q.id}/options/${o.id}/delete`} formnovalidate>Remove</button>}</div>
               <input type="hidden" name="opt_id" value={o.id} />
               <div class="row wrap-row">
@@ -322,7 +322,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Kids Amount ₹" hint="Total child charge for this option's entire stay, after checking the policy."><input type="number" name={`kids_${o.id}`} value={chosenAddons(o.addons).find(a => a.kind === 'kids')?.total ?? ''} min="0" /></Field>
                 <Field label="Meal plan"><Select name={`meal_${o.id}`} value={o.meal_plan ?? ''} options={[['', 'Room only'], ...meals.map((m) => [m, MEAL_PLANS[m] ?? m] as [string, string])]} /></Field>
                 <Field label="Guest rate ₹ / room / night" hint="Your selling price. Blank = website rate."><input type="number" name={`grate_${o.id}`} value={o.guest_rate ?? ''} min="0" placeholder={String(o.base_rate)} /></Field>
-                <Field label="Discount Amount ₹" hint={resolvedPrices.get(o.id)?.maximumDiscount != null ? `Maximum accommodation discount: ${money(resolvedPrices.get(o.id)!.maximumDiscount!)} (recalculated for the selected dates on save).` : 'Staff Rate not supplied: a positive discount cannot be applied.'}><input type="number" name={`discount_${o.id}`} value={o.discount || ''} min="0" step="1" /></Field>
+                <Field label="Discount Amount ₹" hint={resolvedPrices.get(o.id)?.maximumDiscount != null ? `Maximum accommodation discount: ${money(resolvedPrices.get(o.id)!.maximumDiscount!)} (updated for the selected dates).` : 'Staff Rate not supplied: a positive discount cannot be applied.'}><input type="number" name={`discount_${o.id}`} value={o.discount || ''} min="0" step="1" /></Field>
                 <Field label="Other extras ₹"><input type="number" name={`extra_${o.id}`} value={Math.max(0, o.extra_charges - chosenAddons(o.addons).reduce((a, x) => a + x.total, 0))} min="0" /></Field>
                 <Field label="Other extras label"><input name={`extralabel_${o.id}`} value={o.extra_label ?? ''} placeholder="e.g. Airport pickup" /></Field>
               </div>
@@ -344,14 +344,14 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                   })}
                 </fieldset>
               )}
-              <div class="rate-strip small">
+              <div class="rate-strip small" data-price-benchmarks>
                 <span class="internal">Staff rate: <strong>{o.staff_rate ? money(o.staff_rate) : 'not set'}</strong></span>
                 <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} ${weekendLabel(weekendOf.get(o.property_id)).replace(' nights', '')}` : ''}</span>
                 <span>Quoted: <strong>{money(effectiveNightly({ ...o, subtotal: resolvedPrices.get(o.id)?.roomCharges ?? o.subtotal }))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
                 {perms.view_net_rates && netStay.get(o.id) && <span class="internal">B2B / Net for these dates: {money(netStay.get(o.id)!)} / room / night</span>}
                 {resolvedPrices.get(o.id)?.errors.map(error => <span class="pill pill-red">{error}</span>)}
               </div>
-              <table class="breakdown narrow-table">
+              <table class="breakdown narrow-table" data-price-breakdown>
                 {(() => {
                   const room = rooms.find((r) => r.id === o.room_id)
                   const n = nightsBetween(o.check_in, o.check_out)
@@ -370,7 +370,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <tr class="total"><td>Total</td><td>{money(o.total)}</td></tr>
                 {perms.view_net_rates && margin != null && <tr class="internal"><td>Room margin (internal, before GST)</td><td>{money(margin)}</td></tr>}
               </table>
-              <p class="muted small">Prices are calculated by the rate rules. Save to recalculate.</p>
+              <p class="muted small" data-price-status role="status" aria-live="polite">{editable ? 'Prices update automatically. Save to retain your changes.' : 'Prices reflect the saved quotation.'}</p>
             </section>
           )
         })}
@@ -424,6 +424,79 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   ))
 })
 
+async function calculateDraftOption(c: Context<AppEnv>, o: QuoteOptionRow, f: Form, applyGst: number) {
+  const oid = String(o.id)
+  const checkIn = isDate(f[`in_${oid}`]) ? f[`in_${oid}`] : o.check_in
+  const checkOut = isDate(f[`out_${oid}`]) && f[`out_${oid}`] > checkIn ? f[`out_${oid}`] : addDays(checkIn, Math.max(1, nightsBetween(o.check_in, o.check_out)))
+  const amount = f[`discount_${oid}`] == null ? o.discount : Number(f[`discount_${oid}`] || 0)
+  const grate = int(f[`grate_${oid}`]) > 0 ? int(f[`grate_${oid}`]) : null
+  // Add-ons ticked from the property's list (prices from the property, never from the form).
+  const propAddons = readAddons((await first<{ addons: string }>(c.env, 'SELECT addons FROM properties WHERE id = ?', o.property_id))?.addons)
+  const picked: ChosenAddon[] = (f.__all[`addon_${oid}`] ?? []).map((i) => propAddons[int(i)]).filter(Boolean).map((a) => {
+    const qty = Math.max(1, Math.min(99, int(f[`addonqty_${oid}_${propAddons.indexOf(a)}`], 1)))
+    return { name: a.name, price: a.price, qty, total: a.price * qty }
+  })
+  const kids = f[`kids_${oid}`] == null
+    ? chosenAddons(o.addons).find(a => a.kind === 'kids')?.total ?? 0
+    : Math.max(0, int(f[`kids_${oid}`]))
+  if (kids > 0) picked.push({ kind: 'kids', name: 'Kids Amount', price: kids, qty: 1, total: kids })
+  const addonTotal = picked.reduce((a, x) => a + x.total, 0)
+  const next = {
+    room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
+    apply_gst: applyGst, discount_pct: 0, discount: amount, extra_charges: Math.max(0, int(f[`extra_${oid}`])) + addonTotal, guest_rate: grate,
+    adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
+    meal_plan: f[`meal_${oid}`] || null,
+  }
+  const p = await priceOption(c, next)
+  return { next, picked, p, amount, grate, checkIn, checkOut }
+}
+
+opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), async (c) => {
+  const q = await loadQuoteFor(c, int(c.req.param('id')))
+  if (!q) return c.json({ error: 'Quotation not found.' }, 404)
+  if (!['draft', 'pending_approval', 'changes_requested'].includes(q.status)) return c.json({ error: 'Reopen this quotation before editing.' }, 409)
+  const f = await form(c)
+  const applyGst = f.gst_control === '1' ? (f.apply_gst === '1' ? 1 : 0) : q.apply_gst ?? 1
+  const perms = await permissionsFor(c.env, c.get('user')!.role)
+  const options = []
+  for (const oid of [...new Set(f.__all.opt_id ?? [])]) {
+    const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE id = ? AND quotation_id = ?', int(oid), q.id)
+    if (!o) return c.json({ error: 'Quotation option not found.' }, 404)
+    const selectedRoom = await first<{ property_id: number }>(c.env, 'SELECT property_id FROM rooms WHERE id = ?', int(f[`room_${oid}`], o.room_id))
+    if (!selectedRoom || selectedRoom.property_id !== o.property_id) return c.json({ error: 'Select a room belonging to this option’s property.' }, 422)
+    const { next, picked, p } = await calculateDraftOption(c, o, f, applyGst)
+    if (!p) return c.json({ error: 'Room rate could not be resolved.' }, 422)
+    const staffRate = await optionStaffRate(c, next)
+    const rows: [string, string][] = [
+      [`Room charges (${p.nights} nights × ${p.roomsCount} rooms)`, money(p.roomCharges)],
+    ]
+    if (p.extraGuests?.total) rows.push(['Extra guests', money(p.extraGuests.total)])
+    if (p.discount) rows.push(['Accommodation discount', `− ${money(p.discount)}`])
+    for (const addon of picked) rows.push([addon.name, money(addon.total)])
+    const other = Math.max(0, int(f[`extra_${oid}`]))
+    if (other) rows.push([str(f[`extralabel_${oid}`], 60) || 'Other extras', money(other)])
+    rows.push([gstLabel(applyGst), money(p.taxes)], ['Total', money(p.total)])
+    const benchmarks = [`Staff rate: ${staffRate == null ? 'not supplied' : money(staffRate)}`, `Quoted: ${money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount)))} / room / night`]
+    const pr = await loadPricing(c.env, next.room_id)
+    if (pr) {
+      const website = calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn: next.check_in, checkOut: next.check_out, roomsCount: next.rooms_count, mealPlan: next.meal_plan })
+      benchmarks.push(`Website rate: ${website.errors.length ? 'not supplied' : money(Math.round(website.roomCharges / Math.max(1, website.nights * website.roomsCount)))}`)
+    }
+    if (perms.view_net_rates) {
+      const net = pr ? netRateForStay(pr.room, pr.seasons, next.check_in, next.check_out, next.meal_plan) : null
+      if (net != null) {
+        benchmarks.push(`B2B / Net for these dates: ${money(net)} / room / night`)
+        rows.push(['Room margin (internal, before GST)', money(p.subtotal - p.discount - net * p.nights * p.roomsCount)])
+      }
+    }
+    options.push({ benchmarks, id: o.id, subtotal: p.subtotal, discount: p.discount, extraCharges: p.extraCharges, taxes: p.taxes, total: p.total,
+      rows, errors: p.errors, staffRate, maximumDiscount: p.maximumDiscount,
+      quoted: money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount))) })
+  }
+  c.header('Cache-Control', 'private, no-store')
+  return c.json({ options })
+})
+
 /** Save all fields and re-price every option by the rate rules. */
 async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
   const u = c.get('user')!
@@ -435,14 +508,8 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
     for (const oid of f.__all.opt_id ?? []) {
       const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE id = ? AND quotation_id = ?', int(oid), q.id)
       if (!o) continue
-      const amount = f[`discount_${oid}`] == null ? o.discount : Number(f[`discount_${oid}`] || 0)
+      const { p: base, amount } = await calculateDraftOption(c, o, f, applyGst)
       if (!Number.isSafeInteger(amount) || amount < 0) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Enter a valid whole-rupee Discount Amount.' }) })
-      const checkIn = isDate(f[`in_${oid}`]) ? f[`in_${oid}`] : o.check_in
-      const checkOut = isDate(f[`out_${oid}`]) && f[`out_${oid}`] > checkIn ? f[`out_${oid}`] : addDays(checkIn, Math.max(1, nightsBetween(o.check_in, o.check_out)))
-      const base = await priceOption(c, { room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut,
-        rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)), apply_gst: applyGst, discount_pct: 0, discount: amount, extra_charges: 0,
-        guest_rate: int(f[`grate_${oid}`]) > 0 ? int(f[`grate_${oid}`]) : null,
-        adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)), meal_plan: f[`meal_${oid}`] || null })
       if (!base) continue
       if (base.errors.length) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: base.errors[0] }) })
     }
@@ -460,28 +527,7 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
     for (const oid of f.__all.opt_id ?? []) {
       const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE id = ? AND quotation_id = ?', int(oid), q.id)
       if (!o) continue
-      const checkIn = isDate(f[`in_${oid}`]) ? f[`in_${oid}`] : o.check_in
-      const checkOut = isDate(f[`out_${oid}`]) && f[`out_${oid}`] > checkIn ? f[`out_${oid}`] : addDays(checkIn, Math.max(1, nightsBetween(o.check_in, o.check_out)))
-      const amount = f[`discount_${oid}`] == null ? o.discount : Number(f[`discount_${oid}`] || 0)
-      const grate = int(f[`grate_${oid}`]) > 0 ? int(f[`grate_${oid}`]) : null
-      // Add-ons ticked from the property's list (prices from the property, never from the form).
-      const propAddons = readAddons((await first<{ addons: string }>(c.env, 'SELECT addons FROM properties WHERE id = ?', o.property_id))?.addons)
-      const picked: ChosenAddon[] = (f.__all[`addon_${oid}`] ?? []).map((i) => propAddons[int(i)]).filter(Boolean).map((a) => {
-        const qty = Math.max(1, Math.min(99, int(f[`addonqty_${oid}_${propAddons.indexOf(a)}`], 1)))
-        return { name: a.name, price: a.price, qty, total: a.price * qty }
-      })
-      const kids = f[`kids_${oid}`] == null
-        ? chosenAddons(o.addons).find(a => a.kind === 'kids')?.total ?? 0
-        : Math.max(0, int(f[`kids_${oid}`]))
-      if (kids > 0) picked.push({ kind: 'kids', name: 'Kids Amount', price: kids, qty: 1, total: kids })
-      const addonTotal = picked.reduce((a, x) => a + x.total, 0)
-      const next = {
-        room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
-        apply_gst: applyGst, discount_pct: 0, discount: amount, extra_charges: Math.max(0, int(f[`extra_${oid}`])) + addonTotal, guest_rate: grate,
-        adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
-        meal_plan: f[`meal_${oid}`] || null,
-      }
-      const p = await priceOption(c, next)
+      const { next, picked, p, amount, grate, checkIn, checkOut } = await calculateDraftOption(c, o, f, applyGst)
       if (!p) continue
       const disc = amount === o.discount && p.subtotal === o.subtotal
         ? o.discount_pct // Retain legacy descriptive percentage; it no longer controls authorization.
