@@ -43,6 +43,12 @@ describe('property activity child items',()=>{
       expect(html).toContain('name="act_0_item_name" value="Barbecue"')
       expect(html).toContain('name="act_1_item_name" value="Guide"')
       expect(html).toContain('name="act_1_item_free" value="1"')
+      expect(html).toContain('<td colspan="4"><div class="activity-main">')
+      expect(html).toContain('</div><div class="activity-items"')
+      expect(html).not.toContain('act-item-charge')
+      expect(html).toContain('class="act-item-amount" aria-label="Item charge amount (₹)" min="0" disabled')
+      expect(html).toContain('class="act-item-value" name="act_0_item_amt" value="500"')
+      expect(html).toContain('class="act-item-value" name="act_1_item_amt" value=""')
       expect(f.db.prepare("SELECT * FROM taxonomy WHERE label='Music'").all()).toHaveLength(0)
       expect(f.saved().map(a=>a.name)).toEqual(['Bonfire','Plantation Tour'])
       expect(JSON.stringify(['properties','rooms','season_rates','property_photos'].map(t=>f.db.prepare('SELECT * FROM '+t+' WHERE '+(t==='properties'?'id':'property_id')+' IS NOT ? ORDER BY id').all(f.id)))).toBe(before)
@@ -78,24 +84,29 @@ describe('property activity child items',()=>{
       expect(f.saved()).toEqual(withItems)
     }finally{f.db.close()}
   })
-  it('client adds/removes a child within its parent and keeps child charge toggles independent',()=>{
+  it('client adds/removes a child within its parent and keeps complimentary amounts disabled without losing submission positions',()=>{
     const events=(o:any)=>Object.assign(o,{listeners:{} as Record<string,Function>,addEventListener(k:string,f:Function){this.listeners[k]=f}})
-    const child=()=>{const inputs:any[]=[{name:'act___ACT___item_name',value:'',focus(){}},{name:'act___ACT___item_free',value:'0'},{name:'act___ACT___item_amt',value:'',focus(){}}];const c:any={inputs,free:{checked:false},charge:{checked:false},state:inputs[1],amount:inputs[2],cloneNode(){return child()},remove(){this.parent.children=this.parent.children.filter((i:any)=>i!==this)}};return c}
+    const child=()=>{const inputs:any[]=[{name:'act___ACT___item_name',value:'',focus(){}},{name:'act___ACT___item_free',value:'0'},{name:'act___ACT___item_amt',value:'',focus(){}}];const c:any={inputs,free:{checked:false},charge:{checked:false},state:inputs[1],value:inputs[2],amount:{value:'',disabled:false,focus(){},classList:{contains(){return true}}},cloneNode(){return child()},remove(){this.parent.children=this.parent.children.filter((i:any)=>i!==this)}};return c}
     const parents=[0,1].map(i=>({dataset:{actRow:String(i)},name:{value:i?'Jeep Safari':'Bonfire'},items:{children:[] as any[],appendChild(c:any){this.children.push(c);c.parent=this}}}))
     const acts=events({children:parents}),add=events({})
     const source=readFileSync('public/app.js','utf8') as string
     runInNewContext(source.slice(source.indexOf('  var acts ='),source.indexOf('  var contacts =')),{
-      $:(s:string,r:any)=>s==='[data-acts]'?acts:s==='[data-add-activity]'?add:s==='input[name=act_name]'?r.name:s==='[data-act-items]'?r.items:s==='input'?r.inputs[0]:s==='.act-item-free'?r.free:s==='.act-item-charge'?r.charge:s==='.act-item-amount'?r.amount:r.state,
+      $:(s:string,r:any)=>s==='[data-acts]'?acts:s==='[data-add-activity]'?add:s==='input[name=act_name]'?r.name:s==='[data-act-items]'?r.items:s==='input'?r.inputs[0]:s==='.act-item-free'?r.free:s==='.act-item-value'?r.value:s==='.act-item-amount'?r.amount:r.state,
       $$:(s:string,r:any)=>s==='[data-act-row]'?parents:r.inputs,document:{getElementById(){return {content:{firstElementChild:child()}}}},alert(){},cloneClean(){},
     })
     const clickAdd=(p:any)=>acts.listeners.click({target:{closest(s:string){return s==='[data-add-act-item]'?{closest(){return p}}:null}}})
     clickAdd(parents[0]);clickAdd(parents[0]);clickAdd(parents[1])
     expect(parents[0].items.children.map(c=>c.inputs[0].name)).toEqual(['act_0_item_name','act_0_item_name'])
     expect(parents[1].items.children[0].inputs[0].name).toBe('act_1_item_name')
-    const c=parents[0].items.children[0];c.free.checked=true;c.amount.value='500';c.charge.checked=true
-    c.free.closest=()=>c;c.charge.closest=()=>c
-    acts.listeners.change({target:c.free});expect(c.amount.value).toBe('');expect(c.charge.checked).toBe(false);expect(c.state.value).toBe('1')
-    c.charge.checked=true;acts.listeners.change({target:c.charge});expect(c.free.checked).toBe(false);expect(c.state.value).toBe('0')
+    const c=parents[0].items.children[0];c.amount.closest=()=>c;c.free.closest=()=>c
+    c.amount.value='500';acts.listeners.input({target:c.amount});expect(c.value.value).toBe('500')
+    c.free.checked=true
+    acts.listeners.change({target:c.free});expect(c.amount.value).toBe('');expect(c.amount.disabled).toBe(true);expect(c.value.value).toBe('');expect(c.state.value).toBe('1')
+    c.free.checked=false;acts.listeners.change({target:c.free});expect(c.amount.disabled).toBe(false);expect(c.amount.value).toBe('');expect(c.state.value).toBe('0')
+    const second=parents[0].items.children[1];second.amount.closest=()=>second
+    second.amount.value='1000';acts.listeners.input({target:second.amount})
+    expect(parents[0].items.children.map(c=>c.value.value)).toEqual(['','1000'])
+    expect(parents.map(p=>p.name.value)).toEqual(['Bonfire','Jeep Safari'])
     acts.listeners.click({target:{closest(s:string){return s==='[data-del-act-item]'?{closest(){return c}}:null}}})
     expect(parents[0].items.children).toHaveLength(1);expect(parents[1].items.children).toHaveLength(1)
   })

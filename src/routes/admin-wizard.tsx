@@ -552,12 +552,12 @@ async function step4(c: Context<AppEnv>, p: PropertyRow) {
   const rows: (Addon | null)[] = adds.length ? adds : [null, null, null, null]
   const Item: FC<{ keyId: string; item?: ActivityItem }> = ({ keyId, item }) => (
     <div class="activity-item" data-act-item>
-      <label class="wf"><span class="small">Item / add-on name</span><input name={`act_${keyId}_item_name`} value={item?.name ?? ''} maxlength={80} placeholder="e.g. Music" /></label>
+      <label class="activity-item-name"><span aria-hidden="true">↳</span><input aria-label="Item / add-on name" name={`act_${keyId}_item_name`} value={item?.name ?? ''} maxlength={80} placeholder="e.g. Music" /></label>
       <label class="check"><input type="checkbox" class="act-item-free" checked={!!item?.complimentary} /> Complimentary</label>
       <input type="hidden" class="act-item-state" name={`act_${keyId}_item_free`} value={item?.complimentary ? '1' : '0'} />
-      <label class="check"><input type="checkbox" class="act-item-charge" checked={!!item && !item.complimentary} /> Chargeable</label>
-      <label class="wf"><span class="small">Charge Amount (₹)</span><input type="number" class="act-item-amount" name={`act_${keyId}_item_amt`} min="0" value={item && !item.complimentary ? item.price : ''} /></label>
-      <button type="button" class="linklike" data-del-act-item aria-label="Remove activity item">Remove item</button>
+      <input type="number" class="act-item-amount" aria-label="Item charge amount (₹)" min="0" disabled={!!item?.complimentary} value={item && !item.complimentary ? item.price : ''} placeholder="Amount (₹)" />
+      <input type="hidden" class="act-item-value" name={`act_${keyId}_item_amt`} value={item && !item.complimentary ? item.price : ''} />
+      <button type="button" class="linklike" data-del-act-item aria-label="Remove activity item">×</button>
     </div>
   )
   return page(c, { title: `Charges · ${p.name}`, area: 'admin', active: 'prop_new' }, (
@@ -588,13 +588,16 @@ async function step4(c: Context<AppEnv>, p: PropertyRow) {
               <tbody data-acts>
                 {rows.map((a, index) => (
                   <tr data-act-row={index}>
-                    <td><input type="hidden" name="act_key" value={index} /><input name="act_name" list="activities" value={a?.name ?? ''} placeholder="Select activity" />
+                    <td colspan={4}>
+                      <div class="activity-main">
+                        <div><input type="hidden" name="act_key" value={index} /><input name="act_name" list="activities" value={a?.name ?? ''} placeholder="Select activity" aria-label="Activity" /></div>
+                        <div><label class="check"><input type="checkbox" class="act-free" checked={!!a?.complimentary} /> Complimentary</label><input type="hidden" name="act_free" value={a?.complimentary ? '1' : '0'} /></div>
+                        <span class="row"><input type="checkbox" class="act-charge" checked={!!a && !a.complimentary && a.price > 0} aria-label="Chargeable" /><input type="number" min="0" name="act_amt" value={a && !a.complimentary ? val(a.price) : ''} placeholder="Enter amount" aria-label="Activity charge amount (₹)" /></span>
+                        <button type="button" class="icon-btn" data-del-row aria-label="Remove">{I.trash}</button>
+                      </div>
                       <div class="activity-items" data-act-items>{(a?.items ?? []).map((item) => <Item keyId={String(index)} item={item} />)}</div>
                       <button type="button" class="linklike small" data-add-act-item>{I.plus} Add Item</button>
                     </td>
-                    <td><label class="check"><input type="checkbox" class="act-free" checked={!!a?.complimentary} /> Complimentary</label><input type="hidden" name="act_free" value={a?.complimentary ? '1' : '0'} /></td>
-                    <td><span class="row"><input type="checkbox" class="act-charge" checked={!!a && !a.complimentary && a.price > 0} aria-label="Chargeable" /><input type="number" min="0" name="act_amt" value={a && !a.complimentary ? val(a.price) : ''} placeholder="Enter amount" /></span></td>
-                    <td><button type="button" class="icon-btn" data-del-row aria-label="Remove">{I.trash}</button></td>
                   </tr>
                 ))}
               </tbody>

@@ -670,12 +670,18 @@
       var d = e.target.closest('[data-del-row]'); if (!d) return
       var tr = d.closest('tr'); if (acts.children.length > 1) tr.remove(); else { $('[data-act-items]', tr).replaceChildren(); $$('input', tr).forEach(function (i) { if (i.type === 'checkbox') i.checked = false; else if (i.name === 'act_free') i.value = '0'; else if (i.type !== 'hidden') i.value = '' }); }
     })
+    // Named hidden amounts keep submission positions intact for disabled complimentary inputs.
+    acts.addEventListener('input', function (e) {
+      var item = e.target.closest('[data-act-item]');
+      if (item && e.target.classList.contains('act-item-amount')) $('.act-item-value', item).value = e.target.value;
+    })
     acts.addEventListener('change', function (e) {
       var item = e.target.closest('[data-act-item]');
       if (item) {
-        var free = $('.act-item-free', item), charge = $('.act-item-charge', item), amount = $('.act-item-amount', item), state = $('.act-item-state', item);
-        if (e.target === free && free.checked) { charge.checked = false; amount.value = ''; }
-        if (e.target === charge && charge.checked) { free.checked = false; amount.focus(); }
+        var free = $('.act-item-free', item), amount = $('.act-item-amount', item), state = $('.act-item-state', item);
+        if (free.checked) amount.value = '';
+        amount.disabled = free.checked;
+        $('.act-item-value', item).value = amount.value;
         state.value = free.checked ? '1' : '0'; return;
       }
       var tr = e.target.closest('tr'); if (!tr) return

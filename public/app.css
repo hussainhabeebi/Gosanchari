@@ -848,9 +848,22 @@ code { overflow-wrap: anywhere; }
 .common-photos .photo-failed { color: #ad2430; }
 .common-photos progress { width: 100%; height: 6px; }
 
-/* Optional items remain visually nested beneath their parent activity. */
-.activity-items { display: grid; gap: 8px; margin: 8px 0; }
-.activity-item { display: grid; gap: 6px; padding: 10px; border-left: 3px solid #d8b676; border-radius: 6px; background: #fffaf0; }
-.activity-item .wf { min-width: 0; }
-.activity-item input:not([type=checkbox]) { width: 100%; }
-.activity-item [data-del-act-item] { justify-self: start; }
+/* Parent controls have their own grid; nested items cannot shift their alignment. */
+.act-table thead tr, .activity-main, .activity-item { display: grid; grid-template-columns: minmax(0, 2fr) minmax(140px, 1fr) minmax(0, 1.2fr) 36px; gap: 12px; align-items: center; }
+.act-table thead th { padding: 6px 0; }
+.act-table thead tr { padding: 0 8px; }
+.activity-main > *, .activity-item > * { min-width: 0; }
+.activity-main input:not([type=checkbox]) { width: 100%; }
+.activity-items { display: grid; gap: 6px; margin: 6px 0; }
+.activity-item { padding: 4px 0 4px 8px; border-left: 2px solid #d8b676; }
+.activity-item-name { display: flex; align-items: center; gap: 6px; }
+.activity-item input:not([type=checkbox]) { width: 100%; padding: 7px 8px; }
+.activity-item input:disabled { background: #f3f4f6; }
+.activity-item [data-del-act-item] { font-size: 1.25rem; }
+@media (max-width: 699px) {
+  .act-table tr { display: table-row; }
+  .act-table td { padding: 10px 0; border-top: 1px solid #f0f3f8; }
+  .activity-main, .activity-item { grid-template-columns: minmax(0, 1fr) 36px; gap: 6px; }
+  .activity-main > :first-child, .activity-item-name { grid-column: 1; }
+  .activity-main > :last-child, .activity-item > [data-del-act-item] { grid-column: 2; grid-row: 1; }
+}
