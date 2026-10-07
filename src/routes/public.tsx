@@ -34,7 +34,7 @@ publicRoutes.get('/', async (c) => {
   const [content, settings, featured, offers, saved, insights] = await Promise.all([
     getContent(c.env),
     getSettings(c.env),
-    featuredCards(c.env, 8),
+    featuredCards(c.env, 6),
     all<{ code: string; title: string; description: string; discount_type: string; discount_value: number; valid_to: string }>(
       c.env,
       'SELECT code, title, description, discount_type, discount_value, valid_to FROM coupons WHERE active = 1 AND public = 1 AND valid_to >= ? AND valid_from <= ? ORDER BY valid_to LIMIT 3',

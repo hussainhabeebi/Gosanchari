@@ -31,8 +31,11 @@ export async function cardsByIds(env: Env, ids: number[]): Promise<PropertyCard[
   return ids.map((id) => byId.get(id)).filter((r): r is PropertyCard => !!r)
 }
 
-export async function featuredCards(env: Env, limit = 8): Promise<PropertyCard[]> {
-  return all<PropertyCard>(env, `${CARD_SQL} WHERE p.status = 'live' AND p.featured = 1 ORDER BY p.rating_avg DESC LIMIT ?`, limit)
+export async function featuredCards(env: Env, limit = 6): Promise<PropertyCard[]> {
+  // Homepage curation prefers featured stays without excluding other published Admin properties.
+  // Only positive legacy public rates are eligible; private tiers are never selected.
+  const publicCards = CARD_SQL.replace('r.active = 1) AS from_price', 'r.active = 1 AND r.base_rate > 0) AS from_price')
+  return all<PropertyCard>(env, `${publicCards} WHERE p.status = 'live' ORDER BY p.featured DESC, p.rating_avg DESC, p.created_at DESC, p.id DESC LIMIT ?`, Math.min(6, Math.max(0, limit)))
 }
 
 // ---- Smart search: sentence → filters ----
