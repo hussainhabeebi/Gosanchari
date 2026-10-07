@@ -915,3 +915,10 @@ code { overflow-wrap: anywhere; }
 .kids-policy-popover[hidden] { display:none; }
 .kids-policy-popover p { margin:6px 0; }
 .kids-policy-popover [data-kids-room] { border-top:1px solid var(--line); margin-top:10px; padding-top:10px; }
+
+/* Staff Finder labels stay visible after filters are entered. */
+.staff-finder-filters { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; align-items:end; }
+.staff-finder-filters > .field { min-width:0; }
+.staff-finder-filters > .btn { justify-self:start; }
+@media (max-width:900px) { .staff-finder-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:480px) { .staff-finder-filters { grid-template-columns:minmax(0,1fr); gap:10px; } }

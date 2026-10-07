@@ -30,6 +30,8 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
   const q = c.req.queries()
   const flat: Record<string, string | string[]> = {}
   for (const [k, v] of Object.entries(q)) flat[k] = v.length > 1 ? v : v[0]
+  // Staff Finder no longer supports a maximum-price filter, including old URLs.
+  delete flat.priceMax
   const f = filtersFromQuery(flat)
   f.sort ??= 'price_asc'
   const enquiryId = int(c.req.query('enquiry')) || null
@@ -65,17 +67,16 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
       <h1>Property finder</h1>
       {(enquiryId || quoteId) && <p class="flash">Adding to {quoteId ? `quotation #${quoteId}` : `a new quotation for enquiry #${enquiryId}`}.</p>}
       {invalidDates && <p class="flash flash-err" role="alert">Check-out must be after check-in, with valid dates.</p>}
-      <form method="get" action="/staff/finder" class="card filters-inline wrap-row">
+      <form method="get" action="/staff/finder" class="card staff-finder-filters">
         {enquiryId && <input type="hidden" name="enquiry" value={enquiryId} />}
         {quoteId && <input type="hidden" name="quote" value={quoteId} />}
-        <Select name="destination" value={f.destination} options={[['', 'Any destination'], ...dests.map((d) => [d, d] as [string, string])]} />
-        <input type="date" name="checkIn" value={f.checkIn ?? ''} />
-        <input type="date" name="checkOut" value={f.checkOut ?? ''} />
-        <input type="number" name="guests" value={f.guests ?? ''} placeholder="Guests" min="1" />
-        <input type="number" name="priceMax" value={f.priceMax ?? ''} placeholder="Max ₹/night" />
-        <Select name="type" value={f.types?.[0]} options={[['', 'Any type'], ...PROPERTY_TYPES.map((t) => [t, STAY_TYPES[t]] as [string, string])]} />
-        <input name="q" value={f.q ?? ''} placeholder="Feel: quiet, lake view, kids…" />
-        <Select name="sort" value={f.sort} options={[['price_asc', 'Price ↑'], ['price_desc', 'Price ↓'], ['rating', 'Rating'], ['recommended', 'Best match']]} />
+        <Field label="Destination"><Select name="destination" value={f.destination} options={[['', 'Any destination'], ...dests.map((d) => [d, d] as [string, string])]} /></Field>
+        <Field label="Check-in"><input type="date" name="checkIn" value={f.checkIn ?? ''} /></Field>
+        <Field label="Check-out"><input type="date" name="checkOut" value={f.checkOut ?? ''} /></Field>
+        <Field label="Guests"><input type="number" name="guests" value={f.guests ?? ''} placeholder="Guests" min="1" /></Field>
+        <Field label="Property Type"><Select name="type" value={f.types?.[0]} options={[['', 'Any type'], ...PROPERTY_TYPES.map((t) => [t, STAY_TYPES[t]] as [string, string])]} /></Field>
+        <Field label="Feel / Preferences"><input name="q" value={f.q ?? ''} placeholder="quiet, lake view, kids…" /></Field>
+        <Field label="Sort By"><Select name="sort" value={f.sort} options={[['price_asc', 'Price ↑'], ['price_desc', 'Price ↓'], ['rating', 'Rating'], ['recommended', 'Best match']]} /></Field>
         <button class="btn btn-sm">Search</button>
       </form>
       <form method="get" action="/staff/finder/compare" id="compare-form">

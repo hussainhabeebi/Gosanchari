@@ -32,11 +32,18 @@ describe('Staff Property Finder seasonal pricing',()=>{
       const id=Number(f.db.prepare("INSERT INTO properties(slug,name,type,destination,status,rate_meal_plan,weekend_nights) VALUES ('staff-munnar-test','Staff Munnar test','resort','Munnar','live','CP','5,6,0')").run().lastInsertRowid)
       const rid=Number(f.db.prepare("INSERT INTO rooms(property_id,name,base_rate,capacity,units) VALUES (?,'CP room',0,2,5)").run(id).lastInsertRowid)
       f.db.prepare("INSERT INTO season_rates(property_id,room_id,name,start_date,end_date,rate,staff_rate,net_rate,staff_weekend_rate,net_weekend_rate,meal_plan,source,kind) VALUES (?,?,'Season','2026-10-01','2027-03-31',NULL,3250,998877,3500,998877,'CP','wizard','season')").run(id,rid)
-      const query='/staff/finder?destination=Munnar&checkIn=2026-10-16&checkOut=2026-10-21&guests=2&type=resort&sort=recommended&priceMax=&q='
+      const query='/staff/finder?destination=Munnar&checkIn=2026-10-16&checkOut=2026-10-21&guests=2&type=resort&sort=recommended&q='
       const response=await f.app.request('http://localhost'+query,{},f.env)
       expect(response.status).toBe(200)
       const html=await response.text()
       expect(html).toContain('Staff Munnar test')
+      const filterForm = html.match(/<form method="get" action="\/staff\/finder"[\s\S]*?<\/form>/)![0]
+      expect(filterForm).not.toContain('priceMax')
+      expect(filterForm).not.toContain('Max ₹/night')
+      expect(filterForm).toContain('staff-finder-filters')
+      for (const label of ['Destination', 'Check-in', 'Check-out', 'Guests', 'Property Type', 'Feel / Preferences', 'Sort By']) expect(filterForm).toContain('class="field-label">'+label+'</span>')
+      const oneGuest = await (await f.app.request('http://localhost/staff/finder?guests=1',{},f.env)).text()
+      expect(oneGuest).toContain('class="field-label">Guests</span><input type="number" name="guests" value="1"')
       expect(html).toContain('₹3,400')
       expect(html).not.toContain('₹0')
       expect(html).not.toContain('9,98,877')
@@ -45,7 +52,8 @@ describe('Staff Property Finder seasonal pricing',()=>{
         new URLSearchParams(suffix.replace(/^&/,'')).forEach((v,k)=>url.searchParams.set(k,v))
         return await (await f.app.request(url.toString(),{},f.env)).text()
       }
-      expect(await request('&priceMax=3300')).not.toContain('Staff Munnar test')
+      expect(await request('&priceMax=1')).toContain('Staff Munnar test')
+      expect(await request('&priceMax=3300')).toContain('Staff Munnar test')
       expect(await request('&priceMax=3500')).toContain('Staff Munnar test')
       expect(await request('&checkIn=2026-10-19&checkOut=2026-10-21')).toContain('₹3,250')
       expect(await request('&checkOut=2026-10-19')).toContain('₹3,500')
