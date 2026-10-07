@@ -1,7 +1,6 @@
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
 import { Hono, type Context } from 'hono'
-import { quotationPdf, quotationPdfFilename, type PdfQuoteOption } from '../lib/quotation-pdf'
 import { HTTPException } from 'hono/http-exception'
 import { addons as readAddons, ADDON_PER, chosenAddons, contact as readContact, extrasLabel, guestsText, STAY_TYPES, stayTypeLabel, type ChosenAddon } from '../lib/catalog'
 import type { AppEnv } from '../env'
@@ -271,8 +270,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
         <div><a href="/staff/quotes" class="small">← Quotations</a><h1>Quotation {q.code} <Pill s={q.status} /></h1>{enquiry && <a class="small" href={`/staff/enquiries/${enquiry.id}`}>Enquiry {enquiry.code} · {enquiry.summary ?? ''}</a>}</div>
         <div class="row wrap-row">
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/preview`} target="_blank">Preview</a>
-          <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/pdf`}>PDF</a>
-          <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/pdf?download=1`}>Download PDF</a>
+          <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/print`} target="_blank">PDF</a>
           <form method="post" action={`/staff/quotes/${q.id}/duplicate`} class="inline"><button class="btn btn-sm btn-outline">Duplicate</button></form>
         </div>
       </div>
@@ -689,21 +687,6 @@ opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (
       <p class="muted">Valid till {fmtDate(q.valid_till)}</p>
     </div>
   ))
-})
-
-// A direct PDF response works with native mobile browser Save/Download/Share.
-opsRoutes.get('/staff/quotes/:id/pdf', requirePerm('manage_quotes'), async (c) => {
-  const q = await loadQuoteFor(c, int(c.req.param('id')))
-  if (!q) return c.notFound()
-  const s = await getSettings(c.env)
-  const options = await all<PdfQuoteOption>(c.env, 'SELECT o.*, p.name AS property_name, p.destination, r.name AS room_name FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE quotation_id = ? ORDER BY o.id', q.id)
-  const bytes = await quotationPdf(q, options, s.business, c.env.SITE_URL)
-  return new Response(bytes, { headers: {
-    'Content-Type': 'application/pdf',
-    'Content-Disposition': `${c.req.query('download') === '1' ? 'attachment' : 'inline'}; filename="${quotationPdfFilename(q.code)}"`,
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff',
-  } })
 })
 
 opsRoutes.get('/staff/quotes/:id/print', requirePerm('manage_quotes'), async (c) => {

@@ -75,9 +75,3 @@ crons = ["30 1 * * *", "30 2 * * 1"]
 
 [observability]
 enabled = true
-
-# Embedded quotation font; loaded as bytes without a runtime network request.
-[[rules]]
-type = "Data"
-globs = ["**/*.ttf"]
-fallthrough = true
