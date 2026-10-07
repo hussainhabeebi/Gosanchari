@@ -118,7 +118,10 @@ describe('unsaved quotation recalculation', () => {
       expect(html.indexOf('Apply GST to quotation')).toBeGreaterThan(html.indexOf('data-price-benchmarks'));
       expect(html.indexOf('Apply GST to quotation')).toBeLessThan(html.indexOf('data-price-breakdown'));
       expect(html).toContain('Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹749');
+      expect(html).not.toContain('Staff rate:');
       const b=f.form('500');const p=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body:b},f.env)).json() as any).options[0];
+      expect(p.benchmarks.join(' ')).not.toContain('Staff rate:');
+      expect(p.benchmarks.join(' ')).toContain('Website rate:');
       expect(p.discountHint).toBe('Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹749');
       expect(p.benchmarks.join(' ')).toContain('Accommodation selling rate after discount: ₹3,499 / room / night');expect(p.discountError).toBe('');
       b.set(`discount_${f.oid}`,'800');const bad=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body:b},f.env)).json() as any).options[0];
@@ -147,7 +150,7 @@ function browserFixture() {
   runInNewContext(previewScript,{document:{querySelector(){return form},createElement(){return {textContent:'',children:[] as any[],append(x:any){this.children.push(x)}}}},Intl,AbortController,FormData:class {},setTimeout(fn:any){task=fn;return 1},clearTimeout(){task=null},fetch(url:any,init:any){return new Promise(resolve=>requests.push({resolve,url,init}))}});
   const change=(name:string,type='number',event='input')=>handlers[event]({type:event,target:{name,type,tagName:type==='select'?'SELECT':'INPUT'}});
   const flush=()=>{const f=task;task=null;f?.()};
-  const finish=(index:number,total:string,ok=true)=>requests[index].resolve({ok,json:async()=>ok?{options:[{id:1,rows:[['Total',total]],errors:[],benchmarks:['Staff rate: ₹3,250'],maximumDiscount:500,discountHint:'Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹500',discountError:''}]}:{error:'Preview unavailable'}});
+  const finish=(index:number,total:string,ok=true)=>requests[index].resolve({ok,json:async()=>ok?{options:[{id:1,rows:[['Total',total]],errors:[],benchmarks:['Quoted: ₹3,499 / room / night','Website rate: ₹3,999'],maximumDiscount:500,discountHint:'Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹500',discountError:''}]}:{error:'Preview unavailable'}});
   return {change,flush,finish,requests,status,table,field,benchmarks,hint,discountError};
 }
 const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve()};

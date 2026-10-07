@@ -360,7 +360,6 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 </fieldset>
               )}
               <div class="rate-strip small" data-price-benchmarks>
-                <span class="internal">Staff rate: <strong>{o.staff_rate ? money(o.staff_rate) : 'not set'}</strong></span>
                 <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} ${weekendLabel(weekendOf.get(o.property_id)).replace(' nights', '')}` : ''}</span>
                 <span>{o.discount > 0 ? 'Accommodation selling rate after discount: ' : 'Quoted: '}<strong>{money(effectiveNightly({ ...o, subtotal: resolvedPrices.get(o.id)?.roomCharges ?? o.subtotal }))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
                 {perms.view_net_rates && netStay.get(o.id) && <span class="internal">B2B / Net for these dates: {money(netStay.get(o.id)!)} / room / night</span>}
@@ -494,7 +493,7 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
     if (other) rows.push([str(f[`extralabel_${oid}`], 60) || 'Other extras', money(other)])
     rows.push([gstLabel(applyGst), money(p.taxes)], ['Total', money(p.total)])
     const discountInfo = discountExplanation(p, next.discount)
-    const benchmarks = [`Staff rate: ${staffRate == null ? 'not supplied' : money(staffRate)}`, `${next.discount > 0 ? 'Accommodation selling rate after discount' : 'Quoted'}: ${money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount)))} / room / night`]
+    const benchmarks = [`${next.discount > 0 ? 'Accommodation selling rate after discount' : 'Quoted'}: ${money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount)))} / room / night`]
     const pr = await loadPricing(c.env, next.room_id)
     if (pr) {
       const website = calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn: next.check_in, checkOut: next.check_out, roomsCount: next.rooms_count, mealPlan: next.meal_plan })
