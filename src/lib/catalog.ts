@@ -282,11 +282,11 @@ export function addonLines(list: Addon[], withNet: boolean): string {
   return list.map((a) => (withNet ? [a.name, a.price, a.net ?? '', a.per ?? 'stay'] : [a.name, a.price, a.per ?? 'stay']).join(' | ')).join('\n')
 }
 
-export interface ChosenAddon { name: string; price: number; qty: number; total: number }
+export interface ChosenAddon { kind?: 'kids'; name: string; price: number; qty: number; total: number }
 export const chosenAddons = (s: string | null | undefined) => parseJson<ChosenAddon[]>(s, []).filter((a) => a && a.name)
 /** Guest-facing label for a quote option's extras: "Campfire + Candle-light dinner + Airport pickup". */
 export function extrasLabel(o: { extra_label: string | null; addons?: string | null; extra_charges: number }): string {
   const adds = chosenAddons(o.addons)
   const manual = o.extra_charges - adds.reduce((a, x) => a + x.total, 0)
-  return [...adds.map((a) => (a.qty > 1 ? `${a.name} × ${a.qty}` : a.name)), ...(manual > 0 ? [o.extra_label || 'Other extras'] : [])].join(' + ') || o.extra_label || 'Extras'
+  return [...adds.map((a) => (a.kind === 'kids' ? `${a.name} (${money(a.total)})` : a.qty > 1 ? `${a.name} × ${a.qty}` : a.name)), ...(manual > 0 ? [o.extra_label || 'Other extras'] : [])].join(' + ') || o.extra_label || 'Extras'
 }
