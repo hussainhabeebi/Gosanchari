@@ -300,21 +300,21 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Check-out"><input type="date" name={`out_${o.id}`} value={o.check_out} required /></Field>
                 <Field label="Rooms"><input type="number" name={`rooms_${o.id}`} value={o.rooms_count} min="1" /></Field>
                 <Field label="Adults"><input type="number" name={`adults_${o.id}`} value={o.adults} min="1" /></Field>
-                <Field label="Children"><input type="number" name={`children_${o.id}`} value={o.children} min="0" /></Field>
-                <details class="kids-policy">
-                  <summary>See Kids Policy</summary>
-                  <div class="card small">
+                <div class="field kids-policy-field">
+                  <div class="kids-policy-label"><label class="field-label" for={`children_${o.id}`}>Children</label><button type="button" class="linklike kids-policy-trigger" data-kids-policy-toggle aria-controls={`kids-policy-${o.id}`} aria-expanded="false">See Kids Policy</button></div>
+                  <input id={`children_${o.id}`} type="number" name={`children_${o.id}`} value={o.children} min="0" />
+                  <div id={`kids-policy-${o.id}`} class="kids-policy-popover" hidden role="dialog" aria-label={`${o.property_name} — Kids Policy`} tabindex={-1} data-kids-room-select={`room_${o.id}`}>
                     <strong>{o.property_name} — Kids Policy</strong>
                     {o.child_free_below != null && <p>Children below {o.child_free_below}: Complimentary</p>}
                     {o.child_age_to != null && <p>Child rate up to age {o.child_age_to}; {o.child_age_to + 1}+ years treated as adult.</p>}
-                    {rooms.map(r => (r.extra_child_rate != null || r.child_no_bed_rate != null) && <div>
-                      <strong>{r.name}</strong>
-                      {r.extra_child_rate != null && <p>Child with bed: {money(r.extra_child_rate)}</p>}
-                      {r.child_no_bed_rate != null && <p>Child without bed: {money(r.child_no_bed_rate)}</p>}
+                    {rooms.map(r => <div data-kids-room={r.id} hidden={r.id !== o.room_id}>
+                      <strong>Selected room: {r.name}</strong>
+                      {r.extra_child_rate != null && <p>With bed: {money(r.extra_child_rate)}</p>}
+                      {r.child_no_bed_rate != null && <p>Without bed: {money(r.child_no_bed_rate)}</p>}
+                      {r.extra_child_rate == null && r.child_no_bed_rate == null && <p>Room kids charges not supplied.</p>}
                     </div>)}
-                    {o.child_free_below == null && o.child_age_to == null && !rooms.some(r => r.extra_child_rate != null || r.child_no_bed_rate != null) && <p>Kids policy not supplied.</p>}
                   </div>
-                </details>
+                </div>
                 <Field label="Kids Amount ₹" hint="Total child charge for this option's entire stay, after checking the policy."><input type="number" name={`kids_${o.id}`} value={chosenAddons(o.addons).find(a => a.kind === 'kids')?.total ?? ''} min="0" /></Field>
                 <Field label="Meal plan"><Select name={`meal_${o.id}`} value={o.meal_plan ?? ''} options={[['', 'Room only'], ...meals.map((m) => [m, MEAL_PLANS[m] ?? m] as [string, string])]} /></Field>
                 <Field label="Guest rate ₹ / room / night" hint="Your selling price. Blank = website rate."><input type="number" name={`grate_${o.id}`} value={o.guest_rate ?? ''} min="0" placeholder={String(o.base_rate)} /></Field>

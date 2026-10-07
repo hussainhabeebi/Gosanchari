@@ -61,6 +61,11 @@ describe('Staff quotation manual kids policy amounts',()=>{
       expect(read(b).extra_charges).toBe(650)
       const html=await (await f.app.request('http://localhost/staff/quotes/'+qid,{},f.env)).text()
       expect(html).toContain('See Kids Policy')
+      expect(html).not.toContain('<details class="kids-policy"')
+      expect(html).toContain('class="kids-policy-popover" hidden="" role="dialog"')
+      expect(html).toContain('data-kids-room="'+a.rid+'"')
+      expect(html).toContain('Selected room: Family room')
+      expect(html).toContain('With bed: ₹900'); expect(html).toContain('Without bed: ₹650')
       expect(html).toContain('Policy A — Kids Policy');expect(html).toContain('Children below 6: Complimentary')
       expect(html).toContain('Policy B — Kids Policy');expect(html).toContain('Children below 5: Complimentary')
       expect(html).toContain('12+ years treated as adult')
@@ -76,5 +81,19 @@ describe('Staff quotation manual kids policy amounts',()=>{
       expect(read(a).extra_charges).toBe(0);expect(read(a).total).toBe(8400)
       expect(JSON.stringify(['properties','rooms'].map(t=>f.db.prepare('SELECT * FROM '+t+' ORDER BY id').all()))).toBe(before)
     }finally{f.db.close()}
+  })
+})
+
+// Keep the policy outside normal flow; opening it cannot resize the quotation row.
+describe('Quotation kids policy floating layout', () => {
+  it('uses a fixed, viewport-sized overlay and supports option-scoped room selection and dismissal', () => {
+    const css = readFileSync('public/app.css', 'utf8')
+    const js = readFileSync('public/app.js', 'utf8')
+    expect(css).toMatch(/\.kids-policy-popover \{ position:fixed;/)
+    expect(css).toContain('max-width:calc(100vw - 24px)')
+    expect(js).toContain('item.dataset.kidsRoom !== room.value')
+    expect(js).toContain("room.addEventListener('change'")
+    expect(js).toContain("event.key === 'Escape'")
+    expect(js).toContain('!panel.contains(event.target) && !button.contains(event.target)')
   })
 })

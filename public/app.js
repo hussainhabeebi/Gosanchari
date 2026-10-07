@@ -6,6 +6,34 @@
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] }) }
   var money = function (n) { return '₹' + Math.round(n || 0).toLocaleString('en-IN') }
   var json = function (id) { var el = document.getElementById(id); try { return el ? JSON.parse(el.textContent) : null } catch (e) { return null } }
+  // Floating kids policy: scoped to this quotation option, never part of row layout.
+  $$('[data-kids-policy-toggle]').forEach(function (button) {
+    var panel = document.getElementById(button.getAttribute('aria-controls'));
+    var room = button.closest('form').querySelector('[name="' + panel.dataset.kidsRoomSelect + '"]');
+    function updateRoom() {
+      $$('[data-kids-room]', panel).forEach(function (item) { item.hidden = item.dataset.kidsRoom !== room.value; });
+    }
+    function position() {
+      var anchor = button.getBoundingClientRect(), box = panel.getBoundingClientRect();
+      panel.style.left = Math.max(12, Math.min(anchor.left, window.innerWidth - box.width - 12)) + 'px';
+      panel.style.top = Math.max(12, anchor.bottom + box.height + 8 <= window.innerHeight - 12 ? anchor.bottom + 8 : anchor.top - box.height - 8) + 'px';
+    }
+    function close(restoreFocus) {
+      panel.hidden = true; button.setAttribute('aria-expanded', 'false');
+      if (restoreFocus) button.focus();
+    }
+    button.addEventListener('click', function () {
+      if (!panel.hidden) { close(false); return; }
+      document.dispatchEvent(new Event('close-kids-policy'));
+      updateRoom(); panel.hidden = false; button.setAttribute('aria-expanded', 'true'); position(); panel.focus();
+    });
+    room.addEventListener('change', function () { updateRoom(); if (!panel.hidden) position(); });
+    document.addEventListener('click', function (event) { if (!panel.hidden && !panel.contains(event.target) && !button.contains(event.target)) close(false); });
+    document.addEventListener('keydown', function (event) { if (!panel.hidden && event.key === 'Escape') { event.preventDefault(); close(true); } });
+    document.addEventListener('close-kids-policy', function () { close(false); });
+    window.addEventListener('resize', function () { if (!panel.hidden) position(); });
+    window.addEventListener('scroll', function () { if (!panel.hidden) position(); }, true);
+  });
   // Home AI links are fragment destinations; update the indicator on hash navigation.
   function updatePublicNav() {
     if (location.pathname !== '/') return;

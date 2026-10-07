@@ -907,3 +907,11 @@ code { overflow-wrap: anywhere; }
 @media (min-width: 1100px) and (hover: hover) and (pointer: fine) {
   .area-public .destinations-dropdown .nav-panel::before { content: ''; position: absolute; left: 0; right: 0; top: -12px; height: 12px; }
 }
+
+/* Quotation kids policy floats independently of the quotation fields. */
+.kids-policy-label { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.kids-policy-trigger { font-size:11px; white-space:nowrap; padding:0; }
+.kids-policy-popover { position:fixed; z-index:100; width:320px; max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); overflow:auto; box-sizing:border-box; background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 28px #0002; padding:14px; font-size:13px; }
+.kids-policy-popover[hidden] { display:none; }
+.kids-policy-popover p { margin:6px 0; }
+.kids-policy-popover [data-kids-room] { border-top:1px solid var(--line); margin-top:10px; padding-top:10px; }
