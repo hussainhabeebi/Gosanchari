@@ -111,6 +111,24 @@ describe('unsaved quotation recalculation', () => {
       await f.save(b);expect(p[0].total).toBe(f.read().total);expect(p[1].total).toBe((f.db.prepare('SELECT total FROM quotation_options WHERE id=?').get(second) as any).total);
     }finally{f.db.close()}
   });
+  it('places one quotation-wide GST control in the pricing area and explains the discount floor dynamically',async()=>{
+    const f=fixture();try{
+      const html=await(await f.app.request(f.url,{},f.env)).text();
+      expect(html.match(/name="apply_gst"/g)).toHaveLength(1);
+      expect(html.indexOf('Apply GST to quotation')).toBeGreaterThan(html.indexOf('data-price-benchmarks'));
+      expect(html.indexOf('Apply GST to quotation')).toBeLessThan(html.indexOf('data-price-breakdown'));
+      expect(html).toContain('Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹749');
+      const b=f.form('500');const p=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body:b},f.env)).json() as any).options[0];
+      expect(p.discountHint).toBe('Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹749');
+      expect(p.benchmarks.join(' ')).toContain('Accommodation selling rate after discount: ₹3,499 / room / night');expect(p.discountError).toBe('');
+      b.set(`discount_${f.oid}`,'800');const bad=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body:b},f.env)).json() as any).options[0];
+      expect(bad.discountError).toBe('Maximum allowed is ₹749. Selling price cannot go below the Staff Rate of ₹3,250 / room / night.');expect(bad.errors.join(' ')).toContain('Staff Rate');
+      b.set(`rooms_${f.oid}`,'2');b.set(`out_${f.oid}`,'2030-11-03');b.set(`kids_${f.oid}`,'9000');b.set(`extra_${f.oid}`,'10000');
+      const longer=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body:b},f.env)).json() as any).options[0];
+      expect(longer.discountHint).toBe('Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹2,996');expect(longer.maximumDiscount).toBe(2996);
+      b.delete('apply_gst');const off=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body:b},f.env)).json() as any).options[0];expect(off.taxes).toBe(0);expect(off.maximumDiscount).toBe(longer.maximumDiscount);
+    }finally{f.db.close()}
+  });
   it('blocks restricted quotation access and forged option IDs',async()=>{
     const f=fixture('sales',2);try{expect((await f.app.request(f.url+'/recalculate',{method:'POST',body:f.form()},f.env)).status).toBe(404)}finally{f.db.close()}
     const own=fixture();try{const b=own.form();b.set('opt_id','9999');expect((await own.app.request(own.url+'/recalculate',{method:'POST',body:b},own.env)).status).toBe(404)}finally{own.db.close()}
@@ -122,15 +140,15 @@ function browserFixture() {
   const handlers: Record<string,(e:any)=>void> = {}, requests: any[] = [];
   let task: (()=>void)|null = null;
   const status={textContent:''}, table={rows:[] as any[],replaceChildren(){this.rows=[]},append(row:any){this.rows.push(row)}};
-  const benchmarks={textContent:''}, hint={textContent:''};
-  const field={value:'400',parentElement:{querySelector(){return hint}}};
-  const section={querySelector(s:string){return s==='[data-price-breakdown]'?table:s==='[data-price-benchmarks]'?benchmarks:status}};
+  const benchmarks={textContent:''}, hint={textContent:''}, discountError={textContent:'',hidden:true};
+  const field={value:'400',setAttribute:vi.fn(),parentElement:{querySelector(){return hint}}};
+  const section={querySelector(s:string){return s==='[data-price-breakdown]'?table:s==='[data-price-benchmarks]'?benchmarks:s==='[data-discount-error]'?discountError:status}};
   const form={dataset:{quoteRecalculate:'/staff/quotes/1/recalculate'},elements:{discount_1:field},querySelector(){return section},querySelectorAll(){return [status]},addEventListener(t:string,fn:any){handlers[t]=fn}};
   runInNewContext(previewScript,{document:{querySelector(){return form},createElement(){return {textContent:'',children:[] as any[],append(x:any){this.children.push(x)}}}},Intl,AbortController,FormData:class {},setTimeout(fn:any){task=fn;return 1},clearTimeout(){task=null},fetch(url:any,init:any){return new Promise(resolve=>requests.push({resolve,url,init}))}});
   const change=(name:string,type='number',event='input')=>handlers[event]({type:event,target:{name,type,tagName:type==='select'?'SELECT':'INPUT'}});
   const flush=()=>{const f=task;task=null;f?.()};
-  const finish=(index:number,total:string,ok=true)=>requests[index].resolve({ok,json:async()=>ok?{options:[{id:1,rows:[['Total',total]],errors:[],benchmarks:['Staff rate: ₹3,250'],maximumDiscount:500}]}:{error:'Preview unavailable'}});
-  return {change,flush,finish,requests,status,table,field,benchmarks};
+  const finish=(index:number,total:string,ok=true)=>requests[index].resolve({ok,json:async()=>ok?{options:[{id:1,rows:[['Total',total]],errors:[],benchmarks:['Staff rate: ₹3,250'],maximumDiscount:500,discountHint:'Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹500',discountError:''}]}:{error:'Preview unavailable'}});
+  return {change,flush,finish,requests,status,table,field,benchmarks,hint,discountError};
 }
 const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve()};
 describe('automatic browser preview',()=>{
@@ -138,7 +156,7 @@ describe('automatic browser preview',()=>{
     const f=browserFixture();f.change('kids_1');expect(f.requests).toHaveLength(0);f.flush();expect(f.status.textContent).toBe('Updating price…');
     f.change('kids_1');expect(f.requests[0].init.signal.aborted).toBe(true);
     f.finish(0,'old');await settle();expect(f.table.rows).toHaveLength(0);
-    f.flush();f.finish(1,'new');await settle();expect(f.table.rows[0].children[1].textContent).toBe('new');expect(f.field.value).toBe('400');
+    f.flush();f.finish(1,'new');await settle();expect(f.table.rows[0].children[1].textContent).toBe('new');expect(f.field.value).toBe('400');expect(f.hint.textContent).toContain('Staff floor:');expect(f.discountError.hidden).toBe(true);
   });
   it('ignores out-of-order responses and keeps inputs/results on failure',async()=>{
     const f=browserFixture();f.change('room_1','select','change');f.change('apply_gst','checkbox','change');expect(f.requests).toHaveLength(2);

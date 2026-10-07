@@ -949,14 +949,17 @@
         benchmarks.textContent = option.benchmarks.join(' · ');
         var discount = form.elements['discount_' + option.id];
         var hint = discount && discount.parentElement.querySelector('.hint');
-        if (hint) hint.textContent = option.maximumDiscount == null ? 'Staff Rate not supplied: a positive discount cannot be applied.' : 'Maximum accommodation discount: ' + money(option.maximumDiscount);
+        if (hint) hint.textContent = option.discountHint;
+        var discountError = section.querySelector('[data-discount-error]');
+        discountError.textContent = option.discountError;
+        discountError.hidden = !option.discountError;
+        if (discount) discount.setAttribute('aria-invalid', option.discountError ? 'true' : 'false');
         section.querySelector('[data-price-status]').textContent = option.errors.length ? option.errors.join(' ') : 'Price updated. Save to retain your changes.';
       });
     } catch (error) {
       if (version === revision && error.name !== 'AbortError') status(error.message || 'Could not update price. Please try again.');
     }
   }
-  function money(value) { return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value); }
   function changed(event) {
     var field = event.target;
     if (!/^(apply_gst|(?:room|in|out|rooms|adults|children|kids|meal|grate|discount|extra|extralabel|addon|addonqty)_\d+(?:_\d+)?)$/.test(field.name || '')) return;

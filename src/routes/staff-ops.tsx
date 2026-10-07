@@ -175,6 +175,20 @@ async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: s
   return quotationPrice({ room, seasons, staffRoom: pr.room, staffSeasons: pr.seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountAmount: o.discount ?? Math.round(base.roomCharges * o.discount_pct / 100), applyGst: o.apply_gst !== 0, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0, mealPlan: o.meal_plan })
 }
 
+/** Presentation only: the existing server result supplies the floor and allowance. */
+function discountExplanation(p: Awaited<ReturnType<typeof priceOption>>, amount: number) {
+  if (!p || p.staffAccommodation == null || p.maximumDiscount == null) return {
+    hint: 'Staff Rate not supplied: a positive discount cannot be applied.', error: '',
+  }
+  const floor = money(p.staffAccommodation / Math.max(1, p.nights * p.roomsCount))
+  const maximum = money(p.maximumDiscount)
+  return {
+    hint: `Staff floor: ${floor} / room / night · Maximum discount for this stay: ${maximum}`,
+    error: Number.isSafeInteger(amount) && amount > p.maximumDiscount
+      ? `Maximum allowed is ${maximum}. Selling price cannot go below the Staff Rate of ${floor} / room / night.` : '',
+  }
+}
+
 /** Staff rate benchmark for an option's room and dates (season staff rates apply). */
 async function optionStaffRate(c: Context<AppEnv>, o: Pick<QuoteOptionRow, 'room_id' | 'check_in' | 'check_out' | 'meal_plan'>) {
   const pr = await loadPricing(c.env, o.room_id)
@@ -263,6 +277,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   const resolvedPrices = new Map<number, Awaited<ReturnType<typeof priceOption>>>()
   for (const o of options) resolvedPrices.set(o.id, await priceOption(c, { ...o, apply_gst: q.apply_gst }))
   const needsApproval = options.some(o => resolvedPrices.get(o.id)?.errors.length)
+  const gstControl = <label class="check"><input type="hidden" name="gst_control" value="1" disabled={!editable} /><input type="checkbox" name="apply_gst" value="1" checked={q.apply_gst !== 0} disabled={!editable} /> Apply GST to quotation</label>
   const link = `${c.env.SITE_URL}/q/${q.token}`
   return page(c, { title: `Quotation ${q.code}`, area: 'staff', active: 'quotes' }, (
     <div class="stack-lg">
@@ -287,10 +302,10 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
           </div>
         </section>
 
-        <label class="check"><input type="hidden" name="gst_control" value="1" disabled={!editable} /><input type="checkbox" name="apply_gst" value="1" checked={q.apply_gst !== 0} disabled={!editable} /> Apply GST</label>
         {options.map((o, i) => {
           const rooms = allRooms.filter((r) => r.property_id === o.property_id)
           const meals = parseJson<string[]>(o.meal_plans, [])
+          const discountInfo = discountExplanation(resolvedPrices.get(o.id) ?? null, o.discount)
           // Margin = what the guest pays for rooms (after discount, before GST) minus the B2B net cost for these exact dates.
           const net = netStay.get(o.id) ?? null
           const margin = net ? o.subtotal - o.discount - net * nightsBetween(o.check_in, o.check_out) * o.rooms_count : null
@@ -322,7 +337,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Kids Amount ₹" hint="Total child charge for this option's entire stay, after checking the policy."><input type="number" name={`kids_${o.id}`} value={chosenAddons(o.addons).find(a => a.kind === 'kids')?.total ?? ''} min="0" /></Field>
                 <Field label="Meal plan"><Select name={`meal_${o.id}`} value={o.meal_plan ?? ''} options={[['', 'Room only'], ...meals.map((m) => [m, MEAL_PLANS[m] ?? m] as [string, string])]} /></Field>
                 <Field label="Guest rate ₹ / room / night" hint="Your selling price. Blank = website rate."><input type="number" name={`grate_${o.id}`} value={o.guest_rate ?? ''} min="0" placeholder={String(o.base_rate)} /></Field>
-                <Field label="Discount Amount ₹" hint={resolvedPrices.get(o.id)?.maximumDiscount != null ? `Maximum accommodation discount: ${money(resolvedPrices.get(o.id)!.maximumDiscount!)} (updated for the selected dates).` : 'Staff Rate not supplied: a positive discount cannot be applied.'}><input type="number" name={`discount_${o.id}`} value={o.discount || ''} min="0" step="1" /></Field>
+                <Field label="Discount Amount ₹" hint={discountInfo.hint}><input type="number" name={`discount_${o.id}`} value={o.discount || ''} min="0" step="1" aria-describedby={`discount-error-${o.id}`} aria-invalid={discountInfo.error ? 'true' : undefined} /><span id={`discount-error-${o.id}`} data-discount-error class="error small" role="alert" hidden={!discountInfo.error}>{discountInfo.error}</span></Field>
                 <Field label="Other extras ₹"><input type="number" name={`extra_${o.id}`} value={Math.max(0, o.extra_charges - chosenAddons(o.addons).reduce((a, x) => a + x.total, 0))} min="0" /></Field>
                 <Field label="Other extras label"><input name={`extralabel_${o.id}`} value={o.extra_label ?? ''} placeholder="e.g. Airport pickup" /></Field>
               </div>
@@ -347,10 +362,11 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
               <div class="rate-strip small" data-price-benchmarks>
                 <span class="internal">Staff rate: <strong>{o.staff_rate ? money(o.staff_rate) : 'not set'}</strong></span>
                 <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} ${weekendLabel(weekendOf.get(o.property_id)).replace(' nights', '')}` : ''}</span>
-                <span>Quoted: <strong>{money(effectiveNightly({ ...o, subtotal: resolvedPrices.get(o.id)?.roomCharges ?? o.subtotal }))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
+                <span>{o.discount > 0 ? 'Accommodation selling rate after discount: ' : 'Quoted: '}<strong>{money(effectiveNightly({ ...o, subtotal: resolvedPrices.get(o.id)?.roomCharges ?? o.subtotal }))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
                 {perms.view_net_rates && netStay.get(o.id) && <span class="internal">B2B / Net for these dates: {money(netStay.get(o.id)!)} / room / night</span>}
                 {resolvedPrices.get(o.id)?.errors.map(error => <span class="pill pill-red">{error}</span>)}
               </div>
+              {i === 0 && gstControl}
               <table class="breakdown narrow-table" data-price-breakdown>
                 {(() => {
                   const room = rooms.find((r) => r.id === o.room_id)
@@ -375,6 +391,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
           )
         })}
 
+        {options.length === 0 && gstControl}
         {editable && (
           <section class="card">
             <h3>Add an option</h3>
@@ -476,7 +493,8 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
     const other = Math.max(0, int(f[`extra_${oid}`]))
     if (other) rows.push([str(f[`extralabel_${oid}`], 60) || 'Other extras', money(other)])
     rows.push([gstLabel(applyGst), money(p.taxes)], ['Total', money(p.total)])
-    const benchmarks = [`Staff rate: ${staffRate == null ? 'not supplied' : money(staffRate)}`, `Quoted: ${money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount)))} / room / night`]
+    const discountInfo = discountExplanation(p, next.discount)
+    const benchmarks = [`Staff rate: ${staffRate == null ? 'not supplied' : money(staffRate)}`, `${next.discount > 0 ? 'Accommodation selling rate after discount' : 'Quoted'}: ${money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount)))} / room / night`]
     const pr = await loadPricing(c.env, next.room_id)
     if (pr) {
       const website = calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn: next.check_in, checkOut: next.check_out, roomsCount: next.rooms_count, mealPlan: next.meal_plan })
@@ -489,7 +507,7 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
         rows.push(['Room margin (internal, before GST)', money(p.subtotal - p.discount - net * p.nights * p.roomsCount)])
       }
     }
-    options.push({ benchmarks, id: o.id, subtotal: p.subtotal, discount: p.discount, extraCharges: p.extraCharges, taxes: p.taxes, total: p.total,
+    options.push({ discountHint: discountInfo.hint, discountError: discountInfo.error, benchmarks, id: o.id, subtotal: p.subtotal, discount: p.discount, extraCharges: p.extraCharges, taxes: p.taxes, total: p.total,
       rows, errors: p.errors, staffRate, maximumDiscount: p.maximumDiscount,
       quoted: money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount))) })
   }
