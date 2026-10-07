@@ -25,7 +25,7 @@ export interface PageOpts {
   /** Mood hero at the top of the page (public / guest pages). */
   hero?: Omit<HeroProps, 'photo' | 'children'> & { slot?: Child }
   /** Which top-menu item to underline. */
-  nav?: 'home' | 'stays' | 'offers' | 'about' | 'contact'
+  nav?: 'home' | 'stays' | 'offers' | 'about' | 'contact' | 'ai-search' | 'ai-insights'
 }
 
 interface LayoutProps extends PageOpts {
@@ -212,7 +212,18 @@ const GUEST_NAV = [
   { key: 'help', href: '/help', label: 'Help & chat' },
 ]
 
-const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, settings }) => (
+export function publicNav(path: string): PageOpts['nav'] {
+  if (path === '/') return 'home'
+  if (/^\/(search|destinations)(\/|$)/.test(path)) return 'stays'
+  if (/^\/(offers|packages)(\/|$)/.test(path)) return 'offers'
+  if (/^\/about(\/|$)/.test(path)) return 'about'
+  if (/^\/contact(\/|$)/.test(path)) return 'contact'
+  if (/^\/ai-search(\/|$)/.test(path)) return 'ai-search'
+  if (/^\/ai-insights(\/|$)/.test(path)) return 'ai-insights'
+  return undefined
+}
+
+const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: PageOpts['nav'] }> = ({ user, settings, nav }) => (
   <header class="topbar">
     <div class="wrap topbar-in">
       <a href="/" class="logo" aria-label={settings.business.name}>
@@ -221,13 +232,13 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings }> = ({ user, se
       <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
       <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
       <nav class="topnav">
-        <a href="/">Home</a>
-        <a href="/#ai-search" class="nav-ai-link">AI Search</a>
-        <a href="/#ai-insights" class="nav-ai-link">AI Insights</a>
-        <details class="nav-dropdown"><summary>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
-        <a href="/offers">Packages</a>
-        <a href="/about">About Us</a>
-        <details class="nav-dropdown"><summary>Contact</summary><div class="nav-panel contact-panel"><a href={`tel:${settings.business.phone}`}>{settings.business.phone}</a><a href={`mailto:${settings.business.email}`}>{settings.business.email}</a></div></details>
+        <a href="/" data-public-nav="home" aria-current={nav === 'home' ? 'page' : undefined}>Home</a>
+        <a href="/#ai-search" data-public-nav="ai-search" aria-current={nav === 'ai-search' ? 'page' : undefined}>AI Search</a>
+        <a href="/#ai-insights" data-public-nav="ai-insights" aria-current={nav === 'ai-insights' ? 'page' : undefined}>AI Insights</a>
+        <details class="nav-dropdown"><summary data-public-nav="stays" aria-current={nav === 'stays' ? 'page' : undefined}>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
+        <a href="/offers" data-public-nav="offers" aria-current={nav === 'offers' ? 'page' : undefined}>Packages</a>
+        <a href="/about" data-public-nav="about" aria-current={nav === 'about' ? 'page' : undefined}>About Us</a>
+        <details class="nav-dropdown"><summary data-public-nav="contact" aria-current={nav === 'contact' ? 'page' : undefined}>Contact</summary><div class="nav-panel contact-panel"><a href={`tel:${settings.business.phone}`}>{settings.business.phone}</a><a href={`mailto:${settings.business.email}`}>{settings.business.email}</a></div></details>
         {user ? (
           <>
             <a href={isStaff(user.role) ? (user.role === 'sales' ? '/staff' : '/admin') : '/my'} class="btn btn-sm btn-outline">
@@ -351,7 +362,7 @@ export const Layout: FC<LayoutProps> = (p) => {
         </head>
         <body class={`area-${area}${p.embedded ? ' embedded-stay' : ''} journey-${p.journey?.mood ?? 'discovery'}${p.hero && !dash ? ` has-hero hero-text-${p.moodPhoto ? 'dark' : MOODS[p.hero.mood].text}` : ''}`}>
           <a class="skip" href="#main">Skip to content</a>
-          {!(dash && area !== 'guest') && <TopBar user={p.user} settings={p.settings} />}
+          {!(dash && area !== 'guest') && <TopBar user={p.user} settings={p.settings} nav={p.nav} />}
           {dash && area !== 'guest' ? (
             <div class="app-shell">
               <AppSide active={p.active} perms={p.perms} settings={p.settings} />
@@ -415,7 +426,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
     ? (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM enquiries WHERE status = 'new'").first<{ n: number }>().catch(() => null))?.n ?? 0
     : 0
   return c.html(
-    <Layout {...opts} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
+    <Layout {...opts} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
       {body}
     </Layout>,
     status as 200,

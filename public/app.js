@@ -6,6 +6,17 @@
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] }) }
   var money = function (n) { return '₹' + Math.round(n || 0).toLocaleString('en-IN') }
   var json = function (id) { var el = document.getElementById(id); try { return el ? JSON.parse(el.textContent) : null } catch (e) { return null } }
+  // Home AI links are fragment destinations; update the indicator on hash navigation.
+  function updatePublicNav() {
+    if (location.pathname !== '/') return;
+    var active = location.hash === '#ai-search' ? 'ai-search' : location.hash === '#ai-insights' ? 'ai-insights' : 'home';
+    $$('.area-public [data-public-nav]').forEach(function (link) {
+      if (link.dataset.publicNav === active) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    });
+  }
+  updatePublicNav();
+  window.addEventListener('hashchange', updatePublicNav);
   function post(url, data) {
     var body = new URLSearchParams()
     Object.keys(data || {}).forEach(function (k) { if (data[k] != null) body.append(k, data[k]) })

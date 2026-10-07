@@ -867,3 +867,23 @@ code { overflow-wrap: anywhere; }
   .activity-main > :first-child, .activity-item-name { grid-column: 1; }
   .activity-main > :last-child, .activity-item > [data-del-act-item] { grid-column: 2; grid-row: 1; }
 }
+
+/* Public header: transparent integration with readable, compact navigation. */
+.area-public:has(.reference-hero) .topbar, .area-public:has(.destination-hero) .topbar { background: linear-gradient(to bottom, #ffffffb8, #ffffff50 70%, transparent); }
+.area-public .topbar-in { max-width: 1280px; gap: 24px; }
+.area-public .topbar .logo { flex-shrink: 0; }
+.area-public .topnav [data-public-nav], .area-public .topnav .linklike { color: #152b26; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.area-public .topnav [data-public-nav] { position: relative; padding: 8px 0; text-shadow: 0 1px 3px #ffffffc0; }
+.area-public .topnav [data-public-nav][aria-current=page] { font-weight: 600; color: #10291f; }
+.area-public .topnav [data-public-nav][aria-current=page]::after { content: ''; position: absolute; left: 0; right: 0; bottom: 1px; height: 2px; background: #21854d; }
+@media (min-width: 1100px) {
+  .area-public .topnav { flex: 1; gap: 18px; background: transparent; }
+  .area-public .portal-dropdown, .area-public .topnav > .btn-outline { margin-left: auto; }
+  .area-public .portal-dropdown summary { padding: 10px 16px; font-size: 13px; }
+}
+@media (min-width: 900px) and (max-width: 1099px) {
+  .area-public .nav-burger { display: block; }
+  .area-public .topnav { display: none; position: absolute; top: 84px; flex-direction: column; align-items: stretch; background: #fff; padding: 16px; }
+  .area-public .nav-toggle:checked ~ .topnav { display: flex; }
+  .area-public .portal-dropdown { margin-left: 0; }
+}
