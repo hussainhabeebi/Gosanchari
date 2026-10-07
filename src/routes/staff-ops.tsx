@@ -272,6 +272,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
         <div class="row wrap-row">
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/preview`} target="_blank">Preview</a>
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/pdf`}>PDF</a>
+          <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/pdf?download=1`}>Download PDF</a>
           <form method="post" action={`/staff/quotes/${q.id}/duplicate`} class="inline"><button class="btn btn-sm btn-outline">Duplicate</button></form>
         </div>
       </div>
@@ -699,7 +700,7 @@ opsRoutes.get('/staff/quotes/:id/pdf', requirePerm('manage_quotes'), async (c) =
   const bytes = await quotationPdf(q, options, s.business, c.env.SITE_URL)
   return new Response(bytes, { headers: {
     'Content-Type': 'application/pdf',
-    'Content-Disposition': `inline; filename="${quotationPdfFilename(q.code)}"`,
+    'Content-Disposition': `${c.req.query('download') === '1' ? 'attachment' : 'inline'}; filename="${quotationPdfFilename(q.code)}"`,
     'Cache-Control': 'private, no-store',
     'X-Content-Type-Options': 'nosniff',
   } })

@@ -67,6 +67,17 @@ describe('Direct authenticated quotation PDF',()=>{
       expect(JSON.stringify(f.db.prepare('SELECT * FROM quotation_options WHERE quotation_id=?').all(f.qid))).toBe(before)
       const html=await (await f.app().request(f.url,{},f.env)).text()
       expect(html).toContain('href="/staff/quotes/'+f.qid+'/pdf">PDF')
+      expect(html).toContain('href="/staff/quotes/'+f.qid+'/pdf?download=1">Download PDF')
+      const download=await f.app().request(f.url+'/pdf?download=1',{headers:{'User-Agent':agent}},f.env)
+      expect(download.status).toBe(200)
+      expect(download.headers.get('content-type')).toBe('application/pdf')
+      expect(download.headers.get('content-disposition')).toBe('attachment; filename="Quotation-GS-QT-123456.pdf"')
+      expect(download.headers.get('cache-control')).toBe('private, no-store')
+      const downloadedBytes=new Uint8Array(await download.arrayBuffer())
+      expect(new TextDecoder().decode(downloadedBytes.slice(0,4))).toBe('%PDF')
+      expect((await extractedText(downloadedBytes)).text).toBe(text)
+      const invalidMode=await f.app().request(f.url+'/pdf?download=anything',{},f.env)
+      expect(invalidMode.headers.get('content-disposition')).toBe('inline; filename="Quotation-GS-QT-123456.pdf"')
       expect(html).not.toContain('href="/staff/quotes/'+f.qid+'/print" target="_blank">PDF')
       const print=await f.app().request(f.url+'/print',{},f.env)
       expect(print.headers.get('content-type')).toContain('text/html');expect(await print.text()).toContain('Print / Save as PDF')
@@ -75,11 +86,13 @@ describe('Direct authenticated quotation PDF',()=>{
   it('enforces staff permissions and existing restricted-quotation 404 behavior',async()=>{
     const f=fixture()
     try{
-      expect((await f.app(null).request(f.url+'/pdf',{},f.env)).status).toBe(302)
-      expect((await f.app({id:1,role:'guest'}).request(f.url+'/pdf',{},f.env)).status).toBe(403)
-      expect((await f.app({id:999,role:'sales'}).request(f.url+'/pdf',{},f.env)).status).toBe(404)
-      expect((await f.app({id:999,role:'admin'}).request(f.url+'/pdf',{},f.env)).status).toBe(200)
-      expect((await f.app().request('http://localhost/staff/quotes/999999/pdf',{},f.env)).status).toBe(404)
+      for(const mode of ['', '?download=1']){
+      expect((await f.app(null).request(f.url+'/pdf'+mode,{},f.env)).status).toBe(302)
+      expect((await f.app({id:1,role:'guest'}).request(f.url+'/pdf'+mode,{},f.env)).status).toBe(403)
+      expect((await f.app({id:999,role:'sales'}).request(f.url+'/pdf'+mode,{},f.env)).status).toBe(404)
+      expect((await f.app({id:999,role:'admin'}).request(f.url+'/pdf'+mode,{},f.env)).status).toBe(200)
+      expect((await f.app().request('http://localhost/staff/quotes/999999/pdf'+mode,{},f.env)).status).toBe(404)
+      }
     }finally{f.db.close()}
   })
   it('sanitizes filename content and paginates long saved text',async()=>{
