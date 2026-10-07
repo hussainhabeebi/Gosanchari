@@ -528,7 +528,7 @@ code { overflow-wrap: anywhere; }
 .addon-row input.w-sm { width: 64px; display: inline-block; padding: 4px 6px; }
 
 /* Public experience based on the supplied seven-page design reference. */
-.area-public { --green:#005b2e; --green-2:#08723c; --ink:#101a35; --muted:#667087; --bg:#fff; }
+.area-public { --cta-orange:#ff680a; --green:#005b2e; --green-2:#08723c; --ink:#101a35; --muted:#667087; --bg:#fff; }
 .area-public .topbar { background:#fff8ee; border:0; }
 .area-public:has(.reference-hero) .topbar,.area-public:has(.destination-hero) .topbar { position:absolute;top:0;left:0;width:100%;z-index:20;background:transparent;box-shadow:none; }
 .area-public .topbar-in { min-height:90px;max-width:1080px; }
@@ -554,7 +554,7 @@ code { overflow-wrap: anywhere; }
 .reference-search { display:grid;grid-template-columns:1.15fr 1fr 1fr 1.1fr auto;gap:0;align-items:center;max-width:980px;margin:12px auto 0;background:white;border-radius:20px;padding:9px;box-shadow:0 0 0 7px #ffffff65,0 8px 28px #48200b30;text-align:left;color:#101a35; }
 .reference-search>.field { padding:0 16px;border-right:1px solid #dce0e7;margin:0; }.reference-search .field-label { color:#667087;font-size:12px; }
 .reference-search input,.reference-search select { padding:5px 0;border:0;background:transparent;font-size:13px;min-width:0;width:100%; }
-.find-stay { background:linear-gradient(135deg,#ff680a,#ff3a00);border:0;border-radius:14px;padding:17px 23px;color:white;white-space:nowrap; }
+.find-stay { background:linear-gradient(135deg,var(--cta-orange),#ff3a00);border:0;border-radius:14px;padding:17px 23px;color:white;white-space:nowrap; }
 .guest-picker { position:relative;padding:0 16px; }.guest-picker summary { cursor:pointer;list-style:none; }.guest-picker summary strong { display:block;font-size:13px; }.guest-panel { position:absolute;top:55px;right:0;background:white;border-radius:12px;padding:16px;width:220px;box-shadow:var(--shadow);z-index:25; }
 .trust-strip { display:flex;justify-content:center;gap:30px;margin:26px auto 0;color:#fff;text-shadow:0 1px 8px #60380d;background:#74451d99;padding:10px;border-radius:12px;max-width:850px; }.trust-strip span { font-size:18px; }.trust-strip strong { font-size:13px; }.trust-strip small { display:block;font-size:11px;padding-left:20px; }
 .popular-stays { padding-top:25px; }.popular-stays h2 { font-size:34px;letter-spacing:-1px; }.popular-stays h2 span,.advisor-green { color:var(--green); }.popular-stays .btn-outline { border-radius:25px; }
@@ -898,4 +898,12 @@ code { overflow-wrap: anywhere; }
 @media (max-width: 1099px) {
   .area-public .topnav-menu, .area-public .topnav-account { flex-direction: column; align-items: stretch; gap: 12px; }
   .area-public .topnav-account .portal-dropdown { margin-left: 0; }
+}
+
+/* Only Destinations gets hover opening and the existing CTA orange option state. */
+.area-public .destinations-dropdown .nav-panel a { transition: background-color .15s ease, color .15s ease; }
+.area-public .destinations-dropdown .nav-panel a:hover,
+.area-public .destinations-dropdown .nav-panel a:focus-visible { background: var(--cta-orange); color: #fff; }
+@media (min-width: 1100px) and (hover: hover) and (pointer: fine) {
+  .area-public .destinations-dropdown .nav-panel::before { content: ''; position: absolute; left: 0; right: 0; top: -12px; height: 12px; }
 }

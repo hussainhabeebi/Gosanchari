@@ -17,6 +17,26 @@
   }
   updatePublicNav();
   window.addEventListener('hashchange', updatePublicNav);
+  // Keep native details/tap behavior; enhance only desktop pointer and keyboard access.
+  var destinationsDropdown = $('.area-public .destinations-dropdown');
+  if (destinationsDropdown) {
+    var desktopDestinations = window.matchMedia('(min-width: 1100px) and (hover: hover) and (pointer: fine)');
+    destinationsDropdown.addEventListener('mouseenter', function () {
+      if (desktopDestinations.matches) destinationsDropdown.open = true;
+    });
+    destinationsDropdown.addEventListener('mouseleave', function () {
+      if (desktopDestinations.matches && !(destinationsDropdown.contains(document.activeElement) && document.activeElement.matches(':focus-visible'))) destinationsDropdown.open = false;
+    });
+    destinationsDropdown.addEventListener('focusin', function () {
+      if (desktopDestinations.matches) destinationsDropdown.open = true;
+    });
+    destinationsDropdown.addEventListener('focusout', function (event) {
+      if (desktopDestinations.matches && !destinationsDropdown.contains(event.relatedTarget)) destinationsDropdown.open = false;
+    });
+    destinationsDropdown.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') destinationsDropdown.open = false;
+    });
+  }
   function post(url, data) {
     var body = new URLSearchParams()
     Object.keys(data || {}).forEach(function (k) { if (data[k] != null) body.append(k, data[k]) })

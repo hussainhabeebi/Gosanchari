@@ -236,7 +236,7 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: PageOpts[
         <a href="/" data-public-nav="home" aria-current={nav === 'home' ? 'page' : undefined}>Home</a>
         <a href="/#ai-search" data-public-nav="ai-search" aria-current={nav === 'ai-search' ? 'page' : undefined}>AI Search</a>
         <a href="/#ai-insights" data-public-nav="ai-insights" aria-current={nav === 'ai-insights' ? 'page' : undefined}>AI Insights</a>
-        <details class="nav-dropdown"><summary data-public-nav="stays" aria-current={nav === 'stays' ? 'page' : undefined}>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
+        <details class="nav-dropdown destinations-dropdown"><summary data-public-nav="stays" aria-current={nav === 'stays' ? 'page' : undefined}>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
         <a href="/offers" data-public-nav="offers" aria-current={nav === 'offers' ? 'page' : undefined}>Packages</a>
         <a href="/about" data-public-nav="about" aria-current={nav === 'about' ? 'page' : undefined}>About Us</a>
         <details class="nav-dropdown"><summary data-public-nav="contact" aria-current={nav === 'contact' ? 'page' : undefined}>Contact</summary><div class="nav-panel contact-panel"><a href={`tel:${settings.business.phone}`}>{settings.business.phone}</a><a href={`mailto:${settings.business.email}`}>{settings.business.email}</a></div></details>
