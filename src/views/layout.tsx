@@ -232,6 +232,7 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: PageOpts[
       <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="Menu" />
       <label for="nav-toggle" class="nav-burger" aria-hidden="true">☰</label>
       <nav class="topnav">
+        <div class="topnav-menu">
         <a href="/" data-public-nav="home" aria-current={nav === 'home' ? 'page' : undefined}>Home</a>
         <a href="/#ai-search" data-public-nav="ai-search" aria-current={nav === 'ai-search' ? 'page' : undefined}>AI Search</a>
         <a href="/#ai-insights" data-public-nav="ai-insights" aria-current={nav === 'ai-insights' ? 'page' : undefined}>AI Insights</a>
@@ -239,6 +240,8 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: PageOpts[
         <a href="/offers" data-public-nav="offers" aria-current={nav === 'offers' ? 'page' : undefined}>Packages</a>
         <a href="/about" data-public-nav="about" aria-current={nav === 'about' ? 'page' : undefined}>About Us</a>
         <details class="nav-dropdown"><summary data-public-nav="contact" aria-current={nav === 'contact' ? 'page' : undefined}>Contact</summary><div class="nav-panel contact-panel"><a href={`tel:${settings.business.phone}`}>{settings.business.phone}</a><a href={`mailto:${settings.business.email}`}>{settings.business.email}</a></div></details>
+        </div>
+        <div class="topnav-account">
         {user ? (
           <>
             <a href={isStaff(user.role) ? (user.role === 'sales' ? '/staff' : '/admin') : '/my'} class="btn btn-sm btn-outline">
@@ -254,6 +257,7 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: PageOpts[
         <a class="btn btn-sm btn-wa" href={`https://wa.me/${settings.business.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener">
           WhatsApp
         </a>
+        </div>
       </nav>
     </div>
   </header>

@@ -534,7 +534,7 @@ code { overflow-wrap: anywhere; }
 .area-public .topbar-in { min-height:90px;max-width:1080px; }
 .area-public .topnav { gap:28px; }
 .area-public .topnav>a:not(.btn) { color:#101a35;font-size:14px; }
-.area-public .topnav>.btn-wa { display:none; }
+.area-public .topnav .btn-wa { display:none; }
 .nav-dropdown { position:relative; }
 .nav-dropdown summary { cursor:pointer;list-style:none;font-size:14px; }
 .nav-dropdown summary::-webkit-details-marker { display:none; }
@@ -877,8 +877,12 @@ code { overflow-wrap: anywhere; }
 .area-public .topnav [data-public-nav][aria-current=page] { font-weight: 600; color: #10291f; }
 .area-public .topnav [data-public-nav][aria-current=page]::after { content: ''; position: absolute; left: 0; right: 0; bottom: 1px; height: 2px; background: #21854d; }
 @media (min-width: 1100px) {
-  .area-public .topnav { flex: 1; gap: 18px; background: transparent; }
-  .area-public .portal-dropdown, .area-public .topnav > .btn-outline { margin-left: auto; }
+  .area-public .topbar-in { display: grid; grid-template-columns: minmax(190px, 1fr) auto minmax(190px, 1fr); gap: 20px; }
+  .area-public .topbar .logo { justify-self: start; }
+  .area-public .topnav { display: contents; }
+  .area-public .topnav-menu { grid-column: 2; justify-self: center; }
+  .area-public .topnav-account { grid-column: 3; justify-self: end; }
+  .area-public .portal-dropdown { margin-left: 0; }
   .area-public .portal-dropdown summary { padding: 10px 16px; font-size: 13px; }
 }
 @media (min-width: 900px) and (max-width: 1099px) {
@@ -886,4 +890,12 @@ code { overflow-wrap: anywhere; }
   .area-public .topnav { display: none; position: absolute; top: 84px; flex-direction: column; align-items: stretch; background: #fff; padding: 16px; }
   .area-public .nav-toggle:checked ~ .topnav { display: flex; }
   .area-public .portal-dropdown { margin-left: 0; }
+}
+
+/* Menu and account zones share the existing collapsed menu on smaller screens. */
+.topnav-menu, .topnav-account { display: contents; }
+.area-public .topnav-menu, .area-public .topnav-account { display: flex; align-items: center; gap: 18px; }
+@media (max-width: 1099px) {
+  .area-public .topnav-menu, .area-public .topnav-account { flex-direction: column; align-items: stretch; gap: 12px; }
+  .area-public .topnav-account .portal-dropdown { margin-left: 0; }
 }

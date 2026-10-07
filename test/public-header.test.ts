@@ -13,6 +13,10 @@ describe('public header navigation', () => {
   it('renders the active indicator while preserving navigation and portal destinations', () => {
     const html = Layout({title:'About',nav:publicNav('/about'),settings:DEFAULT_SETTINGS,user:null,perms:null,flash:{},turnstileSiteKey:'',siteUrl:'http://localhost'})!.toString()
     expect(html).toContain('data-public-nav="about" aria-current="page"')
+    const menu = html.slice(html.indexOf('<div class="topnav-menu">'), html.indexOf('<div class="topnav-account">'))
+    for (const label of ['Home','AI Search','AI Insights','Destinations','Packages','About Us','Contact']) expect(menu).toContain(label)
+    expect(menu).not.toContain('Portal Login')
+    expect(html.slice(html.indexOf('<div class="topnav-account">'))).toContain('Portal Login')
     expect(html).not.toContain('data-public-nav="home" aria-current="page"')
     for (const label of ['Home','AI Search','AI Insights','Destinations','Packages','About Us','Contact','Portal Login']) expect(html).toContain(label)
     for (const href of ['/#ai-search','/#ai-insights','/offers','/about','/login?next=%2Fmy']) expect(html).toContain(href)
