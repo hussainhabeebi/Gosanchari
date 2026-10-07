@@ -10,7 +10,7 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
-import { calculatePrice, netRateForStay, occupancy, staffRateForStay, weekendLabel } from '../lib/pricing'
+import { calculatePrice, netRateForStay, occupancy, peaksForQuotedRate, staffRateForStay, weekendLabel } from '../lib/pricing'
 import { quoteFillFromEnquiry, quoteMessageDraft } from '../lib/assist'
 import { cancelBooking, confirmBooking, createBooking, PAYMENT_METHODS, priceStay, recordPayment, storeInvoice } from '../lib/bookings'
 import { fillTemplate, mediaUrl, sendEmail, sendWhatsApp } from '../lib/integrations'
@@ -166,10 +166,10 @@ async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: s
   const pr = await loadPricing(c.env, o.room_id)
   if (!pr) return null
   const s = await getSettings(c.env)
-  // A guest rate set by staff replaces the website price (weekday, weekend and seasons) for every night.
+  // A staff-entered base tariff replaces seasonal base rates; new common peaks still apply.
   // Staff decides the child amount from the property's policy; children still count toward capacity.
   const room = { ...pr.room, ...(o.guest_rate ? { base_rate: o.guest_rate, weekend_rate: o.guest_rate } : {}), extra_child_rate: 0 }
-  const seasons = o.guest_rate ? [] : pr.seasons
+  const seasons = o.guest_rate ? peaksForQuotedRate(pr.seasons) : pr.seasons
   return calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountPct: o.discount == null ? o.discount_pct : 0, discountFlat: o.discount, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0, mealPlan: o.meal_plan })
 }
 

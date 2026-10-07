@@ -85,7 +85,13 @@ export function weekendNights(room: { weekend_nights?: string | null }): number[
   return days.length ? days : [5, 6]
 }
 
-const isSupplementOnly = (s: SeasonRate) => !!s.supplement && !(s.rate && s.rate > 0) && s.pct_adjust == null
+export const commonPeakKey = (s: SeasonRate) => s.room_id == null && s.source?.startsWith('wizard-common:') ? s.source.slice(14) : null
+export const overridePeakKey = (s: SeasonRate) => s.room_id != null && s.source?.startsWith('wizard-override:') ? s.source.slice(16) : null
+
+/** A staff-entered base tariff still carries the explicitly configured common peak charges. */
+export const peaksForQuotedRate = (seasons: SeasonRate[]) => seasons.filter(s => commonPeakKey(s) || overridePeakKey(s))
+
+const isSupplementOnly = (s: SeasonRate) => (!!s.supplement || ((commonPeakKey(s) || overridePeakKey(s)) && s.supplement === 0)) && !(s.rate && s.rate > 0) && s.pct_adjust == null
 
 /** Season types, in the order they win when dates overlap (special first). */
 export const SEASON_KINDS: Record<string, string> = {
@@ -194,15 +200,22 @@ function seasonFor(room: RoomRates, seasons: SeasonRate[], date: string, has?: (
   return matching[0]
 }
 
-/** Supplements for a night (most specific one per name, so a room-level supplement replaces a property-wide one). */
+/** New wizard peaks use stable keys; legacy records retain their name-based precedence. */
 function supplementsOn(room: RoomRates, seasons: SeasonRate[], date: string): SeasonRate[] {
+  const matching = seasonsOn(room, seasons, date).filter(isSupplementOnly)
+  const managed: SeasonRate[] = []
+  for (const common of matching.filter(s => commonPeakKey(s))) {
+    const key = commonPeakKey(common)
+    const override = matching.find(s => overridePeakKey(s) === key && s.property_id === common.property_id)
+    managed.push(override ?? common)
+  }
   const byName = new Map<string, SeasonRate>()
   const rank = (s: SeasonRate) => (s.room_id != null ? 2 : s.property_id != null ? 1 : 0)
-  for (const s of seasonsOn(room, seasons, date).filter(isSupplementOnly)) {
+  for (const s of matching.filter(s => !commonPeakKey(s) && !overridePeakKey(s))) {
     const cur = byName.get(s.name)
     if (!cur || rank(s) > rank(cur)) byName.set(s.name, s)
   }
-  return [...byName.values()]
+  return [...byName.values(), ...managed]
 }
 
 export function isWeekendNight(room: RoomRates, date: string): boolean {

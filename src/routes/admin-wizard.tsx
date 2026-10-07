@@ -19,7 +19,8 @@ import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { int, isDate, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg } from './helpers'
 import { afterPropertySave } from './admin-properties'
-import type { SeasonRate } from '../lib/pricing'
+import { commonPeakKey, overridePeakKey, type SeasonRate } from '../lib/pricing'
+import { peakStatements } from '../lib/wizard-peaks'
 
 export const wizardRoutes = new Hono<AppEnv>()
 
@@ -397,15 +398,33 @@ async function saveStep2(c: Context<AppEnv>, p: PropertyRow) {
 type Rates = Record<string, SeasonRate & { id: number; source: string | null }>
 const val = (n: number | null | undefined) => (n ? String(n) : '')
 
+const PeakEntry: FC<{ prefix: string; row: (SeasonRate & { id: number }) | null; common?: SeasonRate[] }> = ({ prefix, row, common }) => (
+  <div class="peak-row stack" data-peak-entry>
+    <input type="hidden" name={`${prefix}_managed_id`} value={row?.id ?? ''} />
+    <input type="hidden" name={`${prefix}_managed_remove`} value="0" />
+    {prefix === 'common' ? <>
+      <input type="hidden" name="common_managed_key" value={row ? commonPeakKey(row) ?? '' : ''} />
+      <div class="wiz-2"><label class="wf"><span class="wl">From Date</span><input type="date" name="common_managed_from" value={row?.start_date ?? ''} /></label><label class="wf"><span class="wl">To Date</span><input type="date" name="common_managed_to" value={row?.end_date ?? ''} /></label></div>
+    </> : <label class="wf"><span class="wl">Common peak charge to replace</span><select name={`${prefix}_managed_key`} data-override-common><option value="">Select a common peak charge</option>{common?.map(c => <option value={commonPeakKey(c)!} selected={overridePeakKey(row ?? {} as SeasonRate) === commonPeakKey(c)}>{c.name} ({c.start_date} → {c.end_date})</option>)}</select></label>}
+    <div class="wiz-2"><label class="wf"><span class="wl">Additional Charge ₹</span><input type="number" min="0" name={`${prefix}_managed_amt`} value={row?.supplement ?? ''} /></label><label class="wf"><span class="wl">Description</span><input name={`${prefix}_managed_desc`} maxlength={60} value={row?.name ?? ''} /></label></div>
+    <button type="button" class="linklike" data-remove-managed-peak>Remove</button>
+  </div>
+)
+
 async function step3(c: Context<AppEnv>, p: PropertyRow) {
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY id', p.id)
   if (!rooms.length) return redirectMsg(c, `/admin/properties/${p.id}/setup/2`, { err: 'Add a room category first.' })
-  const rows = await all<SeasonRate & { id: number; source: string | null }>(c.env, "SELECT * FROM season_rates WHERE property_id = ? AND source = 'wizard' ORDER BY id", p.id)
+  const rows = await all<SeasonRate & { id: number; source: string | null }>(c.env, "SELECT * FROM season_rates WHERE property_id = ? AND (source = 'wizard' OR source LIKE 'wizard-common:%' OR source LIKE 'wizard-override:%') ORDER BY id", p.id)
+  const common = rows.filter(x => commonPeakKey(x))
   const done = await progress(c, p)
   const perms = await permissionsFor(c.env, c.get('user')!.role)
   return page(c, { title: `Rates · ${p.name}`, area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={3} done={done} icon={I.coins} title="Room Rates" sub="Set different rates for off season, season and peak times. Enter rates for weekdays and weekends with CP, MAP, AP and EP plans.">
       <form method="post" action={`/admin/properties/${p.id}/setup/3`} class="stack wiz-form" data-rates data-rates-draft={c.get('user')!.id}>
+        <section class="period period-peak" data-managed-peaks="common">
+          <div class="period-head"><div><h3>Common Peak Time Charges</h3><small class="muted">Applies to every room, per room per applicable night. Check-out is excluded.</small></div><button type="button" class="linklike" data-add-managed-peak>+ Add New Peak Time</button></div>
+          <div data-peak-entries>{(common.length ? common : [null]).map(x => <PeakEntry prefix="common" row={x} />)}</div>
+        </section>
         <div class="wiz-2 rate-pick">
           <label class="wf">
             <span class="wl">Select Room Category <b>*</b> <a class="linklike add-new" href={`/admin/properties/${p.id}/setup/2`}>{I.plus} Add New Room Category</a></span>
@@ -423,7 +442,7 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
         {rooms.map((r, ri) => {
           const mine: Rates = {}
           for (const x of rows.filter((x) => x.room_id === r.id)) mine[`${x.kind === 'off_season' ? 'off' : x.kind === 'season' ? 'sea' : 'peak'}_${x.meal_plan ?? ''}`] = x
-          const peaks = rows.filter((x) => x.room_id === r.id && x.supplement)
+          const peaks = rows.filter((x) => x.room_id === r.id && x.supplement && x.source === 'wizard')
           return (
             <div class="rate-room" data-rate-room={r.id} hidden={ri > 0}>
               {PERIODS.map(([pk, title, sub]) => {
@@ -463,15 +482,22 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
                   </div>
                 )
               })}
-              <div class="period period-peak">
+              <details class="period" data-managed-peaks={`r${r.id}`}>
+                <summary>Room-specific Peak Override (optional)</summary>
+                <p class="muted">Replaces the selected common charge for this room during that common period.</p>
+                <button type="button" class="linklike" data-add-managed-peak>+ Add Room-specific Override</button>
+                <div data-peak-entries>{(() => { const overrides = rows.filter(x => x.room_id === r.id && overridePeakKey(x)); return (overrides.length ? overrides : [null]).map(x => <PeakEntry prefix={`r${r.id}`} row={x} common={common} />) })()}</div>
+              </details>
+              <div class="period period-peak" hidden={!peaks.length}>
                 <div class="period-head">
                   <span class="period-ico">{I.crown}</span>
-                  <div><h3>Peak Time Charges</h3><small class="muted">Add additional charges for special peak time periods (e.g. Christmas, New Year, Diwali etc.)</small></div>
+                  <div><h3>Existing room-specific Peak Time Charges</h3><small class="muted">Add additional charges for special peak time periods (e.g. Christmas, New Year, Diwali etc.)</small></div>
                   <button type="button" class="linklike add-new" data-add-peak={r.id}>{I.plus} Add New Peak Time</button>
                 </div>
                 <div class="peak-rows" data-peaks={r.id}>
                   {(peaks.length ? peaks : [null]).map((x) => (
                     <div class="wiz-4 peak-row">
+                      <input type="hidden" name={`r${r.id}_peak_id`} value={x?.id ?? ''} />
                       <label class="wf"><span class="wl">From Date <b>*</b></span><input type="date" name={`r${r.id}_peak_from`} value={x?.start_date ?? ''} /></label>
                       <label class="wf"><span class="wl">To Date <b>*</b></span><input type="date" name={`r${r.id}_peak_to`} value={x?.end_date ?? ''} /></label>
                       <label class="wf"><span class="wl">Additional Charge (₹) <b>*</b></span><input type="number" min="0" name={`r${r.id}_peak_amt`} value={val(x?.supplement)} placeholder="Enter amount" /></label>
@@ -498,13 +524,24 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
   const uid = c.get('user')!.id
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1', p.id)
   const old = await all<SeasonRate & { id: number }>(c.env, "SELECT * FROM season_rates WHERE property_id = ? AND source = 'wizard'", p.id)
-  const n = (k: string) => (int(f[k]) > 0 ? int(f[k]) : null)
+  const n = (k: string, previous?: number | null) => !(k in f) ? previous ?? null : (int(f[k]) > 0 ? int(f[k]) : null)
   const ins = "INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, weekend_rate, staff_rate, staff_weekend_rate, net_rate, net_weekend_rate, supplement, net_supplement, kind, meal_plan, source, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wizard', ?)"
-  const stmts: D1PreparedStatement[] = [c.env.DB.prepare("DELETE FROM season_rates WHERE property_id = ? AND source = 'wizard'").bind(p.id)]
+  let stmts: D1PreparedStatement[]
+  try { stmts = peakStatements(c.env.DB, p.id, uid, rooms.map(r => r.id), await all<SeasonRate & { id: number }>(c.env, 'SELECT * FROM season_rates WHERE property_id = ?', p.id), f) }
+  catch (e) { return { err: e instanceof Error ? e.message : 'Invalid peak charges.' } }
+  const write = (keep: SeasonRate | undefined, values: unknown[]) => {
+    const columns = ['name', 'start_date', 'end_date', 'rate', 'weekend_rate', 'staff_rate', 'staff_weekend_rate', 'net_rate', 'net_weekend_rate', 'supplement', 'net_supplement', 'kind', 'meal_plan'] as const
+    if (keep && columns.every((key, i) => (keep[key] ?? null) === (values[i + 2] ?? null))) return false
+    if (keep?.id) {
+      stmts.push(c.env.DB.prepare('UPDATE season_rates SET name=?, start_date=?, end_date=?, rate=?, weekend_rate=?, staff_rate=?, staff_weekend_rate=?, net_rate=?, net_weekend_rate=?, supplement=?, net_supplement=?, kind=?, meal_plan=? WHERE id=? AND property_id=? AND room_id=? AND source=\'wizard\'').bind(...values.slice(2, 15), keep.id, p.id, values[1]))
+    } else stmts.push(c.env.DB.prepare(ins).bind(...values))
+    return true
+  }
   let saved = 0
   let defaultPlan: string | null = null
-  const configuredPlans = new Set<string>()
+  const configuredPlans = new Set<string>(old.filter(x => x.meal_plan && x.supplement == null).map(x => x.meal_plan!))
   for (const r of rooms) {
+    let roomChanged = false
     let regular: { plan: string; wk: number | null; we: number | null; staff: number | null; net: number | null } | null = null
     for (const [pk, , , kind] of [...PERIODS].reverse()) {
       const from = f[`r${r.id}_${pk}_from`], to = f[`r${r.id}_${pk}_to`]
@@ -512,14 +549,14 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
       for (const [plan] of PLANS) {
         const key = `r${r.id}_${pk}`
         const keep = old.find((x) => x.room_id === r.id && x.kind === kind && x.meal_plan === plan)
-        const net = perms.view_net_rates ? n(`${key}_wk_${plan}_b2b`) : keep?.net_rate ?? null
-        const netWe = perms.view_net_rates ? n(`${key}_we_${plan}_b2b`) : keep?.net_weekend_rate ?? null
-        const wk = n(`${key}_wk_${plan}_direct`), we = n(`${key}_we_${plan}_direct`)
-        const staff = n(`${key}_wk_${plan}_staff`), staffWe = n(`${key}_we_${plan}_staff`)
+        const net = perms.view_net_rates ? n(`${key}_wk_${plan}_b2b`, keep?.net_rate) : keep?.net_rate ?? null
+        const netWe = perms.view_net_rates ? n(`${key}_we_${plan}_b2b`, keep?.net_weekend_rate) : keep?.net_weekend_rate ?? null
+        const wk = n(`${key}_wk_${plan}_direct`, keep?.rate), we = n(`${key}_we_${plan}_direct`, keep?.weekend_rate)
+        const staff = n(`${key}_wk_${plan}_staff`, keep?.staff_rate), staffWe = n(`${key}_we_${plan}_staff`, keep?.staff_weekend_rate)
         if ([wk, we, staff, staffWe, net, netWe].every((v) => v == null)) continue
         configuredPlans.add(plan)
         defaultPlan ??= plan
-        stmts.push(c.env.DB.prepare(ins).bind(p.id, r.id, PERIOD_NAME[pk], from, to, wk, we, staff, staffWe, net, netWe, null, null, kind, plan, uid))
+        roomChanged = write(keep, [p.id, r.id, PERIOD_NAME[pk], from, to, wk, we, staff, staffWe, net, netWe, null, null, kind, plan, uid]) || roomChanged
         saved++
         // Regular room rates (outside any period) follow the season's CP rate, else the first plan entered.
         if (wk != null && (!regular || (plan === 'CP' && regular.plan !== 'CP' && pk === 'sea'))) regular = { plan, wk, we, staff, net }
@@ -529,16 +566,20 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
     froms.forEach((from, k) => {
       const to = tos[k], amt = int(amts[k])
       if (!isDate(from) || !isDate(to) || to < from || !(amt > 0)) return
-      stmts.push(c.env.DB.prepare(ins).bind(p.id, r.id, str(descs[k], 60) || 'Peak time', from, to, null, null, null, null, null, null, amt, amt, 'special', null, uid))
+      const keep = old.find(x => x.id === int(f.__all[`r${r.id}_peak_id`]?.[k]) && x.room_id === r.id && x.kind === 'special' && x.supplement != null)
+      // Existing peaks are preserved; old clients can still submit new room-specific peaks.
+      if (!keep && old.some(x => x.room_id === r.id && x.kind === 'special' && x.name === (str(descs[k], 60) || 'Peak time') && x.start_date === from && x.end_date === to)) return
+      if (keep) stmts.push(c.env.DB.prepare('UPDATE season_rates SET name=?,start_date=?,end_date=?,supplement=? WHERE id=? AND property_id=? AND room_id=?').bind(str(descs[k], 60) || 'Peak time', from, to, amt, keep.id, p.id, r.id))
+      else write(undefined, [p.id, r.id, str(descs[k], 60) || 'Peak time', from, to, null, null, null, null, null, null, amt, amt, 'special', null, uid])
       saved++
     })
-    if (regular) {
+    if (regular && roomChanged) {
       // Private-only rows do not invent a legacy public base rate.
       stmts.push(c.env.DB.prepare(`UPDATE rooms SET base_rate = ?, weekend_rate = ?, staff_rate = COALESCE(?, staff_rate)${perms.view_net_rates ? ', net_rate = COALESCE(?, net_rate)' : ''} WHERE id = ?`).bind(...[regular.wk, regular.we, regular.staff, ...(perms.view_net_rates ? [regular.net] : []), r.id]))
     }
   }
   if (defaultPlan) stmts.push(c.env.DB.prepare("UPDATE properties SET rate_meal_plan = ?, weekend_nights = '5,6,0', meal_plans = ? WHERE id = ?").bind(p.rate_meal_plan && configuredPlans.has(p.rate_meal_plan) ? p.rate_meal_plan : defaultPlan, JSON.stringify([...configuredPlans]), p.id))
-  await c.env.DB.batch(stmts)
+  if (stmts.length) await c.env.DB.batch(stmts)
   await logActivity(c.env, uid, 'price.wizard_rates', 'property', p.id, { rows: saved })
   await afterPropertySave(c, p.id)
   return {}
