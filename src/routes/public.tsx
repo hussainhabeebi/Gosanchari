@@ -59,7 +59,7 @@ publicRoutes.get('/', async (c) => {
             <div class="hero-ai-heading"><span class="ai-badge">AI</span><strong>AI Search</strong><span>Describe your perfect escape</span></div>
             <form class="ai-search priority-ai-form" method="get" action="/search" role="search">
               <label for="hero-ai-query" class="sr-only">Describe your stay</label><input id="hero-ai-query" name="ai" maxlength={200} required placeholder="A peaceful stay in Munnar for 2, with a pool, under ₹8,000" />
-              <button class="btn find-stay">Find with AI →</button>
+              <button class="btn btn-primary find-stay">Find with AI →</button>
             </form>
             <div class="ai-example-chips" aria-label="Try a search">{['Munnar for 2 with a pool', 'Family stay in Wayanad under ₹6000', 'Alleppey houseboat for 4'].map((example) => <a href={`/search?ai=${encodeURIComponent(example)}`}>{example}</a>)}</div>
           </div>
@@ -69,7 +69,7 @@ publicRoutes.get('/', async (c) => {
             <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
             <Field label="▣ Check-out"><input type="date" name="checkOut" min={today} /></Field>
             <details class="guest-picker"><summary><span class="field-label">♙ Guests</span><strong data-guest-summary>2 Adults, 0 Kids</strong></summary><div class="guest-panel"><Field label="Adults"><input name="guests" type="number" min="1" max="40" value="2" /></Field><Field label="Children"><input name="children" type="number" min="0" max="20" value="0" /></Field></div></details>
-            <button class="btn find-stay">⌕ &nbsp; Find My Stay</button>
+            <button class="btn btn-primary find-stay">⌕ &nbsp; Find My Stay</button>
           </form>
           </details>
           <div class="trust-strip"><span>✦ <strong>Best Price Guarantee</strong><small>Unbeatable Deals</small></span><span>♧ <strong>24/7 Support</strong><small>We're always here</small></span><span>◇ <strong>Trusted Partner</strong><small>Verified Resorts</small></span><span>★ <strong>Curated Experiences</strong><small>Handpicked Stays</small></span></div>
@@ -77,7 +77,7 @@ publicRoutes.get('/', async (c) => {
       </section>
       <div class="wrap home-ai-insights"><AiInsights entries={insights} /></div>
       <section class="wrap section popular-stays">
-        <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
+        <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-primary" href="/search">View All Stays →</a></div>
         <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
       </section>
 
@@ -226,7 +226,7 @@ publicRoutes.get('/search', async (c) => {
         <form class="ai-search search-top" method="get" action="/search" role="search">
           <span class="ai-badge">AI Search</span>
           <input name="ai" maxlength={200} value={understood ?? ''} placeholder="Describe your stay — place, dates, guests, budget, must-haves" aria-label="Describe your stay" required />
-          <button class="btn btn-sm">Search</button>
+          <button class="btn btn-sm btn-primary">Search</button>
         </form>
         <AiInsights entries={insights} search />
         {chips.length > 0 && (
@@ -242,7 +242,7 @@ publicRoutes.get('/search', async (c) => {
             <span class="small"><strong>Add your dates</strong> to see exact prices and free rooms:</span>
             <input type="date" name="checkIn" min={todayIST()} required aria-label="Check-in" />
             <input type="date" name="checkOut" min={todayIST()} required aria-label="Check-out" />
-            <button class="btn btn-sm">Show prices</button>
+            <button class="btn btn-sm btn-primary">Show prices</button>
           </form>
         )}
         <div class="results-bar">
@@ -274,11 +274,11 @@ publicRoutes.get('/search', async (c) => {
               </div>
             )}
             <p>Or send us an enquiry and our team will find one for you.</p>
-            <a class="btn" href={`/enquiry?${new URLSearchParams({ destination: f.destination ?? '', checkIn: f.checkIn ?? '', checkOut: f.checkOut ?? '', adults: String(f.guests ?? 2) })}`}>Send us an enquiry</a>
+            <a class="btn btn-primary" href={`/enquiry?${new URLSearchParams({ destination: f.destination ?? '', checkIn: f.checkIn ?? '', checkOut: f.checkOut ?? '', adults: String(f.guests ?? 2) })}`}>Send us an enquiry</a>
           </Empty>
         )}
         {results.length > 0 && results.length < 3 && (
-          <p class="center"><a class="btn btn-outline" href={`/enquiry?destination=${encodeURIComponent(f.destination ?? '')}`}>Not quite right? Send us an enquiry</a></p>
+          <p class="center"><a class="btn btn-primary" href={`/enquiry?destination=${encodeURIComponent(f.destination ?? '')}`}>Not quite right? Send us an enquiry</a></p>
         )}
         {fewer.length > 0 && (
           <>
@@ -394,7 +394,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                     </div>
                     <div class="room-price">
                       {isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
-                      <button class="btn btn-sm" data-pick-room={r.id}>Book</button>
+                      <button class="btn btn-sm btn-primary" data-pick-room={r.id}>Book</button>
                     </div>
                   </div>
                 )
@@ -499,7 +499,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
               </div>
               <form class="qa-form">
                 <input name="q" maxlength={300} placeholder="Is breakfast included?" required autocomplete="off" />
-                <button class="btn">Ask</button>
+                <button class="btn btn-primary">Ask</button>
               </form>
               <form class="qa-handoff card" method="post" action="/enquiry" hidden>
                 <p><strong>Let our team answer this.</strong> Leave your number and we'll reply on WhatsApp.</p>
@@ -512,7 +512,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                 </div>
                 <input type="hidden" name="whatsapp_optin" value="1" />
                 <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
-                <button class="btn btn-sm">Send to team</button>
+                <button class="btn btn-sm btn-primary">Send to team</button>
               </form>
             </div>
           </section>
@@ -558,7 +558,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
             <Field label="Message (optional)"><textarea name="message" rows={2} maxlength={2000} placeholder="Special requests, questions…"></textarea></Field>
             <input type="hidden" name="whatsapp_optin" value="1" />
             <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
-            <button type="button" class="btn btn-lg" data-trip-quote>Get Quote →</button><button class="btn btn-outline">Send Enquiry</button>
+            <button type="button" class="btn btn-lg btn-primary" data-trip-quote>Get Quote →</button><button class="btn btn-primary">Send Enquiry</button>
             <p class="muted small">No payment now. Final price is confirmed in your quote.</p>
           </form>
         </aside>
@@ -572,7 +572,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
       )}
       <div class="mobile-book-bar">
         <div class="muted small">For a personalised offer, fill in your details below and enquire.</div>
-        <a class="btn" href="#book">Enquire</a>
+        <a class="btn btn-primary" href="#book">Enquire</a>
       </div>
       {jsonScript('ld', ld)}
     </div>
@@ -646,7 +646,7 @@ publicRoutes.get('/enquiry', async (c) => {
         <Field label="Special requests"><textarea name="message" rows={4} maxlength={2000} placeholder="E.g. ground-floor room for elderly parents, vegetarian food, pickup from Aluva station…"></textarea></Field>
         <label class="check"><input type="checkbox" name="whatsapp_optin" value="1" checked /> Send me updates on WhatsApp</label>
         <Turnstile siteKey={c.env.TURNSTILE_SITE_KEY} />
-        <button class="btn btn-lg">Send enquiry</button>
+        <button class="btn btn-lg btn-primary">Send enquiry</button>
       </form>
     </div>
   ))
@@ -706,7 +706,7 @@ publicRoutes.get('/enquiry/thanks/:code', async (c) => {
       <h1>Thank you! We've got your enquiry.</h1>
       <p>Your enquiry number is <strong class="code">{c.req.param('code')}</strong>.</p>
       <p class="muted">Our team will reply on WhatsApp soon. Need us faster? <a href={`https://wa.me/${s.business.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hi, my enquiry number is ' + c.req.param('code'))}`}>Message us on WhatsApp</a>.</p>
-      <a class="btn" href="/search">Keep browsing</a>
+      <a class="btn btn-primary" href="/search">Keep browsing</a>
     </div>
   ))
 })
@@ -733,7 +733,7 @@ publicRoutes.get('/offers', async (c) => {
               <h3>{o.title || o.code}</h3>
               <p>{o.description}</p>
               <p>Code: <code class="code">{o.code}</code> — mention it in your enquiry and we'll apply it to your quote.</p>
-              <a class="btn btn-sm" href={`/enquiry?offer=${encodeURIComponent(o.code)}`}>Enquire with this offer</a>
+              <a class="btn btn-sm btn-primary" href={`/enquiry?offer=${encodeURIComponent(o.code)}`}>Enquire with this offer</a>
               <p class="muted small">Valid {fmtDate(o.valid_from)} – {fmtDate(o.valid_to)}{o.min_amount ? ` · min booking ${money(o.min_amount)}` : ''}{o.max_discount ? ` · up to ${money(o.max_discount)}` : ''}</p>
               <p class="small">Applies to: {ids?.length ? ids.map((id) => byId.get(id)).filter(Boolean).map((p, i) => <>{i > 0 && ', '}<a href={`/stay/${p!.slug}`}>{p!.name}</a></>) : 'all properties'}</p>
             </div>
@@ -752,7 +752,7 @@ publicRoutes.get('/about', async (c) => {
       <img src="/brand/logo-wide.webp" alt={s.business.name} width="302" height="80" style="display:block;margin:0 auto 16px;height:auto;max-width:100%" />
       <h1>About {s.business.name}</h1>
       {(content.about || 'We are a Kerala-based team that personally checks every stay we list.').split(/\n{2,}/).map((p) => <p>{p}</p>)}
-      <p><a class="btn" href="/contact">Contact us</a></p>
+      <p><a class="btn btn-primary" href="/contact">Contact us</a></p>
     </div>
   ))
 })
@@ -774,7 +774,7 @@ publicRoutes.get('/contact', async (c) => {
         <div class="card">
           <h3>Need help with a stay?</h3>
           <p>Send an enquiry and our team will find the right place.</p>
-          <a class="btn" href="/enquiry">Send enquiry</a>
+          <a class="btn btn-primary" href="/enquiry">Send enquiry</a>
           <p class="mt-sm"><a href="/help">Chat with our assistant</a></p>
         </div>
       </div>
@@ -869,7 +869,7 @@ publicRoutes.get('/q/:token', async (c) => {
           {!closed && (
             <form method="post" action={`/q/${q.token}/accept`} class="mt-sm">
               <input type="hidden" name="option" value={o.id} />
-              <button class="btn btn-lg">Accept this option ({money(o.total)})</button>
+              <button class="btn btn-lg btn-primary">Accept this option ({money(o.total)})</button>
             </form>
           )}
         </div>
@@ -886,7 +886,7 @@ publicRoutes.get('/q/:token', async (c) => {
           <form method="post" action={`/q/${q.token}/feedback`} class="card stack">
             <h3>Ask a question or request changes</h3>
             <textarea name="message" rows={3} required maxlength={1000} placeholder="E.g. Can we check in a day later?"></textarea>
-            <button class="btn btn-outline">Send to our team</button>
+            <button class="btn btn-primary">Send to our team</button>
           </form>
           <form method="post" action={`/q/${q.token}/decline`} class="card stack">
             <h3>Not interested?</h3>
@@ -1011,7 +1011,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
         {am.length > 0 && <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>}
         <div class="row wrap-row">
-          <a class="btn" href={`/stay/${p.slug}?room=${r.id}`}>Enquire about this room</a>
+          <a class="btn btn-primary" href={`/stay/${p.slug}?room=${r.id}`}>Enquire about this room</a>
           <a class="btn btn-outline" href={`/stay/${p.slug}`}>See the whole property</a>
         </div>
       </div>

@@ -47,6 +47,8 @@ describe('homepage Popular Stays', () => {
       expect(section).not.toContain('987654');expect(section).not.toContain('876543')
       expect(section).not.toContain('9,87,654');expect(section).not.toContain('8,76,543')
       expect(section).toContain('For a personalised offer')
+      expect(section).toContain('class="btn btn-primary" href="/search"')
+      expect(section).toContain('class="btn btn-sm btn-primary" data-stay-preview')
       expect(section).toContain('/stay/live-ordinary');expect(section).toContain('href="/search"')
       expect(section).toContain('cover-')
       expect(section.match(/class="card pcard"/g)).toHaveLength(2)

@@ -66,7 +66,7 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
             <div class="price">{money(price)}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
             {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
           </div>
-          <a class="btn btn-sm btn-outline" data-stay-preview href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View Details →</a>
+          <a class="btn btn-sm btn-primary" data-stay-preview href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View Details →</a>
         </div>
       </div>
     </article>
@@ -157,7 +157,7 @@ export const Tabs: FC<{ items: [string, string][]; active: string; base: string;
 export interface StayInsight { name: string; slug: string; destination: string; review_summary: string; rating_count: number }
 export const AiInsights: FC<{ entries: StayInsight[]; search?: boolean }> = ({ entries, search }) => (
   <section class="ai-insights-panel" id="ai-insights" aria-labelledby="ai-insights-title">
-    <div class="row-between"><div><span class="ai-badge">AI</span><h2 id="ai-insights-title">AI Insights</h2><p class="muted small">{search ? 'Guest review highlights for stays in your results.' : 'Get to know a stay before you choose it.'}</p></div><a class="btn btn-sm btn-outline" href="/#ai-search">Try AI Search →</a></div>
+    <div class="row-between"><div><span class="ai-badge">AI</span><h2 id="ai-insights-title">AI Insights</h2><p class="muted small">{search ? 'Guest review highlights for stays in your results.' : 'Get to know a stay before you choose it.'}</p></div><a class="btn btn-sm btn-primary" href="/#ai-search">Try AI Search →</a></div>
     {entries.length > 0 ? <><div class="grid grid-3">{entries.map((entry) => <article class="ai-insight-card"><span class="muted small">{entry.destination} · {entry.rating_count} guest reviews</span><h3><a href={`/stay/${entry.slug}`}>{entry.name}</a></h3><p>{entry.review_summary}</p><a href={`/stay/${entry.slug}#ask`}>Ask about this stay →</a></article>)}</div><p class="muted small ai-insight-source">AI-generated summaries of guest reviews. Check property details and confirm availability with our team.</p></> : <div class="ai-insight-empty"><strong>Tell us what matters to you.</strong><p>Use AI Search to describe your destination, dates, budget and must-haves. Review insights appear here when summaries are available.</p><a href="/search">Explore available stays →</a></div>}
   </section>
 )
