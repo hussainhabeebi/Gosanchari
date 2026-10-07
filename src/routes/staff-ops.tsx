@@ -34,13 +34,22 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
   f.sort ??= 'price_asc'
   const enquiryId = int(c.req.query('enquiry')) || null
   const quoteId = int(c.req.query('quote')) || null
-  const results = await searchProperties(c.env, f, 100)
+  const invalidDates = !!(c.req.query('checkIn') && c.req.query('checkOut') && (!f.checkIn || !f.checkOut))
+  const results = invalidDates ? [] : await searchProperties(c.env, f, 100, true)
   const ids = results.map((r) => r.id)
   const [internal, rooms, dests] = await Promise.all([
     ids.length ? all<Pick<PropertyRow, 'id' | 'owner_name' | 'owner_phone' | 'commission_pct' | 'internal_notes' | 'last_minute_note' | 'is_partner' | 'contact'>>(c.env, `SELECT id, owner_name, owner_phone, commission_pct, internal_notes, last_minute_note, is_partner, contact FROM properties WHERE id IN (${placeholders(ids.length)})`, ...ids) : Promise.resolve([]),
     ids.length ? all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(ids.length)}) ORDER BY base_rate`, ...ids) : Promise.resolve([]),
     destinations(c.env),
   ])
+  const resolved = new Map<number, { staff: number | null; direct: number | null; net: number | null }>()
+  for (const room of rooms) {
+    const pricing = await loadPricing(c.env, room.id)
+    if (pricing && f.checkIn && f.checkOut) {
+      const direct = calculatePrice({ room: pricing.room, seasons: pricing.seasons, checkIn: f.checkIn, checkOut: f.checkOut })
+      resolved.set(room.id, { staff: staffRateForStay(pricing.room, pricing.seasons, f.checkIn, f.checkOut), direct: direct.errors.length ? null : Math.round(direct.subtotal / direct.nights), net: perms.view_net_rates ? netRateForStay(pricing.room, pricing.seasons, f.checkIn, f.checkOut) : null })
+    } else resolved.set(room.id, { staff: room.staff_rate, direct: room.base_rate > 0 ? room.base_rate : null, net: perms.view_net_rates ? room.net_rate : null })
+  }
   const avail = f.checkIn && f.checkOut ? await roomAvailability(c.env, ids, f.checkIn, f.checkOut) : null
   const info = new Map(internal.map((i) => [i.id, i]))
   const addHref = (pid: number, rid: number) => {
@@ -55,7 +64,8 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
     <div class="stack-lg">
       <h1>Property finder</h1>
       {(enquiryId || quoteId) && <p class="flash">Adding to {quoteId ? `quotation #${quoteId}` : `a new quotation for enquiry #${enquiryId}`}.</p>}
-      <form method="get" class="card filters-inline wrap-row">
+      {invalidDates && <p class="flash flash-err" role="alert">Check-out must be after check-in, with valid dates.</p>}
+      <form method="get" action="/staff/finder" class="card filters-inline wrap-row">
         {enquiryId && <input type="hidden" name="enquiry" value={enquiryId} />}
         {quoteId && <input type="hidden" name="quote" value={quoteId} />}
         <Select name="destination" value={f.destination} options={[['', 'Any destination'], ...dests.map((d) => [d, d] as [string, string])]} />
@@ -95,8 +105,8 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
                 <Table head={['Room', 'Guests', 'Staff rate', 'Guest rate', ...(perms.view_net_rates ? ['B2B / Net'] : []), ...(avail ? ['Free'] : []), '']}>
                   {prs.map((r) => (
                     <tr>
-                      <td><a href={`/staff/rooms/${p.id}${enquiryId ? `?enquiry=${enquiryId}` : ''}#room-${r.id}`}>{r.name}</a></td><td class="small">{guestsText(r)}</td><td class="internal">{r.staff_rate ? money(r.staff_rate) : '—'}</td><td>{money(r.base_rate)}{r.weekend_rate ? ` / ${money(r.weekend_rate)} wknd` : ''}</td>
-                      {perms.view_net_rates && <td>{r.net_rate ? money(r.net_rate) : '—'}</td>}
+                      <td><a href={`/staff/rooms/${p.id}${enquiryId ? `?enquiry=${enquiryId}` : ''}#room-${r.id}`}>{r.name}</a></td><td class="small">{guestsText(r)}</td><td class="internal">{(resolved.get(r.id)?.staff ?? 0) > 0 ? money(resolved.get(r.id)!.staff!) : 'Not supplied'}</td><td>{(resolved.get(r.id)?.direct ?? 0) > 0 ? money(resolved.get(r.id)!.direct!) : 'Personalised offer / enquire'}</td>
+                      {perms.view_net_rates && <td>{(resolved.get(r.id)?.net ?? 0) > 0 ? money(resolved.get(r.id)!.net!) : 'Not supplied'}</td>}
                       {avail && <td>{avail.get(r.id)?.free ?? 0} / {r.units}</td>}
                       <td><a class="btn btn-sm" href={addHref(p.id, r.id)}>Add to quotation</a></td>
                     </tr>

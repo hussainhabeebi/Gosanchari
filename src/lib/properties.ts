@@ -4,11 +4,11 @@ import { COVER_PHOTO_SQL, dining as readDining, POLICY_FIELDS, policies as readP
 import type { Env } from '../env'
 import { aiEmbed, aiEnabled, aiJson } from './ai'
 import { all, first, loadPricing, placeholders, roomAvailability, run } from './db'
-import { calculatePrice, roomsNeeded, type SeasonRate } from './pricing'
+import { calculatePrice, staffRateForStay, roomsNeeded, type SeasonRate } from './pricing'
 import { FACILITIES, MEAL_PLANS, mergeFilters, parseQueryRules, sanitizeFilters, type SearchFilters } from './search'
 import { getContent, getSettings } from './settings'
 import type { NearbyPlace, PropertyCard, PropertyRow, RoomRow } from './types'
-import { nightsBetween, nowIso, parseJson, sha256Hex, todayIST } from './util'
+import { addDays, eachNight, nightsBetween, nowIso, parseJson, sha256Hex, todayIST } from './util'
 
 const CARD_SQL = `
 SELECT p.id, p.slug, p.name, COALESCE(p.stay_type, p.type) AS type, p.destination, p.rating_avg, p.rating_count, p.facilities, p.meal_plans,
@@ -70,7 +70,7 @@ export async function smartSearch(env: Env, text: string): Promise<{ filters: Se
 
 // ---- Database search ----
 
-export async function searchProperties(env: Env, f: SearchFilters, limit = 60): Promise<PropertyCard[]> {
+export async function searchProperties(env: Env, f: SearchFilters, limit = 60, staffRates = false): Promise<PropertyCard[]> {
   const where: string[] = ["p.status = 'live'"]
   const binds: (string | number)[] = []
   if (f.destination) { where.push('p.destination = ?'); binds.push(f.destination) }
@@ -86,29 +86,35 @@ export async function searchProperties(env: Env, f: SearchFilters, limit = 60): 
     where.push('EXISTS (SELECT 1 FROM json_each(p.meal_plans) j WHERE j.value = ?)')
     binds.push(f.mealPlan)
   }
-  let sql = `SELECT * FROM (${CARD_SQL} WHERE ${where.join(' AND ')}) WHERE from_price IS NOT NULL`
+  const cardSql = staffRates ? CARD_SQL.replace('MIN(base_rate)', 'MIN(CASE WHEN staff_rate > 0 THEN staff_rate ELSE NULLIF(base_rate, 0) END)') : CARD_SQL
+  let sql = `SELECT * FROM (${cardSql} WHERE ${where.join(' AND ')}) WHERE ${staffRates ? '1 = 1' : 'from_price IS NOT NULL'}`
   if (f.guests) { sql += ' AND max_guests >= ?'; binds.push(f.guests) }
-  if (f.priceMin) { sql += ' AND from_price >= ?'; binds.push(f.priceMin) }
+  if (f.priceMin && !(staffRates && f.checkIn && f.checkOut)) { sql += ' AND from_price >= ?'; binds.push(f.priceMin) }
   // priceMax is checked after stay prices are known (season rates can lift the price).
   if (f.priceMax && !(f.checkIn && f.checkOut)) { sql += ' AND from_price <= ?'; binds.push(f.priceMax) }
   sql += ' LIMIT 300'
   let cards = await all<PropertyCard>(env, sql, ...binds)
 
   if (f.checkIn && f.checkOut && cards.length) {
-    cards = await withStayPrices(env, cards, f)
+    cards = await withStayPrices(env, cards, f, staffRates)
     cards = cards.filter((c) => c.available)
-    if (f.priceMax) cards = cards.filter((c) => (c.stay_price ?? c.from_price) <= f.priceMax!)
+    if (f.priceMax) cards = cards.filter((c) => staffRates ? !!c.stay_price && c.stay_price <= f.priceMax! : (c.stay_price ?? c.from_price) <= f.priceMax!)
+    if (staffRates && f.priceMin) cards = cards.filter((c) => !!c.stay_price && c.stay_price >= f.priceMin!)
   }
 
   cards = await sortCards(env, cards, f)
+  if (staffRates && (f.sort === 'price_asc' || f.sort === 'price_desc')) cards.sort((a,b) => {
+    const av = a.stay_price ?? a.from_price, bv = b.stay_price ?? b.from_price
+    return !(av > 0) ? (bv > 0 ? 1 : 0) : !(bv > 0) ? -1 : f.sort === 'price_desc' ? bv - av : av - bv
+  })
   return cards.slice(0, limit)
 }
 
-async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters): Promise<PropertyCard[]> {
+async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters, staffRates = false): Promise<PropertyCard[]> {
   const ids = cards.map((c) => c.id)
   const ph = placeholders(ids.length)
   const [rooms, seasons, avail] = await Promise.all([
-    all<RoomRow & { weekend_nights: string }>(env, `SELECT r.*, p.weekend_nights, p.rate_meal_plan FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.active = 1 AND r.property_id IN (${ph})`, ...ids),
+    all<RoomRow & { weekend_nights: string; rate_meal_plan: string | null }>(env, `SELECT r.*, p.weekend_nights, p.rate_meal_plan FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.active = 1 AND r.property_id IN (${ph})`, ...ids),
     all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date < ?`, ...ids, f.checkIn!, f.checkOut!),
     roomAvailability(env, ids, f.checkIn!, f.checkOut!),
   ])
@@ -123,12 +129,22 @@ async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters)
       const free = avail.get(r.id)?.free ?? 0
       const need = roomsNeeded(guests, r.capacity)
       if (free < need) continue
-      const p = calculatePrice({ room: r, seasons, checkIn: f.checkIn!, checkOut: f.checkOut!, roomsCount: need, adults: guests })
+      const staffLines = staffRates ? eachNight(f.checkIn!, f.checkOut!).map(date => ({
+        property_id: r.property_id, room_id: r.id, name: 'Staff rate', start_date: date, end_date: date,
+        rate: staffRateForStay(r, seasons, date, addDays(date, 1), f.mealPlan), pct_adjust: null,
+        min_nights: Math.max(r.min_nights || 1, ...seasons.filter(s =>
+          (s.property_id == null || s.property_id === r.property_id) && (s.room_id == null || s.room_id === r.id) &&
+          s.start_date <= date && s.end_date >= date && (!s.meal_plan || s.meal_plan === (f.mealPlan || r.rate_meal_plan))
+        ).map(s => s.min_nights || 1)),
+      })) : []
+      const useStaff = staffLines.length > 0 && staffLines.every(line => line.rate != null && line.rate > 0)
+      const p = calculatePrice({ room: r, seasons: useStaff ? staffLines.map(line => ({...line, kind: 'special'})) : seasons, mealPlan: f.mealPlan, checkIn: f.checkIn!, checkOut: f.checkOut!, roomsCount: need, adults: guests })
       if (p.errors.length) continue
       const perNight = Math.round(p.subtotal / nights)
       if (!best || perNight < best.perNight) best = { perNight, total: p.total }
     }
-    c.available = !!best || (freeCapacity >= guests && propRooms.length > 1)
+    c.available = staffRates ? freeCapacity >= guests : !!best || (freeCapacity >= guests && propRooms.length > 1)
+    if (staffRates) c.from_price = best?.perNight ?? 0
     if (best) {
       c.stay_price = best.perNight
       c.stay_total = best.total

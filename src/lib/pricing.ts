@@ -237,6 +237,13 @@ function tierForStay(room: RoomRates, seasons: SeasonRate[], checkIn: string, ch
     // The strongest season that actually has a figure for this tier (a "+25% Christmas" rule has no net rate).
     const s = seasonFor(room, seasons, d, (x) => !!(tier === 'staff' ? x.staff_rate : x.net_rate), plan)
     const wk = isWeekendNight(room, d)
+    const configured = seasonFor(room, seasons, d, undefined, plan)
+    if (tier === 'staff' && configured?.source === 'wizard') {
+      const matrixValue = wk ? configured.staff_weekend_rate : configured.staff_rate
+      if (!(matrixValue != null && matrixValue > 0)) return null
+      sum += matrixValue + supplementsOn(room, seasons, d).reduce((a, x) => a + (x.supplement ?? 0), 0)
+      continue
+    }
     const seasonV = s ? (tier === 'staff' ? (wk && s.staff_weekend_rate) || s.staff_rate : (wk && s.net_weekend_rate) || s.net_rate) : null
     const v = seasonV || roomRate || null
     if (!v) return null
