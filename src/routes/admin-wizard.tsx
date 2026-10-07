@@ -407,7 +407,7 @@ const PeakEntry: FC<{ row: (SeasonRate & { id: number }) | null }> = ({ row }) =
     <label class="wf"><span class="wl">To Date <b>*</b></span><input type="date" name="common_managed_to" value={row?.end_date ?? ''} /></label>
     <label class="wf"><span class="wl">Additional Charge (₹) <b>*</b></span><input type="number" min="0" name="common_managed_amt" value={row?.supplement ?? ''} placeholder="Enter amount" /></label>
     <label class="wf"><span class="wl">Description (Optional)</span><input name="common_managed_desc" maxlength={60} value={row && row.name !== 'Peak time' ? row.name : ''} placeholder="e.g. Christmas, New Year, Diwali etc." /></label>
-    <button type="button" class="linklike small" data-remove-managed-peak>Remove</button>
+    <button type="button" class="icon-btn" data-remove-managed-peak aria-label="Delete peak period">{I.trash}</button>
   </div>
 )
 
