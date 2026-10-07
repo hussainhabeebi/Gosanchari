@@ -70,9 +70,9 @@ describe('Step 3 scoped persistence',()=>{
       expect(rows[1]).toMatchObject({room_id:f.rooms[0],supplement:300,start_date:'2026-12-20',end_date:'2027-01-05',source:'wizard-override:'+key})
       await f.save(body);expect(f.rows()).toEqual(rows)
       const html=await(await f.app.request(`http://localhost/admin/properties/${f.id}/setup/3`,{},f.env)).text()
-      expect(html.indexOf('Common Peak Time Charges')).toBeLessThan(html.indexOf('data-rate-room='))
+      expect(html).not.toContain('Common Peak Time Charges'); expect(html).not.toContain('Room-specific Peak Override'); expect(html).not.toContain('Existing room-specific Peak Time Charges'); expect(html.match(/<h3>Peak Time Charges<\/h3>/g)).toHaveLength(1)
       expect(html).toContain(`name="common_managed_id" value="${rows[0].id}"`)
-      expect(html).toContain('Room-specific Peak Override (optional)')
+      expect(html).toContain('data-shared-peak-section')
       for(const rid of f.rooms){const loaded=await loadPricing(f.env,rid);expect(calculatePrice({...loaded!,checkIn:'2026-12-20',checkOut:'2026-12-23',roomsCount:2}).roomCharges).toBe((8750+(rid===f.rooms[0]?300:1000))*6)}
       const publicApp=new Hono<any>().use('*',async(c,next)=>{c.set('user',null);await next()}).route('/',publicRoutes)
       const response=await publicApp.request('http://localhost/stay/common-peak-test/price',{method:'POST',body:new URLSearchParams({room:String(f.rooms[0]),checkIn:'2026-12-20',checkOut:'2026-12-23',rooms:'2',adults:'2',children:'0'})},f.env)
@@ -107,43 +107,56 @@ describe('Step 3 scoped persistence',()=>{
   })
 })
 
-// @ts-expect-error Node VM executes the shipped browser controller with local DOM doubles.
+// @ts-expect-error Node VM executes the shipped room and shared-peak browser handlers.
 import { runInNewContext } from 'node:vm'
 function draftUI(storage:Map<string,string>, saved:Record<string,string>={}) {
   const events=(node:any)=>Object.assign(node,{listeners:{} as Record<string,Function[]>,addEventListener(k:string,f:Function){(this.listeners[k]??=[]).push(f)},fire(k:string,e:any={}){for(const f of this.listeners[k]??[])f(e)}})
-  class Option {defaultSelected=false;constructor(public text:string,public value:string){}}
-  const control=(name:string,value='',select=false):any=>({name,value,defaultValue:value,tagName:select?'SELECT':'INPUT',options:select?[new Option('Select','')]:undefined,add(option:any){this.options.push(option)},replaceChildren(...options:any[]){this.options=options}})
-  const row=(prefix:string):any=>{const node:any={hidden:false,inputs:[],selects:[]};for(const suffix of ['id','remove','amt','desc',...(prefix==='common'?['key','from','to']:[])])node.inputs.push(control(prefix+'_managed_'+suffix,saved[prefix+'_managed_'+suffix]??(suffix==='remove'?'0':'')));if(prefix!=='common')node.selects.push(control(prefix+'_managed_key',saved[prefix+'_managed_key']??'',true));node.cloneNode=()=>{const clone=row(prefix);for(const type of ['inputs','selects'])node[type].forEach((c:any,i:number)=>{clone[type][i].value=c.value;clone[type][i].defaultValue=c.defaultValue;clone[type][i].options=c.options?.map((o:any)=>({...o}))});return clone};return node}
+  const row=():any=>{const node:any={hidden:false,inputs:[]};for(const suffix of ['id','remove','key','from','to','amt','desc']){const name='common_managed_'+suffix,value=saved[name]??(suffix==='remove'?'0':'');node.inputs.push({name,value,defaultValue:value,closest(){return section}})}node.cloneNode=()=>{const clone=row();node.inputs.forEach((c:any,i:number)=>Object.assign(clone.inputs[i],{value:c.value,defaultValue:c.defaultValue}));return clone};return node}
   const form=events({dataset:{ratesDraft:'1'},getAttribute(){return '/admin/properties/99/setup/3'}}),window=events({})
-  const boxes=['common','r101','r102'].map(prefix=>events({dataset:{managedPeaks:prefix},hidden:false,closest(){return form},entries:{children:[row(prefix)],get firstElementChild(){return this.children[0]},appendChild(r:any){this.children.push(r)},replaceChildren(...r:any[]){this.children=r}}}))
-  const all=(s:string,root:any):any[]=>s==='[data-managed-peaks]'?boxes:s==='[data-peak-entry]'?root.entries.children:s==='input'?root.inputs:s==='select'?root.selects:s==='[data-override-common]'?boxes.flatMap(b=>b.entries.children.flatMap((r:any)=>r.selects)):[]
-  const one=(s:string,root:any)=>s==='[data-peak-entries]'?root.entries:s==='[data-managed-peaks="common"]'?boxes[0]:root?.inputs.find((i:any)=>s===`input[name="${i.name}"]`)
+  const section:any=events({parent:null})
+  const entries:any={children:[row()],get firstElementChild(){return this.children[0]},appendChild(r:any){this.children.push(r)},replaceChildren(...r:any[]){this.children=r}}
+  const box=events({entries,closest(s:string){return s==='form'?form:section}})
+  const panels=[101,102,103].map(id=>({dataset:{rateRoom:String(id)},hidden:false}))
+  const slots=panels.map(panel=>({appendChild(editor:any){editor.parent=panel}}))
+  const statuses=panels.map(()=>({textContent:''}))
+  const buttons=panels.map(panel=>events({dataset:{viewRateRoom:panel.dataset.rateRoom}}))
+  const next=events({}),select:any=events({options:panels.map(p=>({value:p.dataset.rateRoom})),selectedIndex:0,closest(){return form},scrollIntoView(){}})
+  Object.defineProperty(select,'value',{get(){return this.options[this.selectedIndex].value},set(v){this.selectedIndex=this.options.findIndex((o:any)=>o.value===v)}})
+  const all=(s:string,root:any):any[]=>s==='[data-rate-room]'?panels:s==='[data-view-rate-room]'?buttons:s==='[data-peak-entry]'?entries.children:s==='input[name]'?root.inputs:s==='input'||s==='input[type="number"]'?[]:[]
+  const one=(s:string,root:any)=>s==='[data-room-select]'?select:s==='[data-next-room]'?next:s==='[data-shared-peak-section]'?section:s==='[data-managed-peaks="common"]'?box:s==='[data-peak-entries]'?entries:s.startsWith('[data-peak-slot=')?slots[panels.findIndex(p=>s===`[data-peak-slot="${p.dataset.rateRoom}"]`)]:s.startsWith('[data-rate-status=')?statuses[panels.findIndex(p=>s===`[data-rate-status="${p.dataset.rateRoom}"]`)]:root?.inputs?.find((i:any)=>s===`input[name="${i.name}"]`)
   const source=readFileSync('public/app.js','utf8') as string
-  runInNewContext(source.slice(source.indexOf('  // Managed common peaks'),source.indexOf('  function cloneClean(')),{$:one,$$:all,window,Option,crypto,sessionStorage:{getItem(k:string){return storage.get(k)},setItem(k:string,v:string){storage.set(k,v)}}})
-  const set=(index:number,name:string,value:string,entry=0)=>{const r=boxes[index].entries.children[entry];[...r.inputs,...r.selects].find(i=>i.name===name).value=value;boxes[index].fire('input')}
-  const add=(index:number)=>boxes[index].fire('click',{target:{closest(s:string){return s==='[data-add-managed-peak]'?{}:null}}})
-  const remove=(index:number,entry:number)=>boxes[index].fire('click',{target:{closest(s:string){return s==='[data-remove-managed-peak]'?{closest(){return boxes[index].entries.children[entry]}}:null}}})
-  return {boxes,form,window,set,add,remove,value(index:number,name:string,entry=0){const r=boxes[index].entries.children[entry];return [...r.inputs,...r.selects].find(i=>i.name===name).value}}
+  runInNewContext(source.slice(source.indexOf('  var roomSel ='),source.indexOf('  function cloneClean(')),{$:one,$$:all,window,crypto,alert(){},sessionStorage:{getItem(k:string){return storage.get(k)},setItem(k:string,v:string){storage.set(k,v)},removeItem(k:string){storage.delete(k)}}})
+  const set=(name:string,value:string,index=0)=>{entries.children[index].inputs.find((i:any)=>i.name===name).value=value;box.fire('input')}
+  const add=()=>section.fire('click',{target:{closest(s:string){return s==='[data-add-managed-peak]'?{}:null}}})
+  const remove=(index:number)=>section.fire('click',{target:{closest(s:string){return s==='[data-remove-managed-peak]'?{closest(){return entries.children[index]}}:null}}})
+  return {form,window,entries,section,set,add,remove,next,view(index:number){buttons[index].fire('click')},switchRoom(index:number){select.value=panels[index].dataset.rateRoom;select.fire('change')},value(name:string,index=0){return entries.children[index].inputs.find((i:any)=>i.name===name).value}}
 }
 
-describe('common peak browser drafts',()=>{
-  it('retains multiple common rows, linked overrides and removals across rooms, Previous/Next and submission',()=>{
+describe('shared peaks in the original Room Rates workflow',()=>{
+  it.each([0,1])('enter in room %s, switch and View/Edit: every room shows the same live values',start=>{
+    const ui=draftUI(new Map());ui.switchRoom(start)
+    for(const [k,v] of Object.entries({from:'2026-12-20',to:'2027-01-05',amt:'1000',desc:'Xmas New-Year Hike'}))ui.set('common_managed_'+k,v)
+    const editor=ui.section,association=ui.value('common_managed_key')
+    for(const room of [2,0,1]){ui.switchRoom(room);expect(ui.section).toBe(editor);expect(ui.section.parent.dataset.rateRoom).toBe(String(101+room));expect(ui.value('common_managed_amt')).toBe('1000');expect(ui.value('common_managed_key')).toBe(association)}
+    ui.view(0);expect(ui.section.parent.dataset.rateRoom).toBe('101');expect(ui.value('common_managed_desc')).toBe('Xmas New-Year Hike')
+    ui.next.fire('click');expect(ui.section.parent.dataset.rateRoom).toBe('102');expect(ui.value('common_managed_amt')).toBe('1000')
+  })
+  it('shares multiple periods, edits and removals across rooms and restores drafts on Previous/Next and reopening',()=>{
     const storage=new Map<string,string>();let ui=draftUI(storage)
-    for(const [k,v] of Object.entries({from:'2026-12-20',to:'2027-01-05',amt:'1000',desc:'Christmas'}))ui.set(0,'common_managed_'+k,v)
-    const association=ui.value(0,'common_managed_key');expect(association).toMatch(/^[a-f0-9-]{36}$/)
-    ui.set(1,'r101_managed_key',association);ui.set(1,'r101_managed_amt','300')
-    ui.boxes[1].hidden=true;ui.boxes[2].hidden=false // room switch / View/Edit never changes common controls
-    ui.add(0);ui.set(0,'common_managed_from','2026-11-05',1);ui.set(0,'common_managed_to','2026-11-15',1);ui.set(0,'common_managed_amt','500',1)
-    ui.window.fire('pagehide');ui=draftUI(storage) // Previous → Next / reopen unsaved Step 3
-    expect(ui.boxes[0].entries.children).toHaveLength(2)
-    expect(ui.value(0,'common_managed_amt')).toBe('1000');expect(ui.value(0,'common_managed_amt',1)).toBe('500')
-    expect(ui.value(1,'r101_managed_key')).toBe(association);expect(ui.value(1,'r101_managed_amt')).toBe('300')
-    ui.remove(0,1);ui.form.fire('submit');ui=draftUI(storage)
-    expect(ui.boxes[0].entries.children[1].hidden).toBe(true);expect(ui.value(0,'common_managed_remove',1)).toBe('1')
-    expect(ui.value(0,'common_managed_key')).toBe(association)
-    // A new saved server baseline supersedes stale draft fields after Save & Continue.
-    ui=draftUI(storage,{common_managed_id:'42',common_managed_key:association,common_managed_amt:'1000',common_managed_from:'2026-12-20',common_managed_to:'2027-01-05',common_managed_desc:'Saved Christmas'})
-    expect(ui.value(0,'common_managed_id')).toBe('42');expect(ui.value(0,'common_managed_desc')).toBe('Saved Christmas')
+    for(const [k,v] of Object.entries({from:'2026-12-20',to:'2027-01-05',amt:'1000',desc:'Xmas New-Year Hike'}))ui.set('common_managed_'+k,v)
+    const association=ui.value('common_managed_key')
+    ui.switchRoom(1);ui.add()
+    for(const [k,v] of Object.entries({from:'2026-11-05',to:'2026-11-15',amt:'500',desc:'Diwali Hike'}))ui.set('common_managed_'+k,v,1)
+    ui.view(0);expect(ui.entries.children).toHaveLength(2);expect(ui.value('common_managed_amt',1)).toBe('500')
+    ui.set('common_managed_amt','1200');ui.switchRoom(2);expect(ui.value('common_managed_amt')).toBe('1200')
+    ui.remove(1);ui.view(1);expect(ui.entries.children[1].hidden).toBe(true)
+    ui.window.fire('pagehide');ui=draftUI(storage)
+    expect(ui.value('common_managed_amt')).toBe('1200');expect(ui.value('common_managed_key')).toBe(association);expect(ui.entries.children[1].hidden).toBe(true)
+    ui.form.fire('submit');ui=draftUI(storage);expect(ui.value('common_managed_remove',1)).toBe('1')
+    // Saved server values supersede stale drafts after Save & Continue / reopen.
+    ui=draftUI(storage,{common_managed_id:'42',common_managed_key:association,common_managed_amt:'1200',common_managed_from:'2026-12-20',common_managed_to:'2027-01-05',common_managed_desc:'Xmas New-Year Hike'})
+    expect(ui.value('common_managed_id')).toBe('42');expect(ui.entries.children).toHaveLength(1)
+    ui.view(2);expect(ui.value('common_managed_amt')).toBe('1200')
   })
 })
 
@@ -177,6 +190,32 @@ describe('public / Staff Finder / quotation integration and supplement privacy',
       expect(option.subtotal).toBe((7500+1000)*2*3)
       const html=await(await staff.request('http://localhost/staff/quotes/'+qid,{},f.env)).text()
       expect(html).not.toContain('987654');expect(html).not.toContain('9,91,975')
+    }finally{f.db.close()}
+  })
+})
+
+describe('shared peak Save & Continue / reopen',()=>{
+  it('stores each period once, restores one editor for every room and edits/removes without duplicate pricing',async()=>{
+    const f=fixture();try{
+      const unrelated=JSON.stringify(['season_rates','users','property_photos'].map(t=>f.db.prepare('SELECT * FROM '+t+' ORDER BY id').all()))
+      const body=commonForm();body.set('common_managed_from','2030-12-20');body.set('common_managed_to','2031-01-05')
+      for(const [k,v] of Object.entries({id:'',key:key2,from:'2030-11-05',to:'2030-11-15',amt:'500',desc:'Diwali Hike',remove:'0'}))body.append('common_managed_'+k,v)
+      expect((await f.save(body)).headers.get('location')).toContain('/setup/4')
+      const initial=f.rows();expect(initial).toHaveLength(2);expect(initial.every(r=>r.room_id===null)).toBe(true)
+      await f.save(body);expect(f.rows()).toEqual(initial)
+      for(const [index,row] of initial.entries()) {
+        const values=body.getAll('common_managed_id');values[index]=String(row.id);body.delete('common_managed_id');values.forEach(v=>body.append('common_managed_id',v))
+      }
+      const html=await(await f.app.request(`http://localhost/admin/properties/${f.id}/setup/3`,{},f.env)).text()
+      expect(html.match(/data-shared-peak-section/g)).toHaveLength(1)
+      for(const rid of f.rooms)expect(html).toContain(`data-peak-slot="${rid}"`)
+      expect(html).toContain('name="common_managed_amt" value="1000"');expect(html).toContain('name="common_managed_amt" value="500"')
+      const amounts=body.getAll('common_managed_amt');amounts[0]='1200';body.delete('common_managed_amt');amounts.forEach(v=>body.append('common_managed_amt',v));await f.save(body)
+      for(const rid of f.rooms){const loaded=await loadPricing(f.env,rid);expect(calculatePrice({...loaded!,checkIn:'2030-12-20',checkOut:'2030-12-23',roomsCount:2}).roomCharges).toBe((7000+1200)*6);expect(calculatePrice({...loaded!,checkIn:'2030-11-05',checkOut:'2030-11-08',roomsCount:2}).roomCharges).toBe((7000+500)*6)}
+      body.delete('common_managed_remove');body.append('common_managed_remove','1');body.append('common_managed_remove','0');await f.save(body)
+      expect(f.rows()).toHaveLength(1);expect(f.rows()[0].id).toBe(initial[1].id)
+      for(const rid of f.rooms){const loaded=await loadPricing(f.env,rid);expect(calculatePrice({...loaded!,checkIn:'2030-12-20',checkOut:'2030-12-23',roomsCount:2}).roomCharges).toBe(7000*6)}
+      expect(JSON.stringify(['season_rates','users','property_photos'].map(t=>f.db.prepare('SELECT * FROM '+t+(t==='season_rates'?' WHERE property_id IS NOT ?':'')+' ORDER BY id').all(...(t==='season_rates'?[f.id]:[]))))).toBe(unrelated)
     }finally{f.db.close()}
   })
 })

@@ -19,7 +19,7 @@ import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { int, isDate, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg } from './helpers'
 import { afterPropertySave } from './admin-properties'
-import { commonPeakKey, overridePeakKey, type SeasonRate } from '../lib/pricing'
+import { commonPeakKey, type SeasonRate } from '../lib/pricing'
 import { peakStatements } from '../lib/wizard-peaks'
 
 export const wizardRoutes = new Hono<AppEnv>()
@@ -398,16 +398,16 @@ async function saveStep2(c: Context<AppEnv>, p: PropertyRow) {
 type Rates = Record<string, SeasonRate & { id: number; source: string | null }>
 const val = (n: number | null | undefined) => (n ? String(n) : '')
 
-const PeakEntry: FC<{ prefix: string; row: (SeasonRate & { id: number }) | null; common?: SeasonRate[] }> = ({ prefix, row, common }) => (
-  <div class="peak-row stack" data-peak-entry>
-    <input type="hidden" name={`${prefix}_managed_id`} value={row?.id ?? ''} />
-    <input type="hidden" name={`${prefix}_managed_remove`} value="0" />
-    {prefix === 'common' ? <>
-      <input type="hidden" name="common_managed_key" value={row ? commonPeakKey(row) ?? '' : ''} />
-      <div class="wiz-2"><label class="wf"><span class="wl">From Date</span><input type="date" name="common_managed_from" value={row?.start_date ?? ''} /></label><label class="wf"><span class="wl">To Date</span><input type="date" name="common_managed_to" value={row?.end_date ?? ''} /></label></div>
-    </> : <label class="wf"><span class="wl">Common peak charge to replace</span><select name={`${prefix}_managed_key`} data-override-common><option value="">Select a common peak charge</option>{common?.map(c => <option value={commonPeakKey(c)!} selected={overridePeakKey(row ?? {} as SeasonRate) === commonPeakKey(c)}>{c.name} ({c.start_date} → {c.end_date})</option>)}</select></label>}
-    <div class="wiz-2"><label class="wf"><span class="wl">Additional Charge ₹</span><input type="number" min="0" name={`${prefix}_managed_amt`} value={row?.supplement ?? ''} /></label><label class="wf"><span class="wl">Description</span><input name={`${prefix}_managed_desc`} maxlength={60} value={row?.name ?? ''} /></label></div>
-    <button type="button" class="linklike" data-remove-managed-peak>Remove</button>
+const PeakEntry: FC<{ row: (SeasonRate & { id: number }) | null }> = ({ row }) => (
+  <div class="wiz-4 peak-row" data-peak-entry>
+    <input type="hidden" name="common_managed_id" value={row?.id ?? ''} />
+    <input type="hidden" name="common_managed_remove" value="0" />
+    <input type="hidden" name="common_managed_key" value={row ? commonPeakKey(row) ?? '' : ''} />
+    <label class="wf"><span class="wl">From Date <b>*</b></span><input type="date" name="common_managed_from" value={row?.start_date ?? ''} /></label>
+    <label class="wf"><span class="wl">To Date <b>*</b></span><input type="date" name="common_managed_to" value={row?.end_date ?? ''} /></label>
+    <label class="wf"><span class="wl">Additional Charge (₹) <b>*</b></span><input type="number" min="0" name="common_managed_amt" value={row?.supplement ?? ''} placeholder="Enter amount" /></label>
+    <label class="wf"><span class="wl">Description (Optional)</span><input name="common_managed_desc" maxlength={60} value={row && row.name !== 'Peak time' ? row.name : ''} placeholder="e.g. Christmas, New Year, Diwali etc." /></label>
+    <button type="button" class="linklike small" data-remove-managed-peak>Remove</button>
   </div>
 )
 
@@ -421,10 +421,6 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
   return page(c, { title: `Rates · ${p.name}`, area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={3} done={done} icon={I.coins} title="Room Rates" sub="Set different rates for off season, season and peak times. Enter rates for weekdays and weekends with CP, MAP, AP and EP plans.">
       <form method="post" action={`/admin/properties/${p.id}/setup/3`} class="stack wiz-form" data-rates data-rates-draft={c.get('user')!.id}>
-        <section class="period period-peak" data-managed-peaks="common">
-          <div class="period-head"><div><h3>Common Peak Time Charges</h3><small class="muted">Applies to every room, per room per applicable night. Check-out is excluded.</small></div><button type="button" class="linklike" data-add-managed-peak>+ Add New Peak Time</button></div>
-          <div data-peak-entries>{(common.length ? common : [null]).map(x => <PeakEntry prefix="common" row={x} />)}</div>
-        </section>
         <div class="wiz-2 rate-pick">
           <label class="wf">
             <span class="wl">Select Room Category <b>*</b> <a class="linklike add-new" href={`/admin/properties/${p.id}/setup/2`}>{I.plus} Add New Room Category</a></span>
@@ -442,7 +438,6 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
         {rooms.map((r, ri) => {
           const mine: Rates = {}
           for (const x of rows.filter((x) => x.room_id === r.id)) mine[`${x.kind === 'off_season' ? 'off' : x.kind === 'season' ? 'sea' : 'peak'}_${x.meal_plan ?? ''}`] = x
-          const peaks = rows.filter((x) => x.room_id === r.id && x.supplement && x.source === 'wizard')
           return (
             <div class="rate-room" data-rate-room={r.id} hidden={ri > 0}>
               {PERIODS.map(([pk, title, sub]) => {
@@ -482,33 +477,27 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
                   </div>
                 )
               })}
-              <details class="period" data-managed-peaks={`r${r.id}`}>
-                <summary>Room-specific Peak Override (optional)</summary>
-                <p class="muted">Replaces the selected common charge for this room during that common period.</p>
-                <button type="button" class="linklike" data-add-managed-peak>+ Add Room-specific Override</button>
-                <div data-peak-entries>{(() => { const overrides = rows.filter(x => x.room_id === r.id && overridePeakKey(x)); return (overrides.length ? overrides : [null]).map(x => <PeakEntry prefix={`r${r.id}`} row={x} common={common} />) })()}</div>
-              </details>
-              <div class="period period-peak" hidden={!peaks.length}>
-                <div class="period-head">
-                  <span class="period-ico">{I.crown}</span>
-                  <div><h3>Existing room-specific Peak Time Charges</h3><small class="muted">Add additional charges for special peak time periods (e.g. Christmas, New Year, Diwali etc.)</small></div>
-                  <button type="button" class="linklike add-new" data-add-peak={r.id}>{I.plus} Add New Peak Time</button>
-                </div>
-                <div class="peak-rows" data-peaks={r.id}>
-                  {(peaks.length ? peaks : [null]).map((x) => (
-                    <div class="wiz-4 peak-row">
-                      <input type="hidden" name={`r${r.id}_peak_id`} value={x?.id ?? ''} />
-                      <label class="wf"><span class="wl">From Date <b>*</b></span><input type="date" name={`r${r.id}_peak_from`} value={x?.start_date ?? ''} /></label>
-                      <label class="wf"><span class="wl">To Date <b>*</b></span><input type="date" name={`r${r.id}_peak_to`} value={x?.end_date ?? ''} /></label>
-                      <label class="wf"><span class="wl">Additional Charge (₹) <b>*</b></span><input type="number" min="0" name={`r${r.id}_peak_amt`} value={val(x?.supplement)} placeholder="Enter amount" /></label>
-                      <label class="wf"><span class="wl">Description (Optional)</span><input name={`r${r.id}_peak_desc`} value={x && x.name !== 'Peak time' ? x.name : ''} maxlength={60} placeholder="e.g. Christmas, New Year, Diwali etc." /></label>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <div data-peak-slot={r.id}></div>
             </div>
           )
         })}
+        <div class="period period-peak" data-shared-peak-section>
+          <div class="period-head">
+            <span class="period-ico">{I.crown}</span>
+            <div><h3>Peak Time Charges</h3><small class="muted">Add additional charges for special peak time periods (e.g. Christmas, New Year, Diwali etc.)</small></div>
+            <button type="button" class="linklike add-new" data-add-managed-peak>{I.plus} Add New Peak Time</button>
+          </div>
+          <div class="peak-rows" data-managed-peaks="common"><div data-peak-entries>{(common.length ? common : [null]).map(x => <PeakEntry row={x} />)}</div></div>
+          {/* Saved room-specific records remain untouched and visible for their original room. */}
+          {rooms.map(r => <div data-legacy-peak-room={r.id} hidden={r.id !== rooms[0].id}>
+            {rows.filter(x => x.room_id === r.id && x.supplement != null && !commonPeakKey(x)).map(x => <div class="wiz-4 peak-row">
+              <label class="wf"><span class="wl">From Date</span><input type="date" value={x.start_date} readonly /></label>
+              <label class="wf"><span class="wl">To Date</span><input type="date" value={x.end_date} readonly /></label>
+              <label class="wf"><span class="wl">Additional Charge (₹)</span><input type="number" value={x.supplement ?? ''} readonly /></label>
+              <label class="wf"><span class="wl">Description</span><input value={x.name} readonly /></label>
+            </div>)}
+          </div>)}
+        </div>
         <div class="wiz-nav">
           <button type="button" class="btn btn-soft" data-next-room>{I.plus} Add Next Room Category Rates</button>
           <span class="row"><a class="btn btn-outline" href={`/admin/properties/${p.id}/setup/2`}>← Previous</a><button class="btn btn-go">Save & Continue →</button></span>

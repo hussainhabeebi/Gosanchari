@@ -615,13 +615,19 @@
   });
 
   var roomSel = $('[data-room-select]')
-  function showRoom(id) { $$('[data-rate-room]').forEach(function (p) { p.hidden = p.dataset.rateRoom !== String(id) }) }
+  function showRoom(id) {
+    $$('[data-rate-room]').forEach(function (p) { p.hidden = p.dataset.rateRoom !== String(id) })
+    // Move one live editor, never duplicate shared peak values into per-room drafts.
+    var section = $('[data-shared-peak-section]'), slot = $('[data-peak-slot="' + id + '"]')
+    if (section && slot) slot.appendChild(section)
+    $$('[data-legacy-peak-room]').forEach(function (row) { row.hidden = row.dataset.legacyPeakRoom !== String(id) })
+  }
   if (roomSel) {
     var rateForm = roomSel.closest('form'), panels = $$('[data-rate-room]', rateForm)
     var draftKey = 'room-rates:' + rateForm.dataset.ratesDraft + ':' + rateForm.getAttribute('action')
     function rateValues(defaults) {
       return panels.map(function (panel) {
-        return { id: panel.dataset.rateRoom, fields: $$('input', panel).filter(function (input) { return !input.closest || !input.closest('[data-managed-peaks]') }).map(function (input) { return { name: input.name, value: defaults ? input.defaultValue : input.value } }) }
+        return { id: panel.dataset.rateRoom, fields: $$('input', panel).filter(function (input) { return !input.closest || !input.closest('[data-shared-peak-section]') }).map(function (input) { return { name: input.name, value: defaults ? input.defaultValue : input.value } }) }
       })
     }
     // Browser-restored values are drafts, not the saved server baseline.
@@ -631,9 +637,9 @@
       if (!panel) return
       var peaks = $('[data-peaks]', panel)
       var count = room.fields.filter(function (field) { return field.name === 'r' + room.id + '_peak_from' }).length
-      while (peaks.children.length < count) peaks.appendChild(peaks.lastElementChild.cloneNode(true))
+      while (peaks && peaks.children.length < count) peaks.appendChild(peaks.lastElementChild.cloneNode(true))
       var offsets = {}
-      $$('input', panel).filter(function (input) { return !input.closest || !input.closest('[data-managed-peaks]') }).forEach(function (input) {
+      $$('input', panel).filter(function (input) { return !input.closest || !input.closest('[data-shared-peak-section]') }).forEach(function (input) {
         var matches = room.fields.filter(function (field) { return field.name === input.name })
         var index = offsets[input.name] || 0; offsets[input.name] = index + 1
         if (matches[index]) input.value = matches[index].value
@@ -694,70 +700,46 @@
       selectRateRoom(roomSel.options[i].value); roomSel.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
   }
-  $$('[data-add-peak]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var box = $('[data-peaks="' + b.dataset.addPeak + '"]'), row = box.lastElementChild.cloneNode(true)
-      $$('input', row).forEach(function (i) { i.value = '' }); box.appendChild(row)
-    })
-  })
-  // Managed common peaks and explicit overrides have independent, tab-local drafts.
-  $$('[data-managed-peaks]').forEach(function (box) {
-    var form = box.closest('form'), entries = $('[data-peak-entries]', box), template = entries.firstElementChild.cloneNode(true)
-    var prefix = box.dataset.managedPeaks, key = 'managed-peaks:' + form.dataset.ratesDraft + ':' + form.getAttribute('action') + ':' + prefix
-    function controls(row) { return $$('input', row).concat($$('select', row)) }
-    function snapshot(defaults) { return Array.from(entries.children).map(function (row) { return controls(row).map(function (input) { return { name: input.name, value: defaults ? (input.tagName === 'SELECT' ? Array.from(input.options).find(function (option) { return option.defaultSelected })?.value || '' : input.defaultValue) : input.value } }) }) }
-    var baseline = JSON.stringify(snapshot(true))
-    function refreshOptions() {
-      var common = $('[data-managed-peaks="common"]')
-      if (!common) return
-      var choices = $$('[data-peak-entry]', common).filter(function (row) { return $('input[name="common_managed_remove"]', row).value !== '1' }).map(function (row) {
-        return { key: $('input[name="common_managed_key"]', row).value, label: ($('input[name="common_managed_desc"]', row).value || 'Peak time') + ' (' + $('input[name="common_managed_from"]', row).value + ' → ' + $('input[name="common_managed_to"]', row).value + ')' }
-      }).filter(function (choice) { return choice.key })
-      $$('[data-override-common]', form).forEach(function (select) {
-        var selected = select.value
-        select.replaceChildren(new Option('Select a common peak charge', ''))
-        choices.forEach(function (choice) { select.add(new Option(choice.label, choice.key)) })
-        // Keep a deleted association until the server removes its override with the common row.
-        if (selected && !choices.some(function (choice) { return choice.key === selected })) select.add(new Option('Removed common peak', selected))
-        select.value = selected
+  // Shared Peak Time Charges: one editor inside the currently selected room.
+  var sharedPeaks = $('[data-managed-peaks="common"]')
+  if (sharedPeaks) {
+    var peakForm = sharedPeaks.closest('form'), peakSection = sharedPeaks.closest('[data-shared-peak-section]')
+    var entries = $('[data-peak-entries]', sharedPeaks), template = entries.firstElementChild.cloneNode(true)
+    var peakDraftKey = 'shared-peaks:' + peakForm.dataset.ratesDraft + ':' + peakForm.getAttribute('action')
+    function peakFields(row) { return $$('input[name]', row) }
+    function peakSnapshot(defaults) { return Array.from(entries.children).map(function (row) { return peakFields(row).map(function (input) { return { name: input.name, value: defaults ? input.defaultValue : input.value } }) }) }
+    var peakBaseline = JSON.stringify(peakSnapshot(true))
+    function retainPeaks() {
+      $$('[data-peak-entry]', sharedPeaks).forEach(function (row) {
+        var key = $('input[name="common_managed_key"]', row)
+        if (!key.value && peakFields(row).some(function (input) { return /_(from|to|amt|desc)$/.test(input.name) && input.value })) key.value = crypto.randomUUID()
       })
-    }
-    function retain() {
-      if (prefix === 'common') $$('[data-peak-entry]', box).forEach(function (row) {
-        var id = $('input[name="common_managed_key"]', row)
-        if (!id.value && controls(row).some(function (input) { return /_(from|to|amt|desc)$/.test(input.name) && input.value })) id.value = crypto.randomUUID()
-      })
-      try { sessionStorage.setItem(key, JSON.stringify({ base: baseline, rows: snapshot(false) })) } catch (e) {}
-      refreshOptions()
+      try { sessionStorage.setItem(peakDraftKey, JSON.stringify({ base: peakBaseline, rows: peakSnapshot(false) })) } catch (e) {}
     }
     try {
-      var draft = JSON.parse(sessionStorage.getItem(key) || 'null')
-      if (draft && draft.base === baseline && Array.isArray(draft.rows)) {
+      var peakDraft = JSON.parse(sessionStorage.getItem(peakDraftKey) || 'null')
+      if (peakDraft && peakDraft.base === peakBaseline && Array.isArray(peakDraft.rows)) {
         entries.replaceChildren()
-        draft.rows.forEach(function (fields) {
+        peakDraft.rows.forEach(function (fields) {
           var row = template.cloneNode(true)
-          controls(row).forEach(function (input) { var saved = fields.find(function (field) { return field.name === input.name }); if (saved) {
-            if (input.tagName === 'SELECT' && saved.value && !Array.from(input.options).some(function (option) { return option.value === saved.value })) input.add(new Option('Common peak charge', saved.value))
-            input.value = saved.value
-          } })
-          row.hidden = controls(row).some(function (input) { return input.name.endsWith('_remove') && input.value === '1' })
+          peakFields(row).forEach(function (input) { var saved = fields.find(function (field) { return field.name === input.name }); if (saved) input.value = saved.value })
+          row.hidden = $('input[name="common_managed_remove"]', row).value === '1'
           entries.appendChild(row)
         })
       }
     } catch (e) {}
-    box.addEventListener('input', retain); box.addEventListener('change', retain)
-    window.addEventListener('pagehide', retain); form.addEventListener('submit', retain)
-    box.addEventListener('click', function (event) {
+    sharedPeaks.addEventListener('input', retainPeaks); sharedPeaks.addEventListener('change', retainPeaks)
+    window.addEventListener('pagehide', retainPeaks); peakForm.addEventListener('submit', retainPeaks)
+    peakSection.addEventListener('click', function (event) {
       if (event.target.closest('[data-add-managed-peak]')) {
         var row = template.cloneNode(true)
-        controls(row).forEach(function (input) { input.value = input.name.endsWith('_remove') ? '0' : '' })
-        row.hidden = false; entries.appendChild(row); retain()
+        peakFields(row).forEach(function (input) { input.value = input.name.endsWith('_remove') ? '0' : '' })
+        row.hidden = false; entries.appendChild(row); retainPeaks()
       }
       var remove = event.target.closest('[data-remove-managed-peak]')
-      if (remove) { var row = remove.closest('[data-peak-entry]'); controls(row).find(function (input) { return input.name.endsWith('_remove') }).value = '1'; row.hidden = true; retain() }
+      if (remove) { var row = remove.closest('[data-peak-entry]'); $('input[name="common_managed_remove"]', row).value = '1'; row.hidden = true; retainPeaks() }
     })
-    refreshOptions()
-  })
+  }
 
   function cloneClean(container, first) {
     var row = first.cloneNode(true)

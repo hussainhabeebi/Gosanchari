@@ -43,7 +43,7 @@ function rateStep(storage: Map<string, string>, ids = [101, 102, 103], restored:
   }
   const query = (s: string, root: any) => s === '[data-room-select]' ? select : s === '[data-next-room]' ? next : s === '[data-peaks]' ? root.peaks : statuses.find(x => s === `[data-rate-status="${x.dataset.rateStatus}"]`)
   const source = readFileSync('public/app.js', 'utf8') as string
-  runInNewContext(source.slice(source.indexOf('  var roomSel ='), source.indexOf("  $$('[data-add-peak]')")), {
+  runInNewContext(source.slice(source.indexOf('  var roomSel ='), source.indexOf('  // Shared Peak Time Charges:')), {
     $: query, $$: queryAll, window, alert() {}, sessionStorage: {getItem(k: string) {return storage.get(k)}, setItem(k: string, v: string) {storage.set(k,v)}, removeItem(k: string) {storage.delete(k)}},
   })
   const fields = () => panels.flatMap(p => queryAll('input', p))
