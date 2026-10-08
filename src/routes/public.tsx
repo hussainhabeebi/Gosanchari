@@ -895,7 +895,7 @@ publicRoutes.get('/q/:token', async (c) => {
         <div class="card">
           {q.inclusions && <><h3>Included</h3><p style="white-space:pre-line">{quotationInclusions(q.inclusions, q.apply_gst)}</p></>}
           {q.exclusions && <><h3>Not included</h3><p style="white-space:pre-line">{q.exclusions}</p></>}
-          {q.payment_terms && <><h3>Payment terms</h3><p style="white-space:pre-line">{q.payment_terms}</p></>}
+          {q.payment_terms && <><h3>Payment Terms &amp; Conditions</h3><p style="white-space:pre-line">{q.payment_terms}</p></>}
         </div>
       )}
       {!closed && (

@@ -133,3 +133,31 @@ it('additive GST migration preserves existing amounts and defaults ON without a 
     expect(after).toEqual(before);expect(()=>db.exec('UPDATE quotations SET apply_gst=2')).toThrow()
   }finally{db.close()}
 })
+
+
+describe('quotation payment terms defaults and preservation',()=>{
+ const terms="To secure your booking, please pay a 50% advance of the total quoted amount. The remaining 50% balance is payable at the hotel upon check-in.\n\nPlease note that the room booking is subject to availability at the exact time the advance payment is made. Payment does not guarantee confirmation unless availability is verified.";
+ it('uses the exact client terms only on new quotations and renders one styled section',async()=>{
+  const f=fixture();try{
+   const response=await f.app.request('http://localhost/staff/quotes/new',{},f.env);expect(response.status).toBe(303);
+   const path=response.headers.get('location')!;const id=Number(path.split('/').pop());
+   const created=f.db.prepare('SELECT * FROM quotations WHERE id=?').get(id) as any;expect(created.payment_terms).toBe(terms);expect(created.status).toBe('draft');
+   expect(f.quote().payment_terms).toBe('');
+   const editor=await(await f.app.request('http://localhost'+path,{},f.env)).text();expect(editor).toContain('name="payment_terms" rows="5"');
+   const printed=await(await f.app.request('http://localhost'+path+'/print',{},f.env)).text();expect(printed).toContain(terms);expect(printed.match(/<h3>Payment Terms &amp; Conditions<\/h3>/g)).toHaveLength(1);expect(printed).toContain('white-space:pre-line');expect(printed).toContain('data-quote-export');
+  }finally{f.db.close()}
+ });
+ it('preserves existing custom terms through edit, print, customer display and duplication',async()=>{
+  const f=fixture();try{
+   const custom='Property-specific advance terms.\nBalance as individually agreed.';f.db.prepare('UPDATE quotations SET payment_terms=? WHERE id=?').run(custom,f.qid);
+   const before=JSON.stringify(f.read());
+   const edited=await(await f.app.request(f.url,{},f.env)).text();expect(edited).toContain(custom);
+   const printed=await(await f.app.request(f.url+'/print',{},f.env)).text();expect(printed).toContain(custom);expect(printed).not.toContain(terms);expect(f.quote().payment_terms).toBe(custom);expect(JSON.stringify(f.read())).toBe(before);
+   f.db.prepare("UPDATE quotations SET status='sent' WHERE id=?").run(f.qid);const publicHtml=await(await f.publicApp.request('http://localhost/q/gst-token',{},f.env)).text();expect(publicHtml).toContain(custom);expect(publicHtml).not.toContain(terms);
+   const duplicate=await f.app.request(f.url+'/duplicate',{method:'POST'},f.env);const id=Number(duplicate.headers.get('location')!.split('/').pop());expect((f.db.prepare('SELECT payment_terms FROM quotations WHERE id=?').get(id) as any).payment_terms).toBe(custom);
+  }finally{f.db.close()}
+ });
+ it('allows staff to save edited two-paragraph terms without appending defaults',async()=>{
+  const f=fixture();try{const b=f.form();const custom='Custom payment schedule.\n\nPlease verify with the property.';b.set('payment_terms',custom);expect((await f.save(b)).headers.get('location')).not.toContain('err=');expect(f.quote().payment_terms).toBe(custom);const html=await(await f.app.request(f.url,{},f.env)).text();expect(html).toContain(custom);expect(html).not.toContain(terms);}finally{f.db.close()}
+ });
+});

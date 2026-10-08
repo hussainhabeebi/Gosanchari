@@ -231,7 +231,7 @@ async function createQuote(c: Context<AppEnv>) {
     `INSERT INTO quotations (code, token, enquiry_id, user_id, staff_id, guest_name, phone, email, valid_till, inclusions, payment_terms)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     refCode('QT'), randomToken(18), e?.id ?? null, e?.user_id ?? null, u.id, e?.guest_name ?? 'Guest', e?.phone ?? null, e?.email ?? null,
-    addDays(todayIST(), s.booking.quote_validity_days), 'Accommodation as per room type', 'Payment by UPI or bank transfer to confirm. Our team will share the details.',
+    addDays(todayIST(), s.booking.quote_validity_days), 'Accommodation as per room type', 'To secure your booking, please pay a 50% advance of the total quoted amount. The remaining 50% balance is payable at the hotel upon check-in.\n\nPlease note that the room booking is subject to availability at the exact time the advance payment is made. Payment does not guarantee confirmation unless availability is verified.',
   )
   const pid = int(c.req.query('property'))
   if (pid) await addOption(c, id, pid, int(c.req.query('room')) || null, c.req.query('checkIn') ?? e?.check_in ?? null, c.req.query('checkOut') ?? e?.check_out ?? null, e?.adults ?? Math.max(1, int(c.req.query('guests'), 2)), e?.children ?? 0)
@@ -411,7 +411,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
           </div>
           <div class="row">
             <Field label="Valid till"><input type="date" name="valid_till" value={q.valid_till ?? ''} min={todayIST()} /></Field>
-            <Field label="Payment terms"><input name="payment_terms" value={q.payment_terms} /></Field>
+            <Field label="Payment terms"><textarea name="payment_terms" rows={5}>{q.payment_terms}</textarea></Field>
           </div>
           <Field label="Message to guest">
             <textarea name="message" rows={4} id="quote-msg">{q.message}</textarea>
@@ -824,7 +824,7 @@ ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => 
 <div class="quote-stay"><h3>Stay details</h3><p><strong>${esc(o.room_name)}</strong> · ${o.rooms_count} room${o.rooms_count === 1 ? '' : 's'}<br>${esc(fmtDate(o.check_in))} → ${esc(fmtDate(o.check_out))}<br>${o.adults} adult${o.adults === 1 ? '' : 's'} · ${o.children} child${o.children === 1 ? '' : 'ren'} · ${esc(o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only')}</p></div>
 ${amenities(o.property_facilities) ? `<h3>Property amenities</h3><ul class="quote-amenities">${amenities(o.property_facilities)}</ul>` : ''}${amenities(o.room_facilities, true) ? `<div class="${parseJson<string[]>(o.room_facilities, []).length <= 12 ? 'quote-amenity-group' : ''}"><h3>Selected-room amenities</h3><ul class="quote-amenities">${amenities(o.room_facilities, true)}</ul></div>` : ''}
 <div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div></section>`).join('')}
-${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment terms</h3><p style="white-space:pre-line">${esc(q.payment_terms)}</p>` : ''}
+${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment Terms &amp; Conditions</h3><p style="white-space:pre-line">${esc(q.payment_terms)}</p>` : ''}
 <footer class="quote-footer"><p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p><p>Go Sanchari · reservation@gosanchari.com</p></footer></main></body></html>`)
 
 })
