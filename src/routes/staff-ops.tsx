@@ -758,16 +758,71 @@ opsRoutes.get('/staff/quotes/:id/print', requirePerm('manage_quotes'), async (c)
   if (!q) return c.notFound()
   const opts = await all<QuoteOptionRow & { property_name: string; room_name: string; destination: string; property_facilities: string; room_facilities: string }>(c.env, 'SELECT o.*, p.name AS property_name, p.destination, p.facilities AS property_facilities, r.facilities AS room_facilities, r.name AS room_name FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE quotation_id = ? ORDER BY o.id', q.id)
   const esc = (x: unknown) => String(x ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!)
-  const amenities = (value: string, room = false) => parseJson<string[]>(value, []).map(key => `<li>${esc((room ? ROOM_AMENITIES[key] : undefined) ?? FACILITIES[key] ?? key)}</li>`).join('')
+  const amenities = (value: string, room = false) => {
+    const labels = parseJson<string[]>(value, []).map(key => esc((room ? ROOM_AMENITIES[key] : undefined) ?? FACILITIES[key] ?? key))
+    return labels.reduce((rows, label, i) => i % 2 === 0 ? rows + `<li><span>${label}</span>${labels[i + 1] == null ? '' : `<span>${labels[i + 1]}</span>`}</li>` : rows, '')
+  }
   return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Quote ${esc(q.code)}</title><style>
-body{font:14px/1.5 Arial,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#203530;background:#fff}h1{font-size:25px;margin:0}h2{font-size:20px;color:#174c3c;margin:20px 0 8px}h3{font-size:15px;margin:16px 0 6px}p{margin:8px 0}table{width:100%;border-collapse:collapse}td{padding:9px 8px;border-bottom:1px solid #e1e8e4}.r{text-align:right}.t td{font-weight:700;background:#edf5f0}.quote-brand{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:2px solid #174c3c;padding-bottom:18px}.quote-brand img{width:181px;height:48px;object-fit:contain}.quote-notice{border-left:4px solid #b78124;background:#fff8e9;padding:12px 16px;margin:20px 0}.quote-notice h2{font-size:18px;color:#634614;margin:0}.quote-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;padding:12px 0}.quote-meta p{margin:0}.quote-option{border-top:1px solid #dce6df;padding-top:4px;margin-top:20px}.quote-amenities{padding-left:20px;margin:6px 0}.quote-amenities li{margin-bottom:3px}.quote-footer{border-top:1px solid #dce6df;margin-top:24px;padding-top:12px;color:#52665e;font-size:12px}a{color:#174c3c}[data-quote-actions]{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}[data-quote-actions] button{min-height:44px;padding:10px 16px;cursor:pointer;border:1px solid #174c3c;border-radius:6px;font:600 14px Arial}[data-download-quote]{background:#174c3c;color:white}[data-quote-actions] [data-print]{background:white;color:#174c3c}[data-quote-actions] button:disabled{opacity:.65;cursor:wait}[data-quote-actions] button:focus-visible{outline:2px solid #174c3c;outline-offset:3px}[data-pdf-status]{font-size:13px}@media(max-width:480px){.quote-brand{flex-wrap:wrap}.quote-meta{grid-template-columns:1fr}}@media print{body{margin:0;max-width:none}[data-quote-actions]{display:none}tr,li,.quote-meta,.quote-brand,.quote-notice,.quote-property-heading,.quote-stay,.quote-price{break-inside:avoid}h2,h3{break-after:avoid}}@page{size:A4;margin:12mm}
+:root{--quote-navy:#14213d;--quote-teal:#0f5e57;--quote-red:#b42318;--quote-line:#dfe5e3;--quote-soft:#e6f2ef}
+*{box-sizing:border-box}
+body{font:12px/1.45 Arial,"Helvetica Neue",sans-serif;max-width:760px;margin:24px auto;padding:0 20px;color:var(--quote-navy);background:#fff;overflow-wrap:anywhere}
+h1{font-size:22px;line-height:1.2;margin:0;font-weight:700;letter-spacing:-.3px}
+h2{font-size:18px;line-height:1.3;color:var(--quote-navy);margin:16px 0 5px}
+h3{font-size:12px;line-height:1.4;margin:10px 0 5px;color:var(--quote-teal);font-weight:700;letter-spacing:.3px}
+p{margin:6px 0}
+a{color:var(--quote-teal)}
+.quote-brand{display:flex;justify-content:space-between;gap:24px;align-items:center;border-bottom:2px solid var(--quote-navy);padding:0 0 14px;margin-bottom:14px}
+.quote-brand img{width:181px;height:48px;object-fit:contain;flex:none}
+.quote-brand>div{text-align:right;min-width:0}
+.quote-brand a{font-size:12px;text-decoration:none}
+.quote-brand p{margin:3px 0 0;font-size:11px;color:var(--quote-teal);letter-spacing:.8px}
+.quote-notice{border:1px solid #eee1d3;border-left:3px solid var(--quote-red);background:#fff9f2;padding:8px 12px;margin:12px 0}
+.quote-notice h2{font-size:14px;color:var(--quote-navy);line-height:1.4;margin:0}
+.quote-notice p{font-size:11px;color:#5d6b69;margin:3px 0 0}
+.quote-meta{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:24px;row-gap:0;padding:0 0 10px}
+.quote-meta p{margin:0;padding:5px 0;border-bottom:1px solid var(--quote-line);font-size:12px}
+.quote-meta strong{display:inline-block;min-width:112px;font-weight:600;color:#5d6b69}
+.quote-option{border-top:1px solid var(--quote-line);padding-top:0;margin-top:10px}
+.quote-property-heading{border-left:3px solid var(--quote-teal);padding-left:10px;margin:14px 0 10px}
+.quote-property-heading h2{margin:0 0 3px}
+.quote-property-heading p{margin:0;font-size:12px;color:#5d6b69}
+.quote-stay{padding:8px 12px;border:1px solid var(--quote-line);background:#f8fafb;margin:8px 0 10px}
+.quote-stay h3{margin:0 0 4px}
+.quote-stay p{margin:0;line-height:1.65;font-size:12px}
+.quote-stay strong{font-weight:700;color:var(--quote-navy)}
+.quote-amenities{list-style:none;padding:0;margin:0 0 7px}
+.quote-amenities li{display:flex;gap:18px;min-width:0;font-size:11.5px;line-height:1.45;break-inside:avoid}
+.quote-amenities li span{display:block;flex:0 0 calc(50% - 9px);min-width:0;padding:3px 0;border-bottom:1px solid #edf0f2;overflow-wrap:anywhere}
+.quote-amenity-group{break-inside:avoid}
+.quote-price{margin:12px 0}
+.quote-price h3{margin:0 0 7px}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
+td{padding:7px 10px;border-bottom:1px solid var(--quote-line);vertical-align:top}
+td:first-child{width:72%}
+.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.t td{font-weight:700;background:var(--quote-soft);border-top:1px solid #c4dcd6;border-bottom:1px solid #c4dcd6;padding-top:8px;padding-bottom:8px;color:var(--quote-navy)}
+.t .r{font-size:15px}
+[data-quote-export]>h3{padding-top:10px;border-top:1px solid var(--quote-line);margin-top:10px}
+[data-quote-export]>p[style]{font-size:12px;line-height:1.55;margin:5px 0 10px}
+.quote-footer{border-top:1px solid var(--quote-line);margin-top:18px;padding-top:9px;color:#5d6b69;font-size:10px;overflow-wrap:anywhere}
+.quote-footer p{margin:3px 0}
+[data-quote-actions]{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+[data-quote-actions] button{min-height:44px;padding:10px 16px;cursor:pointer;border:1px solid var(--quote-navy);border-radius:6px;font:600 14px Arial}
+[data-download-quote]{background:var(--quote-navy);color:white}
+[data-quote-actions] [data-print]{background:white;color:var(--quote-navy)}
+[data-quote-actions] button:disabled{opacity:.65;cursor:wait}
+[data-quote-actions] button:focus-visible{outline:2px solid var(--quote-teal);outline-offset:3px}
+[data-pdf-status]{font-size:13px}
+@media(max-width:480px){body{padding:0 16px;margin:16px auto}.quote-brand{gap:12px}.quote-brand img{width:130px;height:auto}.quote-brand h1{font-size:18px}.quote-brand a{font-size:10px}.quote-brand p{font-size:10px;letter-spacing:.2px}.quote-meta{column-gap:14px}.quote-meta strong{display:block;min-width:0}.quote-amenities li{gap:12px}.quote-amenities li span{flex-basis:calc(50% - 6px)}td:first-child{width:67%}}
+@media print{body{margin:0;max-width:none;padding:0}[data-quote-actions]{display:none}tr,li,.quote-meta,.quote-brand,.quote-notice,.quote-property-heading,.quote-stay,.quote-price{break-inside:avoid}h2,h3{break-after:avoid}}
+@page{size:A4;margin:12mm}
 </style></head><body><div data-quote-actions><button type="button" data-download-quote data-quote-code="${esc(q.code)}">⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div><script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
 <header class="quote-brand"><img src="/brand/logo-wide.webp" alt="Go Sanchari" width="181" height="48"><div><h1>Go Sanchari</h1><a href="mailto:reservation@gosanchari.com">reservation@gosanchari.com</a><p>Travel quotation</p></div></header>
 <div class="quote-notice"><h2>Please note this is not a confirmation voucher</h2><p>Voucher not issued by this quotation</p></div>
 <div class="quote-meta"><p><strong>Customer:</strong> ${esc(q.guest_name)}</p><p><strong>Quotation number:</strong> ${esc(q.code)}</p><p><strong>Quotation date:</strong> ${esc(fmtDate(q.created_at))}</p><p><strong>Valid till:</strong> ${esc(fmtDate(q.valid_till))}</p></div>
 ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => `<section class="quote-option"><div class="quote-property-heading"><h2>${opts.length > 1 ? `Option ${i + 1}: ` : ''}${esc(o.property_name)}</h2><p>${esc(o.destination)}</p></div>
 <div class="quote-stay"><h3>Stay details</h3><p><strong>${esc(o.room_name)}</strong> · ${o.rooms_count} room${o.rooms_count === 1 ? '' : 's'}<br>${esc(fmtDate(o.check_in))} → ${esc(fmtDate(o.check_out))}<br>${o.adults} adult${o.adults === 1 ? '' : 's'} · ${o.children} child${o.children === 1 ? '' : 'ren'} · ${esc(o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only')}</p></div>
-${amenities(o.property_facilities) ? `<h3>Property amenities</h3><ul class="quote-amenities">${amenities(o.property_facilities)}</ul>` : ''}${amenities(o.room_facilities, true) ? `<h3>Selected-room amenities</h3><ul class="quote-amenities">${amenities(o.room_facilities, true)}</ul>` : ''}
+${amenities(o.property_facilities) ? `<h3>Property amenities</h3><ul class="quote-amenities">${amenities(o.property_facilities)}</ul>` : ''}${amenities(o.room_facilities, true) ? `<div class="${parseJson<string[]>(o.room_facilities, []).length <= 12 ? 'quote-amenity-group' : ''}"><h3>Selected-room amenities</h3><ul class="quote-amenities">${amenities(o.room_facilities, true)}</ul></div>` : ''}
 <div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div></section>`).join('')}
 ${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment terms</h3><p style="white-space:pre-line">${esc(q.payment_terms)}</p>` : ''}
 <footer class="quote-footer"><p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p><p>Go Sanchari · reservation@gosanchari.com</p></footer></main></body></html>`)

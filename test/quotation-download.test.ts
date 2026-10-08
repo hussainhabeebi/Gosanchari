@@ -34,3 +34,10 @@ it('waits for the logo before PDF generation and reports failed images',async()=
  let loaded:any;const f=fixture(false,false,[{complete:false,addEventListener:(event:string,fn:any)=>{if(event==='load')loaded=fn}}]);f.click();await settle();expect(f.saves()).toBe(0);loaded();await settle();expect(f.saves()).toBe(1);f.finish();await settle();
  const bad=fixture(false,false,[{complete:true,naturalWidth:0}]);bad.click();await settle();expect(bad.saves()).toBe(0);expect(bad.status.textContent).toContain('Could not prepare');
 });
+
+it('keeps quotation information and saved pricing while applying compact brand formatting',()=>{
+ const route=readFileSync('src/routes/staff-ops.tsx','utf8').split("opsRoutes.get('/staff/quotes/:id/print'")[1].split('// ---------- 24.')[0];
+ for(const value of ['q.guest_name','q.code','q.created_at','q.valid_till','o.property_name','o.destination','o.room_name','o.rooms_count','o.check_in','o.check_out','o.adults','o.children','o.meal_plan','o.subtotal','o.discount','o.extra_charges','o.taxes','o.total','q.inclusions','q.exclusions','q.payment_terms'])expect(route).toContain(value);
+ for(const label of ['Please note this is not a confirmation voucher','Voucher not issued by this quotation','Travel quotation','Customer:','Quotation date:','Quotation number:','Valid till:','Stay details','Property amenities','Selected-room amenities','Price breakdown','Room charges','Discount','Total','Included','Not included','Payment terms','Accept online:'])expect(route).toContain(label);
+ expect(route).toContain('--quote-navy:#14213d');expect(route).toContain('--quote-teal:#0f5e57');expect(route).toContain('--quote-red:#b42318');expect(route).toContain('grid-template-columns:minmax(0,1fr) minmax(0,1fr)');expect(route).toContain('overflow-wrap:anywhere');expect(route).toContain('labels[i + 1]');expect(route).not.toContain('calculatePrice(');expect(route).not.toContain('quotationPrice(');
+});
