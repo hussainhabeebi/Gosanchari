@@ -1,4 +1,34 @@
 // Go Sanchari client script: small progressive enhancements, no framework.
+// Admin → Resort contacts: filter the resort cards instantly by location and search words.
+(function () {
+  'use strict'
+  var root = document.querySelector('[data-contact-finder]')
+  if (!root) return
+  var input = root.querySelector('input[name="q"]')
+  var loc = root.querySelector('select[name="location"]')
+  var cards = Array.prototype.slice.call(root.querySelectorAll('.contact-card'))
+  var count = root.querySelector('[data-contact-count]')
+  var empty = root.querySelector('[data-contact-empty]')
+  function filter() {
+    var words = input.value.toLowerCase().split(/\s+/).filter(Boolean)
+    var place = loc.value, shown = 0
+    cards.forEach(function (card) {
+      var text = card.getAttribute('data-search') || ''
+      var ok = (!place || card.getAttribute('data-location') === place) && words.every(function (w) { return text.indexOf(w) !== -1 || text.indexOf(w.replace(/\D/g, '') || '\u0000') !== -1 })
+      card.hidden = !ok
+      if (ok) shown++
+    })
+    if (count) count.textContent = shown + ' of ' + cards.length + ' resorts'
+    if (empty) empty.hidden = shown > 0
+    var url = new URL(location.href)
+    if (input.value) url.searchParams.set('q', input.value); else url.searchParams.delete('q')
+    if (place) url.searchParams.set('location', place); else url.searchParams.delete('location')
+    history.replaceState(null, '', url)
+  }
+  input.addEventListener('input', filter)
+  loc.addEventListener('change', filter)
+  root.querySelector('form').addEventListener('submit', function (e) { e.preventDefault(); filter() })
+})();
 (function () {
   'use strict'
   var $ = function (s, r) { return (r || document).querySelector(s) }

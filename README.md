@@ -131,9 +131,12 @@ The editor is split into sections. Sections 1–10 are filled in first; sections
 | 19–21, 28–30 | Staff dashboard, inbox, enquiry workspace, guests, follow-ups, profile | `/staff…` | staff.tsx |
 | 22–27 | Property finder, quote builder, quotes, bookings, booking detail, availability | `/staff/finder`, `/staff/quotes…`, `/staff/bookings…`, `/staff/calendar` | staff-ops.tsx |
 | 31–40 | Admin dashboard, properties, rates, offers, all enquiries/quotes/bookings, payments, guests | `/admin…` | admin.tsx |
+| — | Expiring season rates (season / off-season / holiday periods ending in 30 days with no newer rates) | `/admin/rates/expiring` | admin.tsx, `src/lib/rate-expiry.ts` |
+| — | Resort contacts: instant search by location and resort name (admin only, `view_property_contacts`) | `/admin/contacts` | admin-contacts.tsx |
 | 41–47 | Staff & roles, reports, Ask AI, reviews, website content, settings, activity log | `/admin…` | admin2.tsx |
 
 Background work: `src/jobs/queue.ts` (Queues) and `src/jobs/cron.ts` (daily 07:00 IST, weekly Monday 08:00 IST).
+The daily job also sends a WhatsApp **season rate reminder** 30 days and 7 days before a rate period ends, and on its last day (event *Season rates ending* in *Admin → Settings → Notifications*, admins by default).
 WhatsApp inbound (text, voice notes, photos): `src/routes/webhooks.ts`.
 
 ## AI features and where they run

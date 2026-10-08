@@ -17,6 +17,7 @@ import { form, pageNum, redirectMsg } from './helpers'
 import { renderBookings, renderQuotes } from './staff-ops'
 import { renderGuests, renderInbox } from './staff'
 import { destinations, reindexKb } from '../lib/properties'
+import { daysLeft, EXPIRY_WINDOW_DAYS, expiryText, rateExpiryAlerts } from '../lib/rate-expiry'
 
 export const adminRoutes = new Hono<AppEnv>()
 adminRoutes.use('/admin', requireStaff)
@@ -38,7 +39,7 @@ adminRoutes.get('/admin', async (c) => {
   const period = ['today', 'week', 'month'].includes(c.req.query('p') ?? '') ? c.req.query('p')! : 'today'
   const since = periodStart(period)
   const since30 = periodStart('month')
-  const [k, series, byProp, bySource, unanswered, accepted, lowReviews, noAvail, activity, summary] = await Promise.all([
+  const [k, series, byProp, bySource, unanswered, accepted, lowReviews, noAvail, activity, summary, expiring] = await Promise.all([
     first<{ enquiries: number; bookings: number; revenue: number; booked_enq: number }>(
       c.env,
       `SELECT (SELECT COUNT(*) FROM enquiries WHERE created_at >= ?) AS enquiries,
@@ -56,6 +57,7 @@ adminRoutes.get('/admin', async (c) => {
     all<{ id: number; name: string }>(c.env, "SELECT id, name FROM properties p WHERE status = 'live' AND NOT EXISTS (SELECT 1 FROM rooms r WHERE r.property_id = p.id AND r.active = 1 AND r.base_rate > 0)"),
     all<{ name: string; n: number; last: string }>(c.env, 'SELECT u.name, COUNT(*) AS n, MAX(a.created_at) AS last FROM activity_log a JOIN users u ON u.id = a.user_id WHERE a.created_at >= ? AND u.role != \'guest\' GROUP BY u.id ORDER BY n DESC LIMIT 10', new Date(Date.now() - 86400_000).toISOString()),
     first<{ body: string; period: string }>(c.env, "SELECT body, period FROM insights WHERE kind = 'daily_summary' ORDER BY id DESC LIMIT 1"),
+    perms.manage_rates ? rateExpiryAlerts(c.env) : Promise.resolve([]),
   ])
   const conv = k?.enquiries ? Math.round(((k.booked_enq ?? 0) / k.enquiries) * 100) : 0
   const days = eachNight(todayIST(-29), todayIST(1))
@@ -89,7 +91,9 @@ adminRoutes.get('/admin', async (c) => {
             {accepted.map((q) => <li class="alert-red"><a href={`/staff/quotes/${q.id}`}>{q.guest_name} accepted {q.code}</a> — confirm the booking</li>)}
             {lowReviews.map((r) => <li class="alert-amber"><a href="/admin/reviews">{r.rating}★ review</a> for {r.property_name}: “{r.body.slice(0, 60)}…”</li>)}
             {noAvail.map((p) => <li class="alert-amber"><a href={`/admin/properties/${p.id}`}>{p.name}</a> has no rooms or rates set</li>)}
-            {!unanswered.length && !accepted.length && !lowReviews.length && !noAvail.length && <li class="muted">All clear.</li>}
+            {expiring.slice(0, 8).map((r) => <li class={daysLeft(r.end_date) <= 7 ? 'alert-red' : 'alert-amber'}><a href="/admin/rates/expiring">{r.property_name ?? 'All properties'} · {r.name}</a> {expiryText(r.end_date)} — add the new rates</li>)}
+            {expiring.length > 8 && <li class="alert-amber"><a href="/admin/rates/expiring">{expiring.length - 8} more rate periods ending →</a></li>}
+            {!unanswered.length && !accepted.length && !lowReviews.length && !noAvail.length && !expiring.length && <li class="muted">All clear.</li>}
           </ul>
         </div>
       </div>
@@ -320,6 +324,53 @@ adminRoutes.post('/admin/rates/season', requirePerm('manage_rates'), async (c) =
   const id = await insertId(c.env, 'INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, created_by, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', propertyId, roomId, str(f.name, 60), f.start_date, f.end_date, rate, rate ? null : pct, int(f.min_nights) || null, c.get('user')!.id, f.kind in SEASON_KINDS ? f.kind : 'season')
   await logActivity(c.env, c.get('user')!.id, 'price.season_added', 'season_rate', id, { scope: f.scope, rate, pct, from: f.start_date, to: f.end_date })
   return redirectMsg(c, `/admin/rates?property=${f.property}&month=${f.start_date.slice(0, 7)}`, { ok: 'Rate added.' })
+})
+
+// Season / off-season rates that are ending with no newer rates entered (also sent daily on WhatsApp).
+adminRoutes.get('/admin/rates/expiring', requirePerm('manage_rates'), async (c) => {
+  const rows = await rateExpiryAlerts(c.env)
+  const today = todayIST()
+  return page(c, { title: 'Expiring rates', area: 'admin', active: 'rate-expiry' }, (
+    <div class="stack-lg">
+      <h1>Expiring season rates</h1>
+      <p class="muted">Season, off-season and holiday rate periods that end within {EXPIRY_WINDOW_DAYS} days (or have already ended) and have no newer rates of the same type.
+        They disappear from this list once you add the new period's rates. A WhatsApp reminder goes out 30 days and 7 days before, and on the last day
+        (choose who gets it in <a href="/admin/settings">Settings → Notifications</a>).</p>
+      {rows.length ? (
+        <Table head={['Property', 'Location', 'Rate period', 'Type', 'Dates', 'Status', '']}>
+          {rows.map((r) => (
+            <tr>
+              <td>{r.property_id ? <a href={`/admin/properties/${r.property_id}/setup/3`}><strong>{r.property_name}</strong></a> : <strong>All properties</strong>}</td>
+              <td>{r.destination ?? '—'}</td>
+              <td>{r.name}{r.rows > 1 && <div class="muted small">{r.rows} room / meal-plan rates</div>}</td>
+              <td><span class={`pill pill-kind-${r.kind}`}>{seasonKindLabel(r.kind)}</span></td>
+              <td class="nowrap">{fmtDate(r.start_date)} – {fmtDate(r.end_date)}</td>
+              <td><span class={`rate-expiry-days ${daysLeft(r.end_date, today) <= 7 ? 'text-red' : ''}`}>{expiryText(r.end_date, today)}</span></td>
+              <td class="rate-expiry-actions">
+                {r.property_id ? <a class="btn btn-sm" href={`/admin/properties/${r.property_id}/setup/3`}>Update rates</a> : <a class="btn btn-sm" href="/admin/rates">Update rates</a>}
+                <form method="post" action="/admin/rates/expiring/dismiss" class="inline" data-confirm={`Stop reminding about “${r.name}”${r.property_name ? ` at ${r.property_name}` : ''}? Use this when no new rates are needed.`}>
+                  <input type="hidden" name="property_id" value={r.property_id ?? ''} />
+                  <input type="hidden" name="name" value={r.name} />
+                  <input type="hidden" name="kind" value={r.kind} />
+                  <input type="hidden" name="end_date" value={r.end_date} />
+                  <button class="btn btn-sm btn-outline">Mark as handled</button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </Table>
+      ) : <Empty>No season rates are ending in the next {EXPIRY_WINDOW_DAYS} days. All clear.</Empty>}
+    </div>
+  ))
+})
+
+adminRoutes.post('/admin/rates/expiring/dismiss', requirePerm('manage_rates'), async (c) => {
+  const f = await form(c)
+  if (!isDate(f.end_date) || !f.name) return c.redirect('/admin/rates/expiring', 303)
+  const pid = int(f.property_id) || null
+  await run(c.env, "UPDATE season_rates SET renewal_dismissed_at = ? WHERE property_id IS ? AND name = ? AND COALESCE(kind, 'season') = ? AND end_date = ?", nowIso(), pid, f.name, f.kind || 'season', f.end_date)
+  await logActivity(c.env, c.get('user')!.id, 'price.season_expiry_handled', 'property', pid, { name: f.name, kind: f.kind, end_date: f.end_date })
+  return redirectMsg(c, '/admin/rates/expiring', { ok: `Reminder for “${f.name}” marked as handled.` })
 })
 
 adminRoutes.post('/admin/rates/season/:id/delete', requirePerm('manage_rates'), async (c) => {

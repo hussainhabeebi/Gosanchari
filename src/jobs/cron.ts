@@ -5,6 +5,7 @@ import { aiText } from '../lib/ai'
 import { all, enqueue, first, insertId, notifyStaff, run } from '../lib/db'
 import { expireHolds } from '../lib/bookings'
 import { fillTemplate } from '../lib/integrations'
+import { rateExpiryReminder } from '../lib/rate-expiry'
 import { getSettings } from '../lib/settings'
 import { fmtDate, moneyShort, nowIso, todayIST } from '../lib/util'
 
@@ -68,7 +69,11 @@ export async function daily(env: Env): Promise<void> {
   const undrafted = await all<{ id: number }>(env, "SELECT id FROM tasks WHERE status = 'open' AND draft_message IS NULL AND due_at <= ? LIMIT 200", new Date(Date.parse(today + 'T23:59:59+05:30')).toISOString())
   for (const t of undrafted) await enqueue(env, { type: 'followup_draft', taskId: t.id })
 
-  // 6. Daily summary for the owner.
+  // 6. Season / off-season rates ending in 30 days, 7 days or today with no newer rates entered.
+  const rateReminder = await rateExpiryReminder(env, today)
+  if (rateReminder) await notifyStaff(env, 'rate_expiry', rateReminder)
+
+  // 7. Daily summary for the owner.
   await dailySummary(env)
 }
 

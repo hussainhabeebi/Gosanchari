@@ -116,7 +116,7 @@ export async function loadPricing(env: Env, roomId: number): Promise<{ room: Roo
 
 // ---- Notifications to staff (WhatsApp, by role, per Settings) ----
 
-export async function notifyStaff(env: Env, event: 'new_enquiry' | 'booking' | 'quote_accepted' | 'refund_request' | 'low_review' | 'daily_summary', text: string) {
+export async function notifyStaff(env: Env, event: 'new_enquiry' | 'booking' | 'quote_accepted' | 'refund_request' | 'low_review' | 'daily_summary' | 'rate_expiry', text: string) {
   const s = await getSettings(env)
   const roles = (s.notifications[event] ?? []) as Role[]
   if (!roles.length) return
