@@ -982,6 +982,26 @@
   });
 })();
 
+// Configured category totals only; advisory and independent of quotation pricing.
+(function () {
+  document.querySelectorAll('[data-quote-option]').forEach(function (option) {
+    var room = option.querySelector('[data-inventory-room]'), count = option.querySelector('[data-inventory-count]');
+    var label = option.querySelector('[data-inventory-label]'), warning = option.querySelector('[data-inventory-warning]');
+    if (!room || !count || !label || !warning) return;
+    function updateInventory() {
+      var raw = room.options[room.selectedIndex]?.getAttribute('data-units');
+      var units = raw == null || raw.trim() === '' ? null : Number(raw), requested = Number(count.value);
+      if (units == null || !Number.isFinite(units) || units < 0) {
+        label.textContent = 'Category inventory not supplied'; warning.hidden = true; warning.textContent = ''; return;
+      }
+      label.textContent = 'Total rooms in category: ' + units + ' — live availability not verified.';
+      warning.hidden = !(requested > units);
+      warning.textContent = requested > units ? 'Requested ' + requested + ' rooms; configured category inventory is ' + units + '. Please verify with the property or choose another category.' : '';
+    }
+    room.addEventListener('change', updateInventory); count.addEventListener('input', updateInventory); count.addEventListener('change', updateInventory); updateInventory();
+  });
+})();
+
 // Unsaved Staff quotation price preview. The server remains the pricing authority.
 (function () {
   var form = document.querySelector('[data-quote-recalculate]');

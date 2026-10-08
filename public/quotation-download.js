@@ -10,10 +10,20 @@
     button.disabled = true;
     button.textContent = 'Preparing PDF…';
     status.textContent = '';
-    Promise.resolve().then(function () {
+    Promise.resolve().then(async function () {
       if (typeof window.html2pdf !== 'function') throw new Error('PDF exporter did not load.');
       // Bound canvas memory on mobile instead of risking an empty oversized PDF.
       if (content.scrollHeight > 12000) throw new Error('Quotation is too long for this export.');
+      await Promise.all(Array.from(content.querySelectorAll('img')).map(function (image) {
+        if (image.complete) {
+          if (!image.naturalWidth) throw new Error('Quotation image failed to load.');
+          return image.decode ? image.decode() : Promise.resolve();
+        }
+        return new Promise(function (resolve, reject) {
+          image.addEventListener('load', resolve, { once: true });
+          image.addEventListener('error', function () { reject(new Error('Quotation image failed to load.')); }, { once: true });
+        });
+      }));
       var exportContent = content.cloneNode(true);
       // Individual policy lines can break between pages without slicing a line.
       exportContent.querySelectorAll('p[style*="pre-line"]').forEach(function (paragraph) {
@@ -35,7 +45,7 @@
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 1, windowWidth: 800, scrollX: 0, scrollY: 0, backgroundColor: '#ffffff' },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'h1', 'h2', 'h3', '.pdf-policy-line'] }
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'h1', 'h2', 'h3', 'li', '.quote-brand', '.quote-meta', '.quote-notice', '.quote-property-heading', '.quote-stay', '.quote-price', '.pdf-policy-line'] }
       }).from(exportContent).save();
     }).then(function () {
       status.textContent = 'PDF prepared. Check your browser downloads.';
