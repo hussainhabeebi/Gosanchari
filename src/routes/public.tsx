@@ -295,6 +295,7 @@ publicRoutes.get('/search', async (c) => {
 // ---------- 3. Property details ----------
 publicRoutes.get('/stay/:slug', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
+  const preview = c.req.query('preview') === '1'
   const user = c.get('user')
   const isStaffUser = !!user && user.role !== 'guest'
   if (!p || (p.status !== 'live' && !isStaffUser)) return page(c, { title: 'Not found' }, <div class="wrap section"><Empty><h2>This stay is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
@@ -340,6 +341,18 @@ publicRoutes.get('/stay/:slug', async (c) => {
   }, (
     <div class="wrap property-page">
       {p.status !== 'live' && <div class="flash flash-err">Preview — this property is {p.status} and not visible to guests.</div>}
+      {preview ? <div class="gallery stay-preview-gallery" data-gallery data-preview-gallery>
+        <div class="preview-gallery-stage">
+          <button type="button" class="preview-gallery-open" data-gallery-open aria-label="Open property photo viewer"><img data-gallery-main src={mediaUrl(gallery[0].r2_key, 1200, settings.images_transform)} alt={gallery[0].caption ?? p.name} /></button>
+          {photos.length > 1 && <><button type="button" class="preview-gallery-arrow previous" data-gallery-step="-1" aria-label="Previous property photo">‹</button><button type="button" class="preview-gallery-arrow next" data-gallery-step="1" aria-label="Next property photo">›</button></>}
+          <span class="preview-gallery-counter" data-gallery-counter aria-live="polite">1 / {gallery.length}</span>
+        </div>
+        <div class="preview-gallery-thumbnails" aria-label="Property photos">
+          {gallery.map((ph, i) => <button type="button" data-gallery-index={i} data-image={mediaUrl(ph.r2_key, 1200, settings.images_transform)} data-caption={ph.caption ?? p.name} aria-label={`Show photo ${i + 1}`} aria-pressed={i === 0 ? 'true' : 'false'}><img src={mediaUrl(ph.r2_key, 200, settings.images_transform)} alt={ph.caption ?? p.name} loading="lazy" /></button>)}
+        </div>
+        {gallery.map(ph => <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} data-full hidden></a>)}
+        {photos.length > 1 && <a class="small" href="#photos">See all {photos.length} photos</a>}
+      </div> : (
       <div class="gallery" data-gallery>
         {gallery.slice(0, 5).map((ph, i) => (
           <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} class={`g-item g-${i}`} data-full>
@@ -349,6 +362,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         {gallery.slice(5).map((ph) => <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} data-full hidden></a>)}
         {(photos.length > 5 || videos.length > 0) && <a class="btn btn-sm g-all" href="#photos">See all {photos.length} photos{videos.length ? ` & ${videos.length} video${videos.length > 1 ? 's' : ''}` : ''}</a>}
       </div>
+      )}
 
       <h1 class="property-title">{p.name}</h1>
       <div class="prop-layout">
@@ -381,6 +395,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                     <div class="grow">
                       <h3>{r.name}</h3>
                       {rp.length > 0 && <div class="room-photos" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 300, settings.images_transform)} alt={m.caption ?? r.name} loading="lazy" /></a>)}</div>}
+                      {preview && meals.length > 0 && <p class="small">Meal plans: {meals.map(m => MEAL_PLANS[m] ?? m).join(' · ')}</p>}
                       <div class="room-meta">
                         <span>👥 {(r.base_guests ?? r.capacity) < r.capacity ? `Rate for ${r.base_guests} guests · up to ${r.capacity}` : `Up to ${r.capacity} guests`}{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
                         {r.bed_type && <span>🛏 {r.bed_type}</span>}
@@ -393,9 +408,9 @@ publicRoutes.get('/stay/:slug', async (c) => {
                       {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
                       <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>
                     </div>
-                    <div class="room-price">
-                      {isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
-                      <button class="btn btn-sm" data-pick-room={r.id}>Book</button>
+                    <div class="room-price" data-preview-room={preview ? r.id : undefined}>
+                      {!preview && isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small" data-preview-room-price={preview ? '' : undefined}>For a personalised offer, fill in your details below and enquire.</p>}
+                      <button type="button" class="btn btn-sm" data-pick-room={r.id}>{preview ? 'Get Quote' : 'Book'}</button>
                     </div>
                   </div>
                 )
@@ -537,6 +552,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
           <p class="muted">For a personalised offer, fill in your details below and enquire.</p>
           <span class="eyebrow">CHAT WITH YOUR</span><h3>Personal <span class="advisor-green">Advisor</span></h3>
           <p class="muted small">Tell us your dates — our team will confirm availability and send you a quote on WhatsApp.</p>
+          {preview && <a class="btn btn-wa preview-advisor-whatsapp" href={`https://wa.me/${settings.business.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`I would like a personalised quote for ${p.name}, ${p.destination}.`)}`} target="_blank" rel="noopener" data-advisor-whatsapp>Chat on WhatsApp →</a>}
           <form method="post" action="/enquiry" class="stack" data-price-url={`/stay/${p.slug}/price`}>
             <input type="hidden" name="property_id" value={p.id} />
             <div class="row">
@@ -565,7 +581,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         </aside>
       </div>
 
-      {similar.length > 0 && (
+      {!preview && similar.length > 0 && (
         <section class="section">
           <h2>Similar properties</h2>
           <div class="grid grid-4">{similar.map((s) => <PropertyCard p={s} saved={saved.has(s.id)} transform={settings.images_transform} />)}</div>

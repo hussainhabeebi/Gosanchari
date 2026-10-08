@@ -877,16 +877,80 @@
   function closeDialog(dialog) { dialog.close(); dialog.remove(); }
   document.querySelectorAll('[data-stay-preview]').forEach(function (link) {
     link.addEventListener('click', function (event) {
-      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || typeof HTMLDialogElement === 'undefined') return;
       event.preventDefault();
       var dialog = document.createElement('dialog'); dialog.className = 'stay-dialog'; dialog.setAttribute('aria-label', 'Property details');
-      var close = document.createElement('button'); close.className = 'dialog-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close property details');
-      var frame = document.createElement('iframe'); var url = new URL(link.href); url.searchParams.set('preview', '1'); frame.src = url.href; frame.title = 'Property details and room selection';
-      dialog.append(close, frame); document.body.append(dialog); dialog.showModal(); close.focus();
-      close.onclick = function () { closeDialog(dialog); link.focus(); };
-      dialog.addEventListener('cancel', function (e) { e.preventDefault(); close.click(); });
+      var head = document.createElement('div'); head.className = 'stay-dialog-head';
+      var title = document.createElement('strong'); title.textContent = 'Property details';
+      var close = document.createElement('button'); close.type = 'button'; close.className = 'dialog-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close property details');
+      var loading = document.createElement('div'); loading.className = 'stay-preview-loading'; loading.setAttribute('role', 'status'); loading.textContent = 'Loading property details…';
+      var frame = document.createElement('iframe'); var url = new URL(link.href); url.searchParams.set('preview', '1'); frame.src = url.href; frame.title = 'Property details and enquiry';
+      head.append(title, close); dialog.append(head, loading, frame); document.body.append(dialog);
+      var previousBodyOverflow = document.body.style.overflow, previousRootOverflow = document.documentElement.style.overflow;
+      document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden';
+      dialog.showModal(); close.focus();
+      function dismiss() {
+        dialog.close(); dialog.remove(); document.body.style.overflow = previousBodyOverflow; document.documentElement.style.overflow = previousRootOverflow; link.focus({ preventScroll: true });
+      }
+      close.addEventListener('click', dismiss);
+      dialog.addEventListener('cancel', function (e) { e.preventDefault(); dismiss(); });
+      dialog.addEventListener('click', function (e) {
+        var rect = dialog.getBoundingClientRect();
+        if (e.target === dialog && (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom)) dismiss();
+      });
+      frame.addEventListener('load', function () {
+        loading.remove();
+        try {
+          var doc = frame.contentDocument, name = doc.querySelector('.property-title');
+          if (name) { title.textContent = name.textContent; dialog.setAttribute('aria-label', name.textContent + ' — Property details'); }
+          doc.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !doc.querySelector('dialog[open], .lightbox')) { e.preventDefault(); dismiss(); }
+          }, true);
+        } catch (_) { /* Native close and direct links remain available. */ }
+      });
     });
   });
+  // Preview uses the existing gallery/lightbox links; these controls only select an image.
+  document.querySelectorAll('[data-preview-gallery]').forEach(function (gallery) {
+    var thumbs = Array.from(gallery.querySelectorAll('[data-gallery-index]')), current = 0;
+    var image = gallery.querySelector('[data-gallery-main]'), counter = gallery.querySelector('[data-gallery-counter]');
+    function select(index) {
+      current = (index + thumbs.length) % thumbs.length;
+      image.src = thumbs[current].dataset.image; image.alt = thumbs[current].dataset.caption;
+      counter.textContent = (current + 1) + ' / ' + thumbs.length;
+      thumbs.forEach(function (thumb, i) { thumb.setAttribute('aria-pressed', i === current ? 'true' : 'false'); });
+      thumbs[current].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    thumbs.forEach(function (thumb, i) { thumb.addEventListener('click', function () { select(i); }); });
+    gallery.querySelectorAll('[data-gallery-step]').forEach(function (button) { button.addEventListener('click', function () { select(current + Number(button.dataset.galleryStep)); }); });
+    gallery.querySelector('[data-gallery-open]').addEventListener('click', function () { gallery.querySelectorAll('[data-full]')[current].click(); });
+  });
+  // Room-card estimates reuse the public endpoint, its default meal plan and its privacy rules.
+  var previewForm = document.querySelector('.embedded-stay form[data-price-url]');
+  if (previewForm) {
+    var previewTimer, previewRevision = 0;
+    var roomPrices = Array.from(document.querySelectorAll('[data-preview-room]'));
+    function refreshRoomPrices() {
+      var version = ++previewRevision; clearTimeout(previewTimer);
+      roomPrices.forEach(function (room) { room.querySelector('[data-preview-room-price]').textContent = 'Pick dates and guests below for a personalised quote.'; });
+      previewTimer = setTimeout(function () {
+        var f = previewForm.elements;
+        if (!f.check_in.value || !f.check_out.value || f.check_out.value <= f.check_in.value) return;
+        roomPrices.forEach(async function (room) {
+          var label = room.querySelector('[data-preview-room-price]'); label.textContent = 'Updating estimate…';
+          try {
+            var data = new FormData(previewForm); data.set('room', room.dataset.previewRoom); data.set('checkIn', f.check_in.value); data.set('checkOut', f.check_out.value);
+            var response = await fetch(previewForm.dataset.priceUrl, { method: 'POST', body: data });
+            var price = await response.json(); if (version !== previewRevision) return;
+            if (!response.ok || price.errors?.length || !(price.roomCharges > 0) || !(price.nights > 0)) { label.textContent = 'For a personalised offer, fill in your details below and enquire.'; return; }
+            label.textContent = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(price.roomCharges / (price.nights * price.roomsCount)) + ' / room / night · estimated for your dates';
+          } catch (_) { if (version === previewRevision) label.textContent = 'Estimate unavailable. Please enquire.'; }
+        });
+      }, 250);
+    }
+    previewForm.addEventListener('change', function (event) { if (['check_in','check_out','adults','children','rooms'].includes(event.target.name)) refreshRoomPrices(); });
+    refreshRoomPrices();
+  }
   var quoteButton = document.querySelector('[data-trip-quote]');
   if (quoteButton) quoteButton.addEventListener('click', async function () {
     var form = quoteButton.form, start = form.elements.check_in, end = form.elements.check_out;
@@ -903,14 +967,14 @@
       if (estimate.errors && estimate.errors.length) throw new Error(estimate.errors.join('. '));
       var dialog = document.createElement('dialog'); dialog.className = 'trip-dialog'; dialog.setAttribute('aria-label', 'Your trip quote');
       dialog.innerHTML = '<button class="dialog-close" aria-label="Close trip quote">×</button><div class="trip-layout"><div class="trip-photo"><img alt="Selected property"><h2></h2></div><div class="trip-content"><div class="quote-notice"><strong>This is not the confirmation voucher.</strong><br>This is an estimated quote. Our team will confirm availability and final rates.</div><h2>Your Trip Quote</h2><div class="trip-facts"></div><div class="trip-estimate"></div><div class="trip-actions"><button class="btn btn-outline" data-back>← Back to Search</button><a class="btn btn-wa" target="_blank" rel="noopener">Proceed on WhatsApp →</a></div></div></div>';
-      var title = document.querySelector('.prop-main h1').textContent, photo = document.querySelector('.gallery img');
+      var title = document.querySelector('.property-title').textContent, photo = document.querySelector('.gallery img');
       if (photo) dialog.querySelector('img').src = photo.src;
       dialog.querySelector('.trip-photo h2').textContent = title;
       var room = form.elements.room;
       [['Property', title], ['Check-in', start.value], ['Check-out', end.value], ['Adults', form.elements.adults.value], ['Children', form.elements.children.value], ['Selected room', room.options[room.selectedIndex].text]].forEach(function (fact) { var item = document.createElement('div'); item.textContent = fact[0]; var value = document.createElement('strong'); value.textContent = fact[1]; item.append(value); dialog.querySelector('.trip-facts').append(item); });
       var box = form.querySelector('.price-box');
       dialog.querySelector('.trip-estimate').textContent = 'Estimated quote (subject to availability): ' + (estimate.total != null ? new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR' }).format(estimate.total) + ' including GST' : box.textContent);
-      var wa = document.querySelector('.wa-float'); var href = new URL(wa.href); href.searchParams.set('text', 'Please confirm availability and final rates for ' + title + ', ' + room.options[room.selectedIndex].text + ', ' + start.value + ' to ' + end.value + ', ' + form.elements.adults.value + ' adults and ' + form.elements.children.value + ' children.'); dialog.querySelector('.btn-wa').href = href.href;
+      var wa = document.querySelector('[data-advisor-whatsapp], .wa-float'); var href = new URL(wa.href); href.searchParams.set('text', 'Please confirm availability and final rates for ' + title + ', ' + room.options[room.selectedIndex].text + ', ' + start.value + ' to ' + end.value + ', ' + form.elements.adults.value + ' adults and ' + form.elements.children.value + ' children.'); dialog.querySelector('.btn-wa').href = href.href;
       document.body.append(dialog); dialog.showModal();
       var close = dialog.querySelector('.dialog-close'); close.onclick = function () { closeDialog(dialog); quoteButton.focus(); }; dialog.querySelector('[data-back]').onclick = close.onclick; dialog.addEventListener('cancel', function (e) { e.preventDefault(); close.click(); });
     } catch (error) { form.querySelector('.price-box').textContent = error.message; }
