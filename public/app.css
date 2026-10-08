@@ -972,3 +972,9 @@ code { overflow-wrap: anywhere; }
   .embedded-stay .room { display:block; }.embedded-stay .room-price { margin-top:12px; }
   .embedded-stay .booking-box .row { flex-wrap:wrap; }.embedded-stay .booking-box .field { min-width:90px; }
 }
+
+/* Keep configured inventory beneath Rooms without shifting the stay inputs. */
+.quote-stay-fields { align-items: flex-start; }
+.quote-stay-fields > .field { align-self: flex-start; justify-content: flex-start; }
+.quote-inventory-helper { font-size: 11px; line-height: 1.4; color: var(--muted); text-align: left; overflow-wrap: anywhere; }
+.quote-inventory-helper .error { margin-top: 3px; font-size: inherit; line-height: inherit; }

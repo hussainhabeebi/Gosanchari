@@ -33,7 +33,7 @@ describe('quotation inventory and professional customer print',()=>{
  f.db.prepare('UPDATE properties SET facilities=? WHERE id=?').run('["pool","Custom property facility"]',f.pid);
  f.db.prepare('UPDATE rooms SET facilities=?,units=4 WHERE id=?').run('["wifi","Custom room amenity"]',f.rid);
  const before=JSON.stringify(f.read());
- const html=await(await f.app.request(f.url,{},f.env)).text();expect(html).toContain('data-units="4"');expect(html).toContain('Total rooms in category: 4 — live availability not verified.');
+ const html=await(await f.app.request(f.url,{},f.env)).text();expect(html).toContain('data-units="4"');expect(html).toMatch(/data-inventory-count[^>]*>\s*<div class="quote-inventory-helper"[\s\S]*?data-inventory-warning[^>]*><\/div><\/div><\/label>/);expect(html).toContain('quote-stay-fields');expect(html).toContain('Total rooms in category: 4 — live availability not verified.');
  const printed=await(await f.app.request(f.url+'/print',{},f.env)).text();expect(printed).toContain('/brand/logo-wide.webp');expect(printed).toContain('Please note this is not a confirmation voucher');expect(printed).toContain('Voucher not issued by this quotation');expect(printed).toContain('reservation@gosanchari.com');expect(printed).toContain('GST-TEST');expect(printed).toContain('Quotation date:');expect(printed).toContain('Property amenities');expect(printed).toContain('Selected-room amenities');expect(printed).toContain('Custom property facility');expect(printed).toContain('Custom room amenity');expect(printed).not.toContain('4321');expect(printed).not.toContain('Staff floor');expect(printed).not.toContain('B2B');expect(JSON.stringify(f.read())).toBe(before);
  }finally{f.db.close()}
  });
@@ -50,4 +50,8 @@ it('updates valid, exceeded, unknown and switched categories without changing co
  expect(label.textContent).toContain('category: 4');expect(warning.hidden).toBe(true);count.value='5';handlers.countinput();expect(warning.textContent).toBe('Requested 5 rooms; configured category inventory is 4. Please verify with the property or choose another category.');
  room.selectedIndex=1;handlers.roomchange();expect(label.textContent).toBe('Category inventory not supplied');expect(warning.hidden).toBe(true);
  room.selectedIndex=2;handlers.roomchange();expect(label.textContent).toContain('category: 8');expect(warning.hidden).toBe(true);expect(count.value).toBe('5');
+});
+
+it("keeps the inventory helper compact and the stay inputs aligned",()=>{
+ const css=readFileSync("public/app.css","utf8");expect(css).toContain(".quote-stay-fields { align-items: flex-start; }");expect(css).toContain(".quote-stay-fields > .field { align-self: flex-start; justify-content: flex-start; }");expect(css).toContain(".quote-inventory-helper { font-size: 11px;");expect(css).toContain("text-align: left; overflow-wrap: anywhere;");
 });

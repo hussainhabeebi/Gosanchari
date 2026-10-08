@@ -313,12 +313,12 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
             <section class="card stack" data-quote-option={o.id}>
               <div class="row-between"><h3>Option {i + 1}: {o.property_name}</h3>{editable && <button class="linklike small" formaction={`/staff/quotes/${q.id}/options/${o.id}/delete`} formnovalidate>Remove</button>}</div>
               <input type="hidden" name="opt_id" value={o.id} />
-              <div class="row wrap-row">
+              <div class="row wrap-row quote-stay-fields">
                 <Field label="Room"><select name={`room_${o.id}`} data-inventory-room>{rooms.map(r => <option value={r.id} selected={r.id === o.room_id} data-units={r.units == null ? '' : r.units}>{r.name} ({guestsText(r)})</option>)}</select></Field>
                 <Field label="Check-in"><input type="date" name={`in_${o.id}`} value={o.check_in} required /></Field>
                 <Field label="Check-out"><input type="date" name={`out_${o.id}`} value={o.check_out} required /></Field>
-                <Field label="Rooms"><input type="number" name={`rooms_${o.id}`} value={o.rooms_count} min="1" data-inventory-count /></Field>
-                <div class="small" data-room-inventory aria-live="polite"><span data-inventory-label>{rooms.find(r => r.id === o.room_id)?.units == null ? 'Category inventory not supplied' : `Total rooms in category: ${rooms.find(r => r.id === o.room_id)!.units} — live availability not verified.`}</span><div class="error" data-inventory-warning hidden></div></div>
+                <Field label="Rooms"><input type="number" name={`rooms_${o.id}`} value={o.rooms_count} min="1" data-inventory-count />
+                <div class="quote-inventory-helper" data-room-inventory aria-live="polite"><span data-inventory-label>{rooms.find(r => r.id === o.room_id)?.units == null ? 'Category inventory not supplied' : `Total rooms in category: ${rooms.find(r => r.id === o.room_id)!.units} — live availability not verified.`}</span><div class="error" data-inventory-warning hidden></div></div></Field>
                 <Field label="Adults"><input type="number" name={`adults_${o.id}`} value={o.adults} min="1" /></Field>
                 <div class="field kids-policy-field">
                   <div class="kids-policy-label"><label class="field-label" for={`children_${o.id}`}>Children</label><button type="button" class="linklike kids-policy-trigger" data-kids-policy-toggle aria-controls={`kids-policy-${o.id}`} aria-expanded="false">See Kids Policy</button></div>
