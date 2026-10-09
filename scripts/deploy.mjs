@@ -12,16 +12,23 @@ const run = (args, quiet = false) =>
 const fail = (msg, code = 1) => { console.error(`✘ ${msg}`); process.exit(code) }
 
 // ---- D1 ----
+// Only a definite "not found" creates the database. Any other lookup error (token permissions, wrong account,
+// network) stops the deploy, so a live site is never pointed at a new, empty database.
 console.log(`▶ D1 database "${DB}"`)
-if (run(['d1', 'info', DB], true).status !== 0) {
+const info = run(['d1', 'info', DB, '--json'], true)
+const infoOut = `${info.stdout ?? ''}\n${info.stderr ?? ''}`
+if (info.status === 0) {
+  const uuid = infoOut.match(/"uuid"\s*:\s*"([^"]+)"/)?.[1]
+  console.log(`  found${uuid ? ` (${uuid})` : ''}`)
+} else if (/Couldn't find a D1 DB named|database not found/i.test(infoOut)) {
   console.log('  not found — creating it')
   if (run(['d1', 'create', DB, '--location', 'apac']).status !== 0) fail('Could not create the D1 database')
-} else console.log('  found')
+} else fail(`Could not look up the D1 database (check the API token has D1 Edit permission and the right account):\n${infoOut.trim()}`)
 
 // ---- KV: find by title (create if missing) and pin its id in the config used for this deploy ----
 function findKv() {
   const r = run(['kv', 'namespace', 'list'], true)
-  if (r.status !== 0) fail(`Could not list KV namespaces:\n${r.stderr}`)
+  if (r.status !== 0) fail(`Could not list KV namespaces (check the API token has Workers KV Storage Edit permission):\n${r.stderr || r.stdout}`)
   const out = r.stdout ?? ''
   const list = JSON.parse(out.slice(out.indexOf('['), out.lastIndexOf(']') + 1) || '[]')
   return list.find((n) => n.title === KV_TITLE)?.id
@@ -40,8 +47,9 @@ if (!pinned.includes(`id = "${kvId}"`)) fail('Could not set the KV namespace id 
 writeFileSync(CONFIG, pinned)
 
 // ---- Migrations + deploy ----
+// Migrations run before the new code goes live; if one fails, the old code keeps running on the old schema.
 console.log('▶ Applying database migrations')
-if (run(['d1', 'migrations', 'apply', DB, '--remote']).status !== 0) fail('Migrations failed')
+if (run(['d1', 'migrations', 'apply', DB, '--remote']).status !== 0) fail('Migrations failed — the Worker was not deployed')
 
 console.log('▶ Deploying the Worker')
 const d = run(['deploy', ...process.argv.slice(2)])

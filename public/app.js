@@ -655,11 +655,43 @@
   if (roomSel) {
     var rateForm = roomSel.closest('form'), panels = $$('[data-rate-room]', rateForm)
     var draftKey = 'room-rates:' + rateForm.dataset.ratesDraft + ':' + rateForm.getAttribute('action')
+    function fieldValue(input, defaults) {
+      if (input.tagName !== 'SELECT') return defaults ? input.defaultValue : input.value
+      if (!defaults) return input.value
+      var chosen = Array.prototype.find.call(input.options, function (o) { return o.defaultSelected }) || input.options[0]
+      return chosen ? chosen.value : ''
+    }
+    function rateFields(panel) { return $$('input', panel).concat($$('select', panel)).filter(function (input) { return input.name && (!input.closest || !input.closest('[data-shared-peak-section]')) }) }
     function rateValues(defaults) {
       return panels.map(function (panel) {
-        return { id: panel.dataset.rateRoom, fields: $$('input', panel).filter(function (input) { return !input.closest || !input.closest('[data-shared-peak-section]') }).map(function (input) { return { name: input.name, value: defaults ? input.defaultValue : input.value } }) }
+        return { id: panel.dataset.rateRoom, fields: rateFields(panel).map(function (input) { return { name: input.name, value: fieldValue(input, defaults) } }) }
       })
     }
+    // Several date ranges per period share one rate table: "+ Add another date range" / "×".
+    function blankRange(row) {
+      var copy = row.cloneNode(true)
+      $$('input', copy).forEach(function (input) { input.value = ''; input.defaultValue = '' })
+      $$('select', copy).forEach(function (select) { Array.prototype.forEach.call(select.options, function (o, i) { o.selected = o.defaultSelected = i === 0 }) })
+      return copy
+    }
+    function setRangeCount(list, count) {
+      count = Math.max(1, count)
+      while (list.children.length < count) list.appendChild(blankRange(list.lastElementChild))
+      while (list.children.length > count) list.removeChild(list.lastElementChild)
+    }
+    rateForm.addEventListener('click', function (event) {
+      var add = event.target.closest('[data-add-range]'), del = event.target.closest('[data-del-range]')
+      if (add) {
+        var list = $('[data-ranges="' + add.dataset.addRange + '"]', rateForm)
+        var row = blankRange(list.lastElementChild)
+        list.appendChild(row); $('input', row).focus(); retainRates()
+      } else if (del) {
+        var rows = del.closest('[data-ranges]'), range = del.closest('[data-date-range]')
+        if (rows.children.length > 1) rows.removeChild(range)
+        else $$('input', range).forEach(function (input) { input.value = '' })
+        retainRates()
+      }
+    })
     // Browser-restored values are drafts, not the saved server baseline.
     var savedValues = JSON.stringify(rateValues(true)), roomDrafts = rateValues(), activeRoom = roomSel.value
     function hydrateRoom(room) {
@@ -668,8 +700,11 @@
       var peaks = $('[data-peaks]', panel)
       var count = room.fields.filter(function (field) { return field.name === 'r' + room.id + '_peak_from' }).length
       while (peaks && peaks.children.length < count) peaks.appendChild(peaks.lastElementChild.cloneNode(true))
+      $$('[data-ranges]', panel).forEach(function (list) {
+        setRangeCount(list, room.fields.filter(function (field) { return field.name === list.dataset.ranges + '_from' }).length)
+      })
       var offsets = {}
-      $$('input', panel).filter(function (input) { return !input.closest || !input.closest('[data-shared-peak-section]') }).forEach(function (input) {
+      rateFields(panel).forEach(function (input) {
         var matches = room.fields.filter(function (field) { return field.name === input.name })
         var index = offsets[input.name] || 0; offsets[input.name] = index + 1
         if (matches[index]) input.value = matches[index].value

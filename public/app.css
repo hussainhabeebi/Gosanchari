@@ -991,3 +991,11 @@ code { overflow-wrap: anywhere; }
 .rate-expiry-days.text-red { color: var(--red); }
 .rate-expiry-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 140px; }
 .rate-expiry-actions form, .rate-expiry-actions form .btn { width: 100%; }
+
+/* Wizard rates: several date ranges per period */
+.date-ranges { margin: 8px 0 4px; }
+.date-range { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
+.date-range .range-del { font-size: 1.3rem; padding: 0 6px 8px; }
+@media (max-width: 640px) { .date-range { grid-template-columns: 1fr 1fr; } .date-range .range-del { justify-self: end; } }
+.period > [data-add-range] { align-self: flex-start; }
+@media (min-width: 700px) { .period-off .period-head, .period-sea .period-head { grid-template-columns: auto 1fr; } }

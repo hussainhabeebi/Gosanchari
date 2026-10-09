@@ -19,7 +19,7 @@ import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { int, isDate, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg } from './helpers'
 import { afterPropertySave } from './admin-properties'
-import { commonPeakKey, type SeasonRate } from '../lib/pricing'
+import { commonPeakKey, parseWeekdays, type SeasonRate } from '../lib/pricing'
 import { peakStatements } from '../lib/wizard-peaks'
 
 export const wizardRoutes = new Hono<AppEnv>()
@@ -41,6 +41,50 @@ const PERIODS: [string, string, string, string][] = [
   ['sea', 'Season Rates', 'Set your season date range and rates', 'season'],
 ]
 const PERIOD_NAME: Record<string, string> = { off: 'Off season', sea: 'Season' }
+// Recurring nights a date range can be limited to (JS weekday numbers of the night); '' = every night.
+const RANGE_DAYS: [string, string][] = [
+  ['', 'Every day'], ['6', 'Every Saturday'], ['0', 'Every Sunday'], ['5', 'Every Friday'], ['1', 'Every Monday'], ['2', 'Every Tuesday'],
+  ['3', 'Every Wednesday'], ['4', 'Every Thursday'], ['5,6', 'Fri & Sat'], ['0,6', 'Sat & Sun'], ['0,5,6', 'Fri, Sat & Sun'], ['1,2,3,4', 'Mon – Thu'],
+]
+const daysValue = (v: string | null | undefined) => parseWeekdays(v).join(',')
+const daysLabel = (v: string) => RANGE_DAYS.find(([k]) => k === v)?.[1] ?? `Days ${v}`
+export interface DateRange { from: string; to: string; days: string }
+
+/** The date ranges of one room's period, in order; duplicates (one row per meal plan) collapse to one range. */
+export function periodRanges(rows: SeasonRate[]): DateRange[] {
+  const seen = new Map<string, DateRange>()
+  for (const x of [...rows].sort((a, b) => a.start_date.localeCompare(b.start_date) || daysValue(a.applicable_weekdays).localeCompare(daysValue(b.applicable_weekdays)))) {
+    const r = { from: x.start_date, to: x.end_date, days: daysValue(x.applicable_weekdays) }
+    seen.set(`${r.from}|${r.to}|${r.days}`, r)
+  }
+  return [...seen.values()]
+}
+
+/** Valid date ranges submitted for one room's period (blank and reversed rows are skipped, duplicates removed). */
+export function submittedRanges(f: { __all: Record<string, string[]> }, key: string): DateRange[] {
+  const froms = f.__all[`${key}_from`] ?? [], tos = f.__all[`${key}_to`] ?? [], days = f.__all[`${key}_days`] ?? []
+  const out = new Map<string, DateRange>()
+  froms.forEach((from, i) => {
+    const to = tos[i]
+    if (!isDate(from) || !isDate(to) || to < from) return
+    const r = { from, to, days: daysValue(days[i]) }
+    out.set(`${r.from}|${r.to}|${r.days}`, r)
+  })
+  return [...out.values()].sort((a, b) => a.from.localeCompare(b.from) || a.days.localeCompare(b.days))
+}
+
+const RangeRow: FC<{ name: string; range?: DateRange }> = ({ name, range }) => {
+  const days = range?.days ?? ''
+  const opts = RANGE_DAYS.some(([k]) => k === days) ? RANGE_DAYS : [...RANGE_DAYS, [days, daysLabel(days)] as [string, string]]
+  return (
+    <div class="date-range" data-date-range>
+      <label class="wf"><span class="wl">Choose Date From <b>*</b></span><input type="date" name={`${name}_from`} value={range?.from ?? ''} /></label>
+      <label class="wf"><span class="wl">Choose Date To <b>*</b></span><input type="date" name={`${name}_to`} value={range?.to ?? ''} /></label>
+      <label class="wf"><span class="wl">Applies on</span><select name={`${name}_days`}>{opts.map(([k, l]) => <option value={k} selected={k === days}>{l}</option>)}</select></label>
+      <button type="button" class="linklike range-del" data-del-range aria-label="Remove this date range">×</button>
+    </div>
+  )
+}
 
 const svg = (d: string, size = 22) => raw(`<svg class="ico" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`)
 const I = {
@@ -437,19 +481,22 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
         </section>
         {rooms.map((r, ri) => {
           const mine: Rates = {}
-          for (const x of rows.filter((x) => x.room_id === r.id)) mine[`${x.kind === 'off_season' ? 'off' : x.kind === 'season' ? 'sea' : 'peak'}_${x.meal_plan ?? ''}`] = x
+          for (const x of rows.filter((x) => x.room_id === r.id).sort((a, b) => b.start_date.localeCompare(a.start_date))) mine[`${x.kind === 'off_season' ? 'off' : x.kind === 'season' ? 'sea' : 'peak'}_${x.meal_plan ?? ''}`] = x
           return (
             <div class="rate-room" data-rate-room={r.id} hidden={ri > 0}>
               {PERIODS.map(([pk, title, sub]) => {
-                const any = Object.values(mine).find((x) => x.kind === (pk === 'off' ? 'off_season' : 'season'))
+                const kind = pk === 'off' ? 'off_season' : 'season'
+                const ranges = periodRanges(rows.filter((x) => x.room_id === r.id && x.source === 'wizard' && x.kind === kind && x.supplement == null))
                 return (
                   <div class={`period period-${pk}`}>
                     <div class="period-head">
                       <span class="period-ico">{pk === 'off' ? I.leaf : I.sun}</span>
-                      <div><h3>{title}</h3><small class="muted">{sub}</small></div>
-                      <label class="wf"><span class="wl">Choose Date From <b>*</b></span><input type="date" name={`r${r.id}_${pk}_from`} value={any?.start_date ?? ''} /></label>
-                      <label class="wf"><span class="wl">Choose Date To <b>*</b></span><input type="date" name={`r${r.id}_${pk}_to`} value={any?.end_date ?? ''} /></label>
+                      <div><h3>{title}</h3><small class="muted">{sub}. All date ranges below use the same rates.</small></div>
                     </div>
+                    <div class="date-ranges stack" data-ranges={`r${r.id}_${pk}`}>
+                      {(ranges.length ? ranges : [undefined]).map((range) => <RangeRow name={`r${r.id}_${pk}`} range={range} />)}
+                    </div>
+                    <button type="button" class="linklike add-new" data-add-range={`r${r.id}_${pk}`}>{I.plus} Add another date range</button>
                     <div class="wiz-2 rate-tables">
                       {[['wk', 'Weekdays Rates (Mon - Thu)'], ['we', 'Weekends Rates (Fri - Sun)']].map(([dk, dl]) => (
                         <div class={`rate-table rt-${dk}`}>
@@ -514,16 +561,18 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1', p.id)
   const old = await all<SeasonRate & { id: number }>(c.env, "SELECT * FROM season_rates WHERE property_id = ? AND source = 'wizard'", p.id)
   const n = (k: string, previous?: number | null) => !(k in f) ? previous ?? null : (int(f[k]) > 0 ? int(f[k]) : null)
-  const ins = "INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, weekend_rate, staff_rate, staff_weekend_rate, net_rate, net_weekend_rate, supplement, net_supplement, kind, meal_plan, source, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wizard', ?)"
+  const ins = "INSERT INTO season_rates (property_id, room_id, name, start_date, end_date, rate, weekend_rate, staff_rate, staff_weekend_rate, net_rate, net_weekend_rate, supplement, net_supplement, kind, meal_plan, source, created_by, rate_group_key, applicable_weekdays) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wizard', ?, ?, ?)"
   let stmts: D1PreparedStatement[]
   try { stmts = peakStatements(c.env.DB, p.id, uid, rooms.map(r => r.id), await all<SeasonRate & { id: number }>(c.env, 'SELECT * FROM season_rates WHERE property_id = ?', p.id), f) }
   catch (e) { return { err: e instanceof Error ? e.message : 'Invalid peak charges.' } }
   const write = (keep: SeasonRate | undefined, values: unknown[]) => {
+    // values: property, room, 13 rate columns, created_by, group key, weekdays
     const columns = ['name', 'start_date', 'end_date', 'rate', 'weekend_rate', 'staff_rate', 'staff_weekend_rate', 'net_rate', 'net_weekend_rate', 'supplement', 'net_supplement', 'kind', 'meal_plan'] as const
-    if (keep && columns.every((key, i) => (keep[key] ?? null) === (values[i + 2] ?? null))) return false
+    const extra = [values[16] ?? null, values[17] || null]
+    if (keep && columns.every((key, i) => (keep[key] ?? null) === (values[i + 2] ?? null)) && (keep.rate_group_key ?? null) === extra[0] && (keep.applicable_weekdays || null) === extra[1]) return false
     if (keep?.id) {
-      stmts.push(c.env.DB.prepare('UPDATE season_rates SET name=?, start_date=?, end_date=?, rate=?, weekend_rate=?, staff_rate=?, staff_weekend_rate=?, net_rate=?, net_weekend_rate=?, supplement=?, net_supplement=?, kind=?, meal_plan=? WHERE id=? AND property_id=? AND room_id=? AND source=\'wizard\'').bind(...values.slice(2, 15), keep.id, p.id, values[1]))
-    } else stmts.push(c.env.DB.prepare(ins).bind(...values))
+      stmts.push(c.env.DB.prepare('UPDATE season_rates SET name=?, start_date=?, end_date=?, rate=?, weekend_rate=?, staff_rate=?, staff_weekend_rate=?, net_rate=?, net_weekend_rate=?, supplement=?, net_supplement=?, kind=?, meal_plan=?, rate_group_key=?, applicable_weekdays=? WHERE id=? AND property_id=? AND room_id=? AND source=\'wizard\'').bind(...values.slice(2, 15), ...extra, keep.id, p.id, values[1]))
+    } else stmts.push(c.env.DB.prepare(ins).bind(...values.slice(0, 16), ...extra))
     return true
   }
   let saved = 0
@@ -533,11 +582,14 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
     let roomChanged = false
     let regular: { plan: string; wk: number | null; we: number | null; staff: number | null; net: number | null } | null = null
     for (const [pk, , , kind] of [...PERIODS].reverse()) {
-      const from = f[`r${r.id}_${pk}_from`], to = f[`r${r.id}_${pk}_to`]
-      if (!isDate(from) || !isDate(to) || to < from) continue
+      const key = `r${r.id}_${pk}`
+      // Every date range of this period shares the rate table below (one row per range × meal plan).
+      const ranges = submittedRanges(f, key)
+      if (!ranges.length) continue
+      const group = `wizard:${r.id}:${kind}`
       for (const [plan] of PLANS) {
-        const key = `r${r.id}_${pk}`
-        const keep = old.find((x) => x.room_id === r.id && x.kind === kind && x.meal_plan === plan)
+        const olds = old.filter((x) => x.room_id === r.id && x.kind === kind && x.meal_plan === plan && x.supplement == null).sort((a, b) => a.start_date.localeCompare(b.start_date))
+        const keep = olds[0]
         const net = perms.view_net_rates ? n(`${key}_wk_${plan}_b2b`, keep?.net_rate) : keep?.net_rate ?? null
         const netWe = perms.view_net_rates ? n(`${key}_we_${plan}_b2b`, keep?.net_weekend_rate) : keep?.net_weekend_rate ?? null
         const wk = n(`${key}_wk_${plan}_direct`, keep?.rate), we = n(`${key}_we_${plan}_direct`, keep?.weekend_rate)
@@ -545,10 +597,18 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
         if ([wk, we, staff, staffWe, net, netWe].every((v) => v == null)) continue
         configuredPlans.add(plan)
         defaultPlan ??= plan
-        roomChanged = write(keep, [p.id, r.id, PERIOD_NAME[pk], from, to, wk, we, staff, staffWe, net, netWe, null, null, kind, plan, uid]) || roomChanged
-        saved++
+        const same = (x: SeasonRate, g: DateRange) => x.start_date === g.from && x.end_date === g.to && daysValue(x.applicable_weekdays) === g.days
+        const spare = olds.filter((x) => !ranges.some((g) => same(x, g)))
+        for (const g of ranges) {
+          const row = olds.find((x) => same(x, g)) ?? spare.shift()
+          roomChanged = write(row, [p.id, r.id, PERIOD_NAME[pk], g.from, g.to, wk, we, staff, staffWe, net, netWe, null, null, kind, plan, uid, group, g.days]) || roomChanged
+          saved++
+        }
+        // Date ranges removed in the form.
+        for (const x of spare) { stmts.push(c.env.DB.prepare("DELETE FROM season_rates WHERE id = ? AND property_id = ? AND source = 'wizard'").bind(x.id, p.id)); roomChanged = true }
         // Regular room rates (outside any period) follow the season's CP rate, else the first plan entered.
-        if (wk != null && (!regular || (plan === 'CP' && regular.plan !== 'CP' && pk === 'sea'))) regular = { plan, wk, we, staff, net }
+        // A period limited to certain weekdays (e.g. every Saturday) never becomes the everyday rate.
+        if (wk != null && ranges.some((g) => !g.days) && (!regular || (plan === 'CP' && regular.plan !== 'CP' && pk === 'sea'))) regular = { plan, wk, we, staff, net }
       }
     }
     const froms = f.__all[`r${r.id}_peak_from`] ?? [], tos = f.__all[`r${r.id}_peak_to`] ?? [], amts = f.__all[`r${r.id}_peak_amt`] ?? [], descs = f.__all[`r${r.id}_peak_desc`] ?? []

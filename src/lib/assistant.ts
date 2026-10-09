@@ -254,7 +254,7 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
   const ph = ids.map(() => '?').join(', ')
   const [rooms, seasons, avail] = await Promise.all([
     all<RoomRow & { weekend_nights: string }>(env, `SELECT r.*, p.weekend_nights, p.rate_meal_plan FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.active = 1 AND r.property_id IN (${ph})`, ...ids),
-    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date <= ?`, ...ids, checkIn, checkOut),
+    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source, applicable_weekdays FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date <= ?`, ...ids, checkIn, checkOut),
     roomAvailability(env, ids, checkIn, checkOut),
   ])
 

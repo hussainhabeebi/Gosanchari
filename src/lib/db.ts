@@ -108,7 +108,7 @@ export async function loadPricing(env: Env, roomId: number): Promise<{ room: Roo
   if (!room) return null
   const seasons = await all<SeasonRate>(
     env,
-    'SELECT id, property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND (room_id IS NULL OR room_id = ?)',
+    'SELECT id, property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source, applicable_weekdays FROM season_rates WHERE (property_id = ? OR property_id IS NULL) AND (room_id IS NULL OR room_id = ?)',
     room.property_id, room.id,
   )
   return { room, seasons }

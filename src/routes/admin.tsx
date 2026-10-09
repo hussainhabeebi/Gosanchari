@@ -10,7 +10,7 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { cancelBooking, processRefund } from '../lib/bookings'
 import { mediaUrl } from '../lib/integrations'
-import { nightlyRate, type SeasonRate, SEASON_KINDS, seasonKindLabel } from '../lib/pricing'
+import { nightlyRate, type SeasonRate, SEASON_KINDS, seasonKindLabel, weekdaysLabel } from '../lib/pricing'
 import type { PropertyRow, RoomRow } from '../lib/types'
 import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShort, nowIso, parseJson, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
@@ -296,7 +296,7 @@ adminRoutes.get('/admin/rates', requirePerm('manage_rates'), async (c) => {
         <Table head={['Name', 'Type', 'Dates', 'Applies to', 'Rate', 'Min nights', '']}>
           {seasons.map((s) => (
             <tr>
-              <td>{s.name}</td><td><span class={`pill pill-kind-${s.kind ?? 'season'}`}>{seasonKindLabel(s.kind)}</span></td><td>{fmtDate(s.start_date)} – {fmtDate(s.end_date)}</td>
+              <td>{s.name}</td><td><span class={`pill pill-kind-${s.kind ?? 'season'}`}>{seasonKindLabel(s.kind)}</span></td><td>{fmtDate(s.start_date)} – {fmtDate(s.end_date)}{s.applicable_weekdays && <div class="muted small">{weekdaysLabel(s.applicable_weekdays)} only</div>}</td>
               <td>{s.room_name ? `${s.property_name} · ${s.room_name}` : s.property_name ?? 'All properties'}</td>
               <td>{s.rate ? money(s.rate) : `${(s.pct_adjust ?? 0) > 0 ? '+' : ''}${s.pct_adjust}%`}</td><td>{s.min_nights ?? '—'}</td>
               <td><form method="post" action={`/admin/rates/season/${s.id}/delete`} class="inline"><button class="linklike small">Delete</button></form></td>

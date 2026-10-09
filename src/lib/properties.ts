@@ -4,7 +4,7 @@ import { COVER_PHOTO_SQL, dining as readDining, POLICY_FIELDS, policies as readP
 import type { Env } from '../env'
 import { aiEmbed, aiEnabled, aiJson } from './ai'
 import { all, first, loadPricing, placeholders, roomAvailability, run } from './db'
-import { calculatePrice, staffRateForStay, roomsNeeded, type SeasonRate } from './pricing'
+import { calculatePrice, seasonAppliesOn, staffRateForStay, roomsNeeded, type SeasonRate } from './pricing'
 import { FACILITIES, MEAL_PLANS, mergeFilters, parseQueryRules, sanitizeFilters, type SearchFilters } from './search'
 import { getContent, getSettings } from './settings'
 import type { NearbyPlace, PropertyCard, PropertyRow, RoomRow } from './types'
@@ -115,7 +115,7 @@ async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters,
   const ph = placeholders(ids.length)
   const [rooms, seasons, avail] = await Promise.all([
     all<RoomRow & { weekend_nights: string; rate_meal_plan: string | null }>(env, `SELECT r.*, p.weekend_nights, p.rate_meal_plan FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.active = 1 AND r.property_id IN (${ph})`, ...ids),
-    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date < ?`, ...ids, f.checkIn!, f.checkOut!),
+    all<SeasonRate>(env, `SELECT property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source, applicable_weekdays FROM season_rates WHERE (property_id IN (${ph}) OR property_id IS NULL) AND end_date >= ? AND start_date < ?`, ...ids, f.checkIn!, f.checkOut!),
     roomAvailability(env, ids, f.checkIn!, f.checkOut!),
   ])
   const nights = nightsBetween(f.checkIn!, f.checkOut!)
@@ -134,7 +134,7 @@ async function withStayPrices(env: Env, cards: PropertyCard[], f: SearchFilters,
         rate: staffRateForStay(r, seasons, date, addDays(date, 1), f.mealPlan), pct_adjust: null,
         min_nights: Math.max(r.min_nights || 1, ...seasons.filter(s =>
           (s.property_id == null || s.property_id === r.property_id) && (s.room_id == null || s.room_id === r.id) &&
-          s.start_date <= date && s.end_date >= date && (!s.meal_plan || s.meal_plan === (f.mealPlan || r.rate_meal_plan))
+          seasonAppliesOn(s, date) && (!s.meal_plan || s.meal_plan === (f.mealPlan || r.rate_meal_plan))
         ).map(s => s.min_nights || 1)),
       })) : []
       const useStaff = staffLines.length > 0 && staffLines.every(line => line.rate != null && line.rate > 0)

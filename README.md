@@ -69,6 +69,8 @@ Trigger cron jobs locally: `curl "http://localhost:8787/cdn-cgi/handler/schedule
 
 For a Cloudflare dashboard Git connection (Workers & Pages → Create → Import a repository), use those same two commands. The root directory is `/`.
 
+**What `npm run deploy` does, in order:** looks up the D1 database `gosanchari` by name (it creates one only when Cloudflare answers "not found"; any other error, such as missing token permissions, stops the deploy), finds the KV namespace, applies pending D1 migrations to the live database, and only then runs `wrangler deploy`. If a migration fails, the new code is not published and the old version keeps running. Migrations are additive, so the old code works with the new columns. The Workers Builds API token needs D1 Edit, Workers KV Storage Edit and Workers Scripts Edit.
+
 **First deploy.** No IDs need editing: the deploy script creates the D1 database if needed and applies migrations. `wrangler deploy` then creates the KV namespace, R2 buckets and queue by name.
 
 1. Change `SITE_URL` in `wrangler.toml` to your address, then commit.
@@ -164,6 +166,7 @@ All AI calls go through `src/lib/ai.ts`. Each call is checked against its on/off
 **Gemini:** Admin → Settings → AI → paste a key from aistudio.google.com/apikey (tested on save, stored in KV, never shown again). Or set the Worker secret `GEMINI_API_KEY`. Every text AI call then tries Gemini first and falls back to Workers AI.
 
 **Season types:** each season is *Peak season*, *Off-season* or *Special / holiday*. On overlapping dates special beats season beats off-season. Seasons can carry their own staff and net rates.
+**Several date ranges, one rate table:** in *Room Rates* (wizard step 3), Season and Off-season each take any number of date ranges (*+ Add another date range*); all of them use the same rates. Each range can be limited to recurring nights (*Applies on*: every Saturday, Fri & Sat…). A recurring-night rate beats an every-night rate of the same type, so "Season, every Saturday" inside an off-season charges Saturdays at the season rate. Rows saved together share `rate_group_key`; recurring nights are in `applicable_weekdays` (migration 0011).
 | Ask AI | Workers AI → SQL guard → read-only views | On question; cached 1 hour | Disabled message |
 
 Ask AI safety:

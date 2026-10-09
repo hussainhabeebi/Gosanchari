@@ -77,6 +77,29 @@ export interface SeasonRate {
   net_supplement?: number | null
   /** Meal plan this rate is for (CP / MAP / AP / EP); null = any plan. */
   meal_plan?: string | null
+  /** Rows entered together as one rate table (several date ranges, same rates) share this key. */
+  rate_group_key?: string | null
+  /** Nights this rate applies to, as JS weekday numbers of the night ("6" = Saturday); null = every night. */
+  applicable_weekdays?: string | null
+}
+
+/** Weekday numbers (0 = Sunday … 6 = Saturday) from a stored list; empty = every night. */
+export function parseWeekdays(v: string | null | undefined): number[] {
+  return [...new Set((v ?? '').split(',').map((x) => parseInt(x, 10)).filter((d) => d >= 0 && d <= 6))].sort()
+}
+
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+/** "Every Sat", "Every Fri, Sat" — or '' for every night. */
+export function weekdaysLabel(v: string | null | undefined): string {
+  const days = parseWeekdays(v)
+  return days.length ? `Every ${[...days.filter((d) => d > 0), ...days.filter((d) => d === 0)].map((d) => DAY_SHORT[d]).join(', ')}` : ''
+}
+
+/** Does this season row apply on the night of `date`? (date range + recurring weekdays) */
+export function seasonAppliesOn(s: Pick<SeasonRate, 'start_date' | 'end_date' | 'applicable_weekdays'>, date: string): boolean {
+  if (!(s.start_date <= date && date <= s.end_date)) return false
+  const days = parseWeekdays(s.applicable_weekdays)
+  return !days.length || days.includes(weekday(date))
 }
 
 /** Weekend nights for a room's property (default Friday and Saturday nights). */
@@ -181,8 +204,7 @@ function seasonsOn(room: RoomRates, seasons: SeasonRate[], date: string, plan?: 
   return seasons.filter(
     (s) =>
       (!s.meal_plan || s.meal_plan === want) &&
-      s.start_date <= date &&
-      date <= s.end_date &&
+      seasonAppliesOn(s, date) &&
       (s.room_id === room.id || (s.room_id == null && (s.property_id == null || s.property_id === room.property_id))),
   )
 }
@@ -196,7 +218,9 @@ function seasonFor(room: RoomRates, seasons: SeasonRate[], date: string, has?: (
   const rank = (s: SeasonRate) => (s.room_id != null ? 2 : s.property_id != null ? 1 : 0)
   // A rate for the exact meal plan beats an "any plan" rate.
   const exact = (s: SeasonRate) => (s.meal_plan ? 1 : 0)
-  matching.sort((a, b) => kind(b) - kind(a) || rank(b) - rank(a) || exact(b) - exact(a) || b.start_date.localeCompare(a.start_date))
+  // A recurring weekday rate (e.g. every Saturday) beats an every-night rate of the same type.
+  const recurring = (s: SeasonRate) => (parseWeekdays(s.applicable_weekdays).length ? 1 : 0)
+  matching.sort((a, b) => kind(b) - kind(a) || recurring(b) - recurring(a) || rank(b) - rank(a) || exact(b) - exact(a) || b.start_date.localeCompare(a.start_date))
   return matching[0]
 }
 
