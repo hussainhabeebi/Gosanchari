@@ -43,11 +43,16 @@ export function peakStatements(db: D1Database, propertyId: number, userId: numbe
   }
   for (const roomId of roomIds) for (const draft of read(`r${roomId}`)) {
     if (!draft.id && !draft.key && !draft.amount && draft.name === 'Peak time') continue
+    // A blank per-category charge means "use the common charge": drop any saved override.
+    if (draft.amount.trim() === '') draft.remove = true
+    // A new peak row left blank for this category has nothing to save.
+    if (draft.remove && !draft.id && !commons.has(draft.key)) continue
     const common = commons.get(draft.key)
     // An override of an explicitly removed common is removed with its parent.
     if (!common && read('common').some(s => s.key === draft.key && s.remove)) continue
     if (!common) throw new Error('Select an existing common peak charge for this override.')
-    write(draft, roomId, common.start_date, common.end_date)
+    // Overrides carry the peak's own description unless one was given.
+    write({ ...draft, name: draft.name === 'Peak time' ? common.name : draft.name }, roomId, common.start_date, common.end_date)
   }
   // Keep override periods in sync when the common period is edited, even for omitted room forms.
   for (const row of old) {

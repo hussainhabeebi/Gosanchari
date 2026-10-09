@@ -19,7 +19,7 @@ import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { int, isDate, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg } from './helpers'
 import { afterPropertySave } from './admin-properties'
-import { commonPeakKey, parseWeekdays, type SeasonRate } from '../lib/pricing'
+import { commonPeakKey, overridePeakKey, parseWeekdays, type SeasonRate } from '../lib/pricing'
 import { peakStatements } from '../lib/wizard-peaks'
 
 export const wizardRoutes = new Hono<AppEnv>()
@@ -442,8 +442,11 @@ async function saveStep2(c: Context<AppEnv>, p: PropertyRow) {
 type Rates = Record<string, SeasonRate & { id: number; source: string | null }>
 const val = (n: number | null | undefined) => (n ? String(n) : '')
 
-const PeakEntry: FC<{ row: (SeasonRate & { id: number }) | null }> = ({ row }) => (
-  <div class="wiz-4 peak-row" data-peak-entry>
+const PeakEntry: FC<{ row: (SeasonRate & { id: number }) | null; rooms: RoomRow[]; overrides: (SeasonRate & { id: number })[] }> = ({ row, rooms, overrides }) => {
+  const key = row ? commonPeakKey(row) ?? '' : ''
+  return (
+  <div class="peak-entry" data-peak-entry>
+  <div class="wiz-4 peak-row">
     <input type="hidden" name="common_managed_id" value={row?.id ?? ''} />
     <input type="hidden" name="common_managed_remove" value="0" />
     <input type="hidden" name="common_managed_key" value={row ? commonPeakKey(row) ?? '' : ''} />
@@ -453,7 +456,29 @@ const PeakEntry: FC<{ row: (SeasonRate & { id: number }) | null }> = ({ row }) =
     <label class="wf"><span class="wl">Description (Optional)</span><input name="common_managed_desc" maxlength={60} value={row && row.name !== 'Peak time' ? row.name : ''} placeholder="e.g. Christmas, New Year, Diwali etc." /></label>
     <button type="button" class="icon-btn" data-remove-managed-peak aria-label="Delete peak period">{I.trash}</button>
   </div>
-)
+  {/* Optional: a different hike per room category. Blank = the common charge above applies to that category. */}
+  {rooms.length > 1 && (
+    <details class="peak-by-room" open={overrides.some(x => x.supplement != null && overridePeakKey(x) === key && !!key)}>
+      <summary>Different charge for each room category (optional)</summary>
+      <div class="peak-room-grid">
+        {rooms.map(r => {
+          const own = key ? overrides.find(x => x.room_id === r.id && overridePeakKey(x) === key) : undefined
+          return (
+            <label class="wf">
+              <span class="wl">{r.name} (₹)</span>
+              <input type="hidden" name={`r${r.id}_managed_id`} value={own?.id ?? ''} />
+              <input type="hidden" name={`r${r.id}_managed_key`} value={key} data-room-peak-key />
+              <input type="hidden" name={`r${r.id}_managed_remove`} value="0" />
+              <input type="number" min="0" name={`r${r.id}_managed_amt`} value={own?.supplement ?? ''} placeholder="Same as common charge" />
+            </label>
+          )
+        })}
+      </div>
+    </details>
+  )}
+  </div>
+  )
+}
 
 async function step3(c: Context<AppEnv>, p: PropertyRow) {
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY id', p.id)
@@ -534,7 +559,7 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
             <div><h3>Peak Time Charges</h3><small class="muted">Add additional charges for special peak time periods (e.g. Christmas, New Year, Diwali etc.)</small></div>
             <button type="button" class="linklike add-new" data-add-managed-peak>{I.plus} Add New Peak Time</button>
           </div>
-          <div class="peak-rows" data-managed-peaks="common"><div data-peak-entries>{(common.length ? common : [null]).map(x => <PeakEntry row={x} />)}</div></div>
+          <div class="peak-rows" data-managed-peaks="common"><div data-peak-entries>{(common.length ? common : [null]).map(x => <PeakEntry row={x} rooms={rooms} overrides={rows.filter(y => overridePeakKey(y))} />)}</div></div>
           {/* Saved room-specific records remain untouched and visible for their original room. */}
           {rooms.map(r => <div data-legacy-peak-room={r.id} hidden={r.id !== rooms[0].id}>
             {rows.filter(x => x.room_id === r.id && x.supplement != null && !commonPeakKey(x)).map(x => <div class="wiz-4 peak-row">

@@ -742,8 +742,8 @@ code { overflow-wrap: anywhere; }
 .rate-table input { padding: 8px 8px; font-size: .88rem; }
 .peak-rows { display: flex; flex-direction: column; gap: 10px; }
 .peak-row { background: #fff; border-radius: 12px; padding: 12px; border: 1px solid #ead9f7; }
-.peak-row[data-peak-entry] { align-items: end; }
-.peak-row[data-peak-entry] > .icon-btn { justify-self: end; }
+.peak-entry > .peak-row { align-items: end; }
+.peak-entry > .peak-row > .icon-btn { justify-self: end; }
 .tint { border-radius: 16px; overflow: hidden; border: 1px solid; }
 .tint-head { display: flex; gap: 12px; align-items: center; padding: 14px 16px; flex-wrap: wrap; }
 .tint-head h3 { margin: 0; font-size: 1.02rem; }
@@ -782,7 +782,7 @@ code { overflow-wrap: anywhere; }
   .wiz-2 { grid-template-columns: 1fr 1fr; }
   .wiz-3 { grid-template-columns: repeat(3, 1fr); }
   .wiz-4 { grid-template-columns: repeat(4, 1fr); }
-  .peak-row[data-peak-entry] { grid-template-columns: repeat(4, minmax(0, 1fr)) 36px; }
+  .peak-entry > .peak-row { grid-template-columns: repeat(4, minmax(0, 1fr)) 36px; }
   .wiz-4 .wf-wide { grid-column: span 1; }
   .period-head { grid-template-columns: auto 1fr 180px 180px; }
   .period-head > .wf { grid-column: auto; }
@@ -1006,3 +1006,9 @@ code { overflow-wrap: anywhere; }
 .extra-room-del { font-size: 1.3rem; padding: 0 6px; align-self: center; }
 .extra-rooms [data-add-extra-room] { align-self: flex-start; }
 @media (max-width: 640px) { .extra-room-row { grid-template-columns: 1fr 1fr; } }
+
+/* Wizard rates: per-room-category peak charges */
+.peak-entry + .peak-entry { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.peak-by-room { margin-top: 8px; }
+.peak-by-room summary { cursor: pointer; font-weight: 600; font-size: .9rem; color: var(--green); }
+.peak-room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 8px; }

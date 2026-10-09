@@ -168,6 +168,7 @@ All AI calls go through `src/lib/ai.ts`. Each call is checked against its on/off
 **Gemini:** Admin → Settings → AI → paste a key from aistudio.google.com/apikey (tested on save, stored in KV, never shown again). Or set the Worker secret `GEMINI_API_KEY`. Every text AI call then tries Gemini first and falls back to Workers AI.
 
 **Season types:** each season is *Peak season*, *Off-season* or *Special / holiday*. On overlapping dates special beats season beats off-season. Seasons can carry their own staff and net rates.
+**Peak charges per room category:** each Peak Time Charge (Christmas, New Year…) has a common extra charge, and under *Different charge for each room category (optional)* a separate amount can be set for any category (e.g. Standard +₹1,000, Deluxe +₹1,500, Suite +₹3,000). A blank box means that category pays the common charge. Per-category amounts follow the peak's dates and are removed with it.
 **Several date ranges, one rate table:** in *Room Rates* (wizard step 3), Season and Off-season each take any number of date ranges (*+ Add another date range*); all of them use the same rates. Each range can be limited to recurring nights (*Applies on*: every Saturday, Fri & Sat…). A recurring-night rate beats an every-night rate of the same type, so "Season, every Saturday" inside an off-season charges Saturdays at the season rate. Rows saved together share `rate_group_key`; recurring nights are in `applicable_weekdays` (migration 0011).
 | Ask AI | Workers AI → SQL guard → read-only views | On question; cached 1 hour | Disabled message |
 

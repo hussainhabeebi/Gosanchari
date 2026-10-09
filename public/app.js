@@ -803,6 +803,8 @@
       $$('[data-peak-entry]', sharedPeaks).forEach(function (row) {
         var key = $('input[name="common_managed_key"]', row)
         if (!key.value && peakFields(row).some(function (input) { return /_(from|to|amt|desc)$/.test(input.name) && input.value })) key.value = crypto.randomUUID()
+        // Per-room-category charges belong to this peak period.
+        $$('[data-room-peak-key]', row).forEach(function (input) { input.value = key.value })
       })
       try { sessionStorage.setItem(peakDraftKey, JSON.stringify({ base: peakBaseline, rows: peakSnapshot(false) })) } catch (e) {}
     }
@@ -824,6 +826,7 @@
       if (event.target.closest('[data-add-managed-peak]')) {
         var row = template.cloneNode(true)
         peakFields(row).forEach(function (input) { input.value = input.name.endsWith('_remove') ? '0' : '' })
+        $$('details', row).forEach(function (d) { d.open = false })
         row.hidden = false; entries.appendChild(row); retainPeaks()
       }
       var remove = event.target.closest('[data-remove-managed-peak]')
