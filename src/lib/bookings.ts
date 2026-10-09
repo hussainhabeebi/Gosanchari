@@ -9,6 +9,7 @@ import { calculatePrice, type Coupon, type PriceResult } from './pricing'
 import { getSettings } from './settings'
 import type { BookingRow, PropertyRow } from './types'
 import { eachNight, fmtDate, money, nowIso, refCode, todayIST } from './util'
+import { roomNames, roomsLabel } from './quote-rooms'
 
 export interface NewBooking {
   roomId: number
@@ -30,6 +31,8 @@ export interface NewBooking {
   enquiryId?: number | null
   staffId?: number | null
   applyGst?: boolean
+  /** Further room categories of the same property (from a combined quotation option); the price covers them all. */
+  extraRooms?: { room_id: number; rooms_count: number; guest_rate?: number | null }[]
   /** For quotes: the exact price already agreed (built by the same rules). */
   fixedPrice?: { subtotal: number; discount: number; extraCharges: number; taxes: number; total: number }
 }
@@ -51,11 +54,20 @@ export async function priceStay(env: Env, roomId: number, checkIn: string, check
 export async function createBooking(env: Env, b: NewBooking): Promise<{ id: number; code: string } | { error: string }> {
   const pr = await loadPricing(env, b.roomId)
   if (!pr) return { error: 'Room not found.' }
-  if (b.adults + b.children > pr.room.capacity * b.roomsCount) return { error: `This room sleeps at most ${pr.room.capacity}; please add rooms for your group.` }
+  const extras = b.extraRooms ?? []
+  const extraRooms = extras.length ? await all<{ id: number; property_id: number; capacity: number; name: string }>(env, `SELECT id, property_id, capacity, name FROM rooms WHERE id IN (${extras.map(() => '?').join(',')})`, ...extras.map((x) => x.room_id)) : []
+  if (extras.some((x) => extraRooms.find((r) => r.id === x.room_id)?.property_id !== pr.room.property_id)) return { error: 'Every room category must belong to the same property.' }
+  const capacity = pr.room.capacity * b.roomsCount + extras.reduce((a, x) => a + (extraRooms.find((r) => r.id === x.room_id)?.capacity ?? 0) * x.rooms_count, 0)
+  if (b.adults + b.children > capacity) return { error: extras.length ? `These rooms sleep at most ${capacity}; please add rooms for your group.` : `This room sleeps at most ${pr.room.capacity}; please add rooms for your group.` }
   if (b.checkIn < todayIST()) return { error: 'Check-in date is in the past.' }
 
   const avail = await roomAvailability(env, [pr.room.property_id], b.checkIn, b.checkOut, b.quotationId ?? undefined)
-  if ((avail.get(b.roomId)?.free ?? 0) < b.roomsCount) return { error: 'Sorry, this room is no longer available for those dates.' }
+  // The same category may appear more than once; check the total asked for each.
+  const asked = new Map<number, number>([[b.roomId, b.roomsCount]])
+  for (const x of extras) asked.set(x.room_id, (asked.get(x.room_id) ?? 0) + x.rooms_count)
+  for (const [roomId, count] of asked) {
+    if ((avail.get(roomId)?.free ?? 0) < count) return { error: roomId === b.roomId && !extras.length ? 'Sorry, this room is no longer available for those dates.' : `Sorry, ${extraRooms.find((r) => r.id === roomId)?.name ?? 'this room'} is no longer available for ${count} room${count > 1 ? 's' : ''} on those dates.` }
+  }
 
   let price: { subtotal: number; discount: number; extraCharges: number; taxes: number; total: number; nights: number }
   if (b.fixedPrice) {
@@ -73,17 +85,22 @@ export async function createBooking(env: Env, b: NewBooking): Promise<{ id: numb
     env,
     `INSERT INTO bookings (code, user_id, property_id, room_id, check_in, check_out, nights, adults, children, rooms_count, meal_plan,
       subtotal, discount, extra_charges, taxes, total, coupon_code, status, payment_status, source, guest_name, guest_phone, guest_email,
-      id_type, special_requests, quotation_id, enquiry_id, staff_id, hold_expires_at, apply_gst)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id_type, special_requests, quotation_id, enquiry_id, staff_id, hold_expires_at, apply_gst, extra_rooms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     code, b.userId, pr.room.property_id, b.roomId, b.checkIn, b.checkOut, price.nights, b.adults, b.children, b.roomsCount, b.mealPlan ?? null,
     price.subtotal, price.discount, price.extraCharges, price.taxes, price.total, b.couponCode?.toUpperCase() ?? null,
     b.source ?? 'website', b.guestName, b.guestPhone, b.guestEmail ?? null, b.idType ?? null, b.specialRequests ?? '',
     b.quotationId ?? null, b.enquiryId ?? null, b.staffId ?? null, hold, b.applyGst === false ? 0 : 1,
+    JSON.stringify(extras.map((x) => ({ room_id: x.room_id, rooms_count: x.rooms_count, guest_rate: x.guest_rate ?? null }))),
   )
   // Re-check after insert: if two guests raced for the last room, the later one loses.
   if (await oversold(env, id)) {
     await run(env, "UPDATE bookings SET status = 'cancelled', cancelled_at = ?, internal_notes = 'Auto-cancelled: overbooked during checkout' WHERE id = ?", nowIso(), id)
     return { error: 'Sorry, someone just booked the last room for those dates.' }
+  }
+  // Reserve the further room categories night by night, linked to this booking (released if it is cancelled).
+  for (const x of extras) for (const d of eachNight(b.checkIn, b.checkOut)) for (let k = 0; k < x.rooms_count; k++) {
+    await run(env, 'INSERT INTO blocked_dates (property_id, room_id, date, reason, booking_id, created_by) VALUES (?, ?, ?, ?, ?, ?)', pr.room.property_id, x.room_id, d, `Booking ${code}`, id, b.staffId ?? null)
   }
   await logActivity(env, b.userId, 'booking.created', 'booking', id, { code, total: price.total })
   return { id, code }
@@ -174,6 +191,7 @@ export async function cancelBooking(env: Env, bookingId: number, byUserId: numbe
   if (!b) return { error: 'Booking not found' }
   if (b.status === 'cancelled') return { error: 'Already cancelled' }
   await run(env, "UPDATE bookings SET status = 'cancelled', cancelled_at = ?, change_status = NULL, updated_at = ? WHERE id = ?", nowIso(), nowIso(), b.id)
+  await run(env, 'DELETE FROM blocked_dates WHERE booking_id = ?', b.id)
   await run(env, "DELETE FROM payouts WHERE booking_id = ? AND status = 'pending'", b.id)
   if (refundAmount && refundAmount > 0 && b.amount_paid > 0) {
     const pay = await first<{ id: number }>(env, "SELECT id FROM payments WHERE booking_id = ? AND status = 'paid' ORDER BY id DESC LIMIT 1", b.id)
@@ -209,13 +227,15 @@ export async function processRefund(env: Env, refundId: number, adminId: number,
 export async function expireHolds(env: Env) {
   await run(env, "UPDATE bookings SET status = 'cancelled', cancelled_at = ?, internal_notes = internal_notes || ' [Payment not completed in time]' WHERE status = 'pending' AND hold_expires_at < ?", nowIso(), nowIso())
   await run(env, 'DELETE FROM blocked_dates WHERE hold_until IS NOT NULL AND hold_until < ?', nowIso())
+  // Rooms reserved for further room categories of bookings that are now cancelled.
+  await run(env, "DELETE FROM blocked_dates WHERE booking_id IN (SELECT id FROM bookings WHERE status = 'cancelled')")
 }
 
 // ---- Invoice (printable HTML, also stored in R2) and calendar file ----
 
 export async function invoiceHtml(env: Env, b: BookingRow, p: PropertyRow): Promise<string> {
   const s = await getSettings(env)
-  const room = await first<{ name: string }>(env, 'SELECT name FROM rooms WHERE id = ?', b.room_id)
+  const rooms = roomsLabel({ ...b, extra_rooms: b.extra_rooms ?? '[]' }, await roomNames(env, [{ ...b, extra_rooms: b.extra_rooms ?? '[]' }]))
   const esc = (x: unknown) => String(x ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
   const taxRate = b.total - b.taxes > 0 ? Math.round((b.taxes / (b.total - b.taxes)) * 100) : 0
   return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${esc(b.code)}</title>
@@ -224,7 +244,7 @@ export async function invoiceHtml(env: Env, b: BookingRow, p: PropertyRow): Prom
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:12px"><div style="display:flex;gap:12px;align-items:center"><img src="/brand/logo-wide.webp" alt="" width="181" height="48"><div><h1>${esc(s.business.legal_name)}</h1><div class="muted">${esc(s.business.address)}<br>${esc(s.business.phone)} · ${esc(s.business.email)}${s.business.gstin ? `<br>GSTIN: ${esc(s.business.gstin)}` : ''}</div></div></div>
 <div class="r"><strong>TAX INVOICE</strong><br>${esc(s.business.invoice_prefix)}-${esc(b.code.replace('GS-BK-', ''))}<br>${esc(fmtDate(b.created_at))}</div></div>
 <p><strong>Billed to:</strong> ${esc(b.guest_name)}<br>${esc(b.guest_phone)}${b.guest_email ? ' · ' + esc(b.guest_email) : ''}</p>
-<p><strong>Stay:</strong> ${esc(p.name)}, ${esc(p.destination)} — ${esc(room?.name)} × ${b.rooms_count}<br>${esc(fmtDate(b.check_in))} to ${esc(fmtDate(b.check_out))} (${b.nights} night${b.nights > 1 ? 's' : ''}), ${b.adults} adults${b.children ? `, ${b.children} children` : ''}<br>Booking ID: ${esc(b.code)}</p>
+<p><strong>Stay:</strong> ${esc(p.name)}, ${esc(p.destination)} — ${esc(rooms)}<br>${esc(fmtDate(b.check_in))} to ${esc(fmtDate(b.check_out))} (${b.nights} night${b.nights > 1 ? 's' : ''}), ${b.adults} adults${b.children ? `, ${b.children} children` : ''}<br>Booking ID: ${esc(b.code)}</p>
 <table><tr><th>Description</th><th class="r">Amount</th></tr>
 <tr><td>Accommodation (SAC 996311)</td><td class="r">${money(b.subtotal)}</td></tr>
 ${b.discount ? `<tr><td>Discount${b.coupon_code ? ` (${esc(b.coupon_code)})` : ''}</td><td class="r">− ${money(b.discount)}</td></tr>` : ''}

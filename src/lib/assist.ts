@@ -1,6 +1,7 @@
 // AI features built on the wrapper in ai.ts. Every function returns null / a safe fallback
 // when AI is off or fails, so the portal keeps working without it.
 
+import { roomNames, roomsLabel } from './quote-rooms'
 import { quotationInclusions } from './quotation-pricing'
 import type { Env } from '../env'
 import { aiJson, aiText, detectLanguage, kbSearch, LANGUAGE_NAME, type ChatMessage } from './ai'
@@ -263,9 +264,10 @@ export async function buildQuoteExplainer(env: Env, quotationId: number): Promis
     quotationId,
   )
   if (!opts.length) return
+  const names = await roomNames(env, opts)
   // Facts are assembled by code; the model only phrases them.
   const facts = opts.map((o, i) =>
-    `Option ${i + 1}: ${nightsBetween(o.check_in, o.check_out)} nights at ${o.property_name} (${o.room_name} x${o.rooms_count}) for ${o.adults + o.children} people, ${fmtDate(o.check_in)} to ${fmtDate(o.check_out)}, meal plan ${o.meal_plan ?? 'room only'}, total ${money(o.total)}. ${q.apply_gst === 0 ? 'GST not applied: ₹0' : `GST: ${money(o.taxes)}`}.`,
+    `Option ${i + 1}: ${nightsBetween(o.check_in, o.check_out)} nights at ${o.property_name} (${roomsLabel(o, names).replace(/ × /g, ' x')}) for ${o.adults + o.children} people, ${fmtDate(o.check_in)} to ${fmtDate(o.check_out)}, meal plan ${o.meal_plan ?? 'room only'}, total ${money(o.total)}. ${q.apply_gst === 0 ? 'GST not applied: ₹0' : `GST: ${money(o.taxes)}`}.`,
   )
   const lang = q.enquiry_id ? ((await first<{ language: 'en' | 'ml' }>(env, 'SELECT language FROM enquiries WHERE id = ?', q.enquiry_id))?.language ?? 'en') : 'en'
   const out = await aiText(env, 'quote_explainer', {

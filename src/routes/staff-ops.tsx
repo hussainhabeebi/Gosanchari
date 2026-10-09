@@ -10,7 +10,8 @@ import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
-import { gstLabel, quotationInclusions, quotationPrice } from '../lib/quotation-pricing'
+import { combinedQuotationPrice, gstLabel, quotationInclusions, splitGuests } from '../lib/quotation-pricing'
+import { extraRoomsOf, roomLines, roomNames, roomsLabel, totalRooms, type ExtraRoom } from '../lib/quote-rooms'
 import { calculatePrice, netRateForStay, occupancy, staffRateForStay, weekendLabel } from '../lib/pricing'
 import { quoteFillFromEnquiry, quoteMessageDraft } from '../lib/assist'
 import { cancelBooking, confirmBooking, createBooking, PAYMENT_METHODS, priceStay, recordPayment, storeInvoice } from '../lib/bookings'
@@ -163,16 +164,23 @@ async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   return q
 }
 
-async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; discount?: number; extra_charges: number; guest_rate?: number | null; adults?: number; children?: number; meal_plan?: string | null; apply_gst?: number }) {
-  const pr = await loadPricing(c.env, o.room_id)
-  if (!pr) return null
+async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: string; check_out: string; rooms_count: number; discount_pct: number; discount?: number; extra_charges: number; guest_rate?: number | null; adults?: number; children?: number; meal_plan?: string | null; apply_gst?: number; extra_rooms?: string | ExtraRoom[] | null }) {
   const s = await getSettings(c.env)
-  // A staff-entered base tariff replaces seasonal base rates; flat peak supplements still apply.
-  // Staff decides the child amount from the property's policy; children still count toward capacity.
-  const room = { ...pr.room, ...(o.guest_rate ? { base_rate: o.guest_rate, weekend_rate: o.guest_rate } : {}), extra_child_rate: 0 }
-  const seasons = o.guest_rate ? pr.seasons.filter(s => s.supplement != null && !(s.rate && s.rate > 0) && s.pct_adjust == null) : pr.seasons
-  const base = calculatePrice({ room, seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, mealPlan: o.meal_plan })
-  return quotationPrice({ room, seasons, staffRoom: pr.room, staffSeasons: pr.seasons, checkIn: o.check_in, checkOut: o.check_out, roomsCount: o.rooms_count, taxSlabs: s.tax_slabs, discountAmount: o.discount ?? Math.round(base.roomCharges * o.discount_pct / 100), applyGst: o.apply_gst !== 0, extraCharges: o.extra_charges, adults: o.adults ?? 2, children: o.children ?? 0, mealPlan: o.meal_plan })
+  // One line per room category (the option's own room first, then any combined categories).
+  const lines = []
+  for (const line of roomLines(o)) {
+    const pr = await loadPricing(c.env, line.room_id)
+    if (!pr) return null
+    // A staff-entered base tariff replaces seasonal base rates; flat peak supplements still apply.
+    // Staff decides the child amount from the property's policy; children still count toward capacity.
+    const room = { ...pr.room, ...(line.guest_rate ? { base_rate: line.guest_rate, weekend_rate: line.guest_rate } : {}), extra_child_rate: 0 }
+    const seasons = line.guest_rate ? pr.seasons.filter(s => s.supplement != null && !(s.rate && s.rate > 0) && s.pct_adjust == null) : pr.seasons
+    lines.push({ room, seasons, staffRoom: pr.room, staffSeasons: pr.seasons, roomsCount: line.rooms_count })
+  }
+  const guests = splitGuests(lines.map(l => ({ capacity: l.room.capacity, base_guests: l.room.base_guests, rooms: l.roomsCount })), o.adults ?? 2, o.children ?? 0)
+  const inputs = lines.map((l, i) => ({ ...l, checkIn: o.check_in, checkOut: o.check_out, taxSlabs: s.tax_slabs, adults: guests[i].adults, children: guests[i].children, mealPlan: o.meal_plan }))
+  const roomCharges = inputs.reduce((a, l) => a + calculatePrice({ ...l, adults: undefined, children: undefined }).roomCharges, 0)
+  return combinedQuotationPrice(inputs, { discountAmount: o.discount ?? Math.round(roomCharges * o.discount_pct / 100), applyGst: o.apply_gst !== 0, extraCharges: o.extra_charges })
 }
 
 /** Presentation only: the existing server result supplies the floor and allowance. */
@@ -189,17 +197,39 @@ function discountExplanation(p: Awaited<ReturnType<typeof priceOption>>, amount:
   }
 }
 
+/** B2B / net cost of every room in the option for its dates, or null when any category's net rate is missing. */
+async function optionNetTotal(c: Context<AppEnv>, o: Parameters<typeof roomLines>[0] & Pick<QuoteOptionRow, 'check_in' | 'check_out' | 'meal_plan'>) {
+  let total = 0
+  for (const line of roomLines(o)) {
+    const pr = await loadPricing(c.env, line.room_id)
+    const net = pr ? netRateForStay(pr.room, pr.seasons, o.check_in, o.check_out, o.meal_plan) : null
+    if (net == null) return null
+    total += net * nightsBetween(o.check_in, o.check_out) * line.rooms_count
+  }
+  return total
+}
+
 /** Staff rate benchmark for an option's room and dates (season staff rates apply). */
 async function optionStaffRate(c: Context<AppEnv>, o: Pick<QuoteOptionRow, 'room_id' | 'check_in' | 'check_out' | 'meal_plan'>) {
   const pr = await loadPricing(c.env, o.room_id)
   return pr ? staffRateForStay(pr.room, pr.seasons, o.check_in, o.check_out, o.meal_plan) : null
 }
 
-/** Per-night price the guest actually pays for the room (after discount, before extras and GST). */
-function effectiveNightly(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'check_in' | 'check_out' | 'rooms_count'>) {
-  const n = Math.max(1, nightsBetween(o.check_in, o.check_out)) * Math.max(1, o.rooms_count)
+/** Per-night price the guest actually pays for the room (after discount, before extras and GST), averaged over every room. */
+function effectiveNightly(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'check_in' | 'check_out' | 'rooms_count' | 'room_id'> & { extra_rooms?: string }) {
+  const n = Math.max(1, nightsBetween(o.check_in, o.check_out)) * Math.max(1, totalRooms(o))
   return Math.round((o.subtotal - o.discount) / n)
 }
+
+/** One additional room category of an option (combined with the option's first room category). */
+const ExtraRoomRow = ({ oid, rooms, line, disabled }: { oid: number; rooms: RoomRow[]; line?: ExtraRoom; disabled?: boolean }) => (
+  <div class="extra-room-row" data-extra-room>
+    <Field label="Room category"><select name={`xroom_${oid}`} disabled={disabled}>{rooms.map(r => <option value={r.id} selected={r.id === line?.room_id}>{r.name} ({guestsText(r)})</option>)}</select></Field>
+    <Field label="Rooms"><input type="number" name={`xrooms_${oid}`} value={line?.rooms_count ?? 1} min="1" disabled={disabled} /></Field>
+    <Field label="Guest rate ₹ / room / night" hint="Blank = website rate."><input type="number" name={`xgrate_${oid}`} value={line?.guest_rate ?? ''} min="0" disabled={disabled} /></Field>
+    {!disabled && <button type="button" class="linklike extra-room-del" data-del-extra-room aria-label="Remove this room category">×</button>}
+  </div>
+)
 
 async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number, roomId: number | null, checkIn: string | null, checkOut: string | null, adults: number, children: number) {
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', propertyId)
@@ -266,10 +296,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   const netStay = new Map<number, number | null>()
   for (const o of options) {
     o.staff_rate = await optionStaffRate(c, o)
-    if (perms.view_net_rates) {
-      const pr = await loadPricing(c.env, o.room_id)
-      netStay.set(o.id, pr ? netRateForStay(pr.room, pr.seasons, o.check_in, o.check_out, o.meal_plan) : null)
-    }
+    if (perms.view_net_rates) netStay.set(o.id, await optionNetTotal(c, o))
   }
   const weekendOf = new Map((await all<{ id: number; weekend_nights: string }>(c.env, `SELECT id, weekend_nights FROM properties WHERE id IN (${placeholders(Math.max(1, options.length))})`, ...(options.length ? options.map((o) => o.property_id) : [0]))).map((x) => [x.id, x.weekend_nights]))
   const allRooms = options.length ? await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(options.length)})`, ...options.map((o) => o.property_id)) : []
@@ -308,7 +335,9 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
           const discountInfo = discountExplanation(resolvedPrices.get(o.id) ?? null, o.discount)
           // Margin = what the guest pays for rooms (after discount, before GST) minus the B2B net cost for these exact dates.
           const net = netStay.get(o.id) ?? null
-          const margin = net ? o.subtotal - o.discount - net * nightsBetween(o.check_in, o.check_out) * o.rooms_count : null
+          const margin = net ? o.subtotal - o.discount - net : null
+          const extras = extraRoomsOf(o.extra_rooms)
+          const priced = resolvedPrices.get(o.id)
           return (
             <section class="card stack" data-quote-option={o.id}>
               <div class="row-between"><h3>Option {i + 1}: {o.property_name}</h3>{editable && <button class="linklike small" formaction={`/staff/quotes/${q.id}/options/${o.id}/delete`} formnovalidate>Remove</button>}</div>
@@ -319,6 +348,12 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Check-out"><input type="date" name={`out_${o.id}`} value={o.check_out} required /></Field>
                 <Field label="Rooms"><input type="number" name={`rooms_${o.id}`} value={o.rooms_count} min="1" data-inventory-count />
                 <div class="quote-inventory-helper" data-room-inventory aria-live="polite"><span data-inventory-label>{rooms.find(r => r.id === o.room_id)?.units == null ? 'Category inventory not supplied' : `Total rooms in category: ${rooms.find(r => r.id === o.room_id)!.units} — live availability not verified.`}</span><div class="error" data-inventory-warning hidden></div></div></Field>
+                <div class="extra-rooms" data-extra-rooms={o.id}>
+                  <div class="small muted">{extras.length ? `Combined: ${roomsLabel(o, new Map(rooms.map(r => [r.id, r.name])))} = ${totalRooms(o)} rooms` : 'Need rooms from more than one category? Add another room category to this option.'}</div>
+                  <div data-extra-room-list>{extras.map(line => <ExtraRoomRow oid={o.id} rooms={rooms} line={line} disabled={!editable} />)}</div>
+                  {editable && <template data-extra-room-template><ExtraRoomRow oid={o.id} rooms={rooms.filter(r => r.id !== o.room_id).concat(rooms.filter(r => r.id === o.room_id))} /></template>}
+                  {editable && <button type="button" class="linklike add-new" data-add-extra-room>+ Add another room category</button>}
+                </div>
                 <Field label="Adults"><input type="number" name={`adults_${o.id}`} value={o.adults} min="1" /></Field>
                 <div class="field kids-policy-field">
                   <div class="kids-policy-label"><label class="field-label" for={`children_${o.id}`}>Children</label><button type="button" class="linklike kids-policy-trigger" data-kids-policy-toggle aria-controls={`kids-policy-${o.id}`} aria-expanded="false">See Kids Policy</button></div>
@@ -362,8 +397,8 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
               )}
               <div class="rate-strip small" data-price-benchmarks>
                 <span>Website rate: {money(o.base_rate)}{o.weekend_rate && o.weekend_rate !== o.base_rate ? ` / ${money(o.weekend_rate)} ${weekendLabel(weekendOf.get(o.property_id)).replace(' nights', '')}` : ''}</span>
-                <span>{o.discount > 0 ? 'Accommodation selling rate after discount: ' : 'Quoted: '}<strong>{money(effectiveNightly({ ...o, subtotal: resolvedPrices.get(o.id)?.roomCharges ?? o.subtotal }))}</strong> / room / night{o.guest_rate ? '' : ' (website rate)'}</span>
-                {perms.view_net_rates && netStay.get(o.id) && <span class="internal">B2B / Net for these dates: {money(netStay.get(o.id)!)} / room / night</span>}
+                <span>{o.discount > 0 ? 'Accommodation selling rate after discount: ' : 'Quoted: '}<strong>{money(effectiveNightly({ ...o, subtotal: resolvedPrices.get(o.id)?.roomCharges ?? o.subtotal }))}</strong> / room / night{extras.length ? ' (average)' : o.guest_rate ? '' : ' (website rate)'}</span>
+                {perms.view_net_rates && net != null && <span class="internal">B2B / Net for these dates: {money(Math.round(net / Math.max(1, nightsBetween(o.check_in, o.check_out) * totalRooms(o))))} / room / night{extras.length ? ' (average)' : ''}</span>}
                 {resolvedPrices.get(o.id)?.errors.map(error => <span class="pill pill-red">{error}</span>)}
               </div>
               {i === 0 && gstControl}
@@ -371,12 +406,16 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 {(() => {
                   const room = rooms.find((r) => r.id === o.room_id)
                   const n = nightsBetween(o.check_in, o.check_out)
-                  const occ = room ? occupancy({ ...room, extra_child_rate: 0 }, o.rooms_count, o.adults, o.children, n) : null
+                  const all = totalRooms(o)
+                  const occ = extras.length ? priced?.extraGuests ?? null : room ? occupancy({ ...room, extra_child_rate: 0 }, o.rooms_count, o.adults, o.children, n) : null
+                  const names = new Map(rooms.map(r => [r.id, r.name]))
                   return (
                     <>
-                      <tr><td>Room charges ({n} nights × {o.rooms_count} room{o.rooms_count > 1 ? 's' : ''}{occ && occ.included < occ.max ? `, rate covers ${occ.included} guests` : ''})</td><td>{money(o.subtotal - (occ?.total ?? 0))}</td></tr>
+                      {extras.length && priced
+                        ? roomLines(o).map((line, k) => <tr><td>{names.get(line.room_id) ?? 'Room'} ({n} nights × {line.rooms_count} room{line.rooms_count > 1 ? 's' : ''})</td><td>{money(priced.parts[k]?.roomCharges ?? 0)}</td></tr>)
+                        : <tr><td>Room charges ({n} nights × {o.rooms_count} room{o.rooms_count > 1 ? 's' : ''}{occ && occ.included < occ.max ? `, rate covers ${occ.included} guests` : ''})</td><td>{money(o.subtotal - (occ?.total ?? 0))}</td></tr>}
                       {occ && occ.total > 0 && <tr><td>Extra guests ({[occ.extraAdults && `${occ.extraAdults} adult${occ.extraAdults > 1 ? 's' : ''}`, false].filter(Boolean).join(' + ')} × {n} nights)</td><td>{money(occ.total)}</td></tr>}
-                      {occ && o.adults + o.children > occ.max && <tr class="row-red"><td colSpan={2}>⚠ {o.adults + o.children} guests is more than {o.rooms_count} room{o.rooms_count > 1 ? 's' : ''} can take (max {occ.max}). Add a room.</td></tr>}
+                      {occ && o.adults + o.children > occ.max && <tr class="row-red"><td colSpan={2}>⚠ {o.adults + o.children} guests is more than {all} room{all > 1 ? 's' : ''} can take (max {occ.max}). Add a room.</td></tr>}
                     </>
                   )
                 })()}
@@ -458,11 +497,18 @@ async function calculateDraftOption(c: Context<AppEnv>, o: QuoteOptionRow, f: Fo
     : Math.max(0, int(f[`kids_${oid}`]))
   if (kids > 0) picked.push({ kind: 'kids', name: 'Kids Amount', price: kids, qty: 1, total: kids })
   const addonTotal = picked.reduce((a, x) => a + x.total, 0)
+  // Further room categories of the same property (rows with no room or no rooms are ignored).
+  const propRooms = new Set((await all<{ id: number }>(c.env, 'SELECT id FROM rooms WHERE property_id = ? AND active = 1', o.property_id)).map(r => r.id))
+  const xCounts = f.__all[`xrooms_${oid}`] ?? [], xRates = f.__all[`xgrate_${oid}`] ?? []
+  const extraRooms: ExtraRoom[] = f.__all[`xroom_${oid}`] == null && f[`room_${oid}`] == null
+    ? extraRoomsOf(o.extra_rooms)
+    : (f.__all[`xroom_${oid}`] ?? []).map((id, k) => ({ room_id: int(id), rooms_count: Math.min(99, int(xCounts[k])), guest_rate: int(xRates[k]) > 0 ? int(xRates[k]) : null }))
+      .filter(x => propRooms.has(x.room_id) && x.rooms_count > 0)
   const next = {
     room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
     apply_gst: applyGst, discount_pct: 0, discount: amount, extra_charges: Math.max(0, int(f[`extra_${oid}`])) + addonTotal, guest_rate: grate,
     adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
-    meal_plan: f[`meal_${oid}`] || null,
+    meal_plan: f[`meal_${oid}`] || null, extra_rooms: extraRooms,
   }
   const p = await priceOption(c, next)
   return { next, picked, p, amount, grate, checkIn, checkOut }
@@ -484,9 +530,11 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
     const { next, picked, p } = await calculateDraftOption(c, o, f, applyGst)
     if (!p) return c.json({ error: 'Room rate could not be resolved.' }, 422)
     const staffRate = await optionStaffRate(c, next)
-    const rows: [string, string][] = [
-      [`Room charges (${p.nights} nights × ${p.roomsCount} rooms)`, money(p.roomCharges)],
-    ]
+    const lines = roomLines(next)
+    const names = lines.length > 1 ? await roomNames(c.env, [next]) : new Map<number, string>()
+    const rows: [string, string][] = lines.length > 1
+      ? lines.map((line, k) => [`${names.get(line.room_id) ?? 'Room'} (${p.nights} nights × ${line.rooms_count} room${line.rooms_count > 1 ? 's' : ''})`, money(p.parts[k]?.roomCharges ?? 0)])
+      : [[`Room charges (${p.nights} nights × ${p.roomsCount} rooms)`, money(p.roomCharges)]]
     if (p.extraGuests?.total) rows.push(['Extra guests', money(p.extraGuests.total)])
     if (p.discount) rows.push(['Accommodation discount', `− ${money(p.discount)}`])
     for (const addon of picked) rows.push([addon.name, money(addon.total)])
@@ -494,17 +542,20 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
     if (other) rows.push([str(f[`extralabel_${oid}`], 60) || 'Other extras', money(other)])
     rows.push([gstLabel(applyGst), money(p.taxes)], ['Total', money(p.total)])
     const discountInfo = discountExplanation(p, next.discount)
-    const benchmarks = [`${next.discount > 0 ? 'Accommodation selling rate after discount' : 'Quoted'}: ${money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount)))} / room / night`]
-    const pr = await loadPricing(c.env, next.room_id)
-    if (pr) {
-      const website = calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn: next.check_in, checkOut: next.check_out, roomsCount: next.rooms_count, mealPlan: next.meal_plan })
-      benchmarks.push(`Website rate: ${website.errors.length ? 'not supplied' : money(Math.round(website.roomCharges / Math.max(1, website.nights * website.roomsCount)))}`)
+    const avg = lines.length > 1 ? ' (average)' : ''
+    const benchmarks = [`${next.discount > 0 ? 'Accommodation selling rate after discount' : 'Quoted'}: ${money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount)))} / room / night${avg}`]
+    let website: number | null = 0
+    for (const line of lines) {
+      const pr = await loadPricing(c.env, line.room_id)
+      const w = pr ? calculatePrice({ room: pr.room, seasons: pr.seasons, checkIn: next.check_in, checkOut: next.check_out, roomsCount: line.rooms_count, mealPlan: next.meal_plan }) : null
+      website = website == null || !w || w.errors.length ? null : website + w.roomCharges
     }
+    benchmarks.push(`Website rate: ${website == null ? 'not supplied' : money(Math.round(website / Math.max(1, p.nights * p.roomsCount)))}${avg}`)
     if (perms.view_net_rates) {
-      const net = pr ? netRateForStay(pr.room, pr.seasons, next.check_in, next.check_out, next.meal_plan) : null
+      const net = await optionNetTotal(c, next)
       if (net != null) {
-        benchmarks.push(`B2B / Net for these dates: ${money(net)} / room / night`)
-        rows.push(['Room margin (internal, before GST)', money(p.subtotal - p.discount - net * p.nights * p.roomsCount)])
+        benchmarks.push(`B2B / Net for these dates: ${money(Math.round(net / Math.max(1, p.nights * p.roomsCount)))} / room / night${avg}`)
+        rows.push(['Room margin (internal, before GST)', money(p.subtotal - p.discount - net)])
       }
     }
     options.push({ discountHint: discountInfo.hint, discountError: discountInfo.error, benchmarks, id: o.id, subtotal: p.subtotal, discount: p.discount, extraCharges: p.extraCharges, taxes: p.taxes, total: p.total,
@@ -556,12 +607,13 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       await run(
         c.env,
         `UPDATE quotation_options SET room_id = ?, check_in = ?, check_out = ?, rooms_count = ?, adults = ?, children = ?, meal_plan = ?, discount_pct = ?, extra_charges = ?, extra_label = ?,
-           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ?, guest_rate = ?, addons = ? WHERE id = ?`,
+           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ?, guest_rate = ?, addons = ?, extra_rooms = ? WHERE id = ?`,
         next.room_id, checkIn, checkOut, next.rooms_count, Math.max(1, int(f[`adults_${oid}`], o.adults)), Math.max(0, int(f[`children_${oid}`], o.children)), f[`meal_${oid}`] || null,
-        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, grate, JSON.stringify(picked), o.id,
+        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, grate, JSON.stringify(picked), JSON.stringify(next.extra_rooms), o.id,
       )
       if (disc !== o.discount_pct) await logActivity(c.env, u.id, 'quote.discount', 'quotation', q.id, { option: o.id, from: o.discount_pct, to: disc })
       if (grate !== o.guest_rate) await logActivity(c.env, u.id, 'quote.guest_rate', 'quotation', q.id, { option: o.id, from: o.guest_rate, to: grate, staff_rate: staffRate })
+      if (JSON.stringify(next.extra_rooms) !== JSON.stringify(extraRoomsOf(o.extra_rooms))) await logActivity(c.env, u.id, 'quote.room_categories', 'quotation', q.id, { option: o.id, from: extraRoomsOf(o.extra_rooms), to: next.extra_rooms })
     }
   }
   await run(
@@ -679,8 +731,8 @@ opsRoutes.post('/staff/quotes/:id/send', requirePerm('manage_quotes'), async (c)
   }
   if (f.hold && q.valid_till) {
     const until = new Date(Date.parse(q.valid_till + 'T23:59:59+05:30')).toISOString()
-    for (const o of opts) for (const d of eachNight(o.check_in, o.check_out)) for (let k = 0; k < o.rooms_count; k++) {
-      await run(c.env, 'INSERT INTO blocked_dates (property_id, room_id, date, reason, quotation_id, hold_until, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)', o.property_id, o.room_id, d, `Hold for quote ${q.code}`, q.id, until, u.id)
+    for (const o of opts) for (const line of roomLines(o)) for (const d of eachNight(o.check_in, o.check_out)) for (let k = 0; k < line.rooms_count; k++) {
+      await run(c.env, 'INSERT INTO blocked_dates (property_id, room_id, date, reason, quotation_id, hold_until, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)', o.property_id, line.room_id, d, `Hold for quote ${q.code}`, q.id, until, u.id)
     }
   }
   // Explainer is written once now and stored; follow-up is scheduled for tomorrow.
@@ -703,8 +755,8 @@ opsRoutes.post('/staff/quotes/:id/duplicate', requirePerm('manage_quotes'), asyn
   )
   await run(
     c.env,
-    `INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate, addons)
-     SELECT ?, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate, addons FROM quotation_options WHERE quotation_id = ?`,
+    `INSERT INTO quotation_options (quotation_id, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate, addons, extra_rooms)
+     SELECT ?, property_id, room_id, check_in, check_out, adults, children, rooms_count, meal_plan, subtotal, discount, extra_charges, extra_label, taxes, total, discount_pct, guest_rate, addons, extra_rooms FROM quotation_options WHERE quotation_id = ?`,
     id, q.id,
   )
   return c.redirect(`/staff/quotes/${id}`, 303)
@@ -720,6 +772,7 @@ opsRoutes.post('/staff/quotes/:id/convert', requirePerm('manage_quotes', 'manage
   if (!validated || validated.errors.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: validated?.errors[0] ?? 'Room rate could not be resolved.' })
   const r = await createBooking(c.env, {
     applyGst: q.apply_gst !== 0, roomId: o.room_id, checkIn: o.check_in, checkOut: o.check_out, adults: o.adults, children: o.children, roomsCount: o.rooms_count,
+    extraRooms: extraRoomsOf(o.extra_rooms),
     guestName: q.guest_name, guestPhone: q.phone, guestEmail: q.email, userId: q.user_id, source: 'staff', mealPlan: o.meal_plan,
     quotationId: q.id, enquiryId: q.enquiry_id, staffId: u.id,
     fixedPrice: { subtotal: o.subtotal, discount: o.discount, extraCharges: o.extra_charges, taxes: o.taxes, total: o.total },
@@ -735,6 +788,7 @@ opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   const opts = await all<QuoteOptionRow & { property_name: string; room_name: string; destination: string }>(c.env, 'SELECT o.*, p.name AS property_name, p.destination, r.name AS room_name FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE quotation_id = ? ORDER BY o.id', q.id)
+  const names = await roomNames(c.env, opts)
   return page(c, { title: `Preview ${q.code}`, noindex: true }, (
     <div class="wrap narrow section">
       <p class="flash">Preview — this is what the guest will see.</p>
@@ -744,7 +798,7 @@ opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (
       {opts.map((o, i) => (
         <div class="card">
           <h2>{opts.length > 1 ? `Option ${i + 1}: ` : ''}{o.property_name}</h2>
-          <p>{o.destination} · {o.room_name} × {o.rooms_count} · {fmtDate(o.check_in)} → {fmtDate(o.check_out)} · {o.adults + o.children} guests</p>
+          <p>{o.destination} · {roomsLabel(o, names)} · {fmtDate(o.check_in)} → {fmtDate(o.check_out)} · {o.adults + o.children} guests</p>
           <table class="breakdown"><tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>{o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}{o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}<tr><td>{gstLabel(q.apply_gst)}</td><td>{money(o.taxes)}</td></tr><tr class="total"><td>Total</td><td>{money(o.total)}</td></tr></table>
         </div>
       ))}
@@ -757,6 +811,7 @@ opsRoutes.get('/staff/quotes/:id/print', requirePerm('manage_quotes'), async (c)
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   const opts = await all<QuoteOptionRow & { property_name: string; room_name: string; destination: string; property_facilities: string; room_facilities: string }>(c.env, 'SELECT o.*, p.name AS property_name, p.destination, p.facilities AS property_facilities, r.facilities AS room_facilities, r.name AS room_name FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE quotation_id = ? ORDER BY o.id', q.id)
+  const names = await roomNames(c.env, opts)
   const esc = (x: unknown) => String(x ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!)
   const amenities = (value: string, room = false) => {
     const labels = parseJson<string[]>(value, []).map(key => esc((room ? ROOM_AMENITIES[key] : undefined) ?? FACILITIES[key] ?? key))
@@ -821,7 +876,7 @@ td:first-child{width:72%}
 <div class="quote-notice"><h2>Please note this is not a confirmation voucher</h2><p>Voucher not issued by this quotation</p></div>
 <div class="quote-meta"><p><strong>Customer:</strong> ${esc(q.guest_name)}</p><p><strong>Quotation number:</strong> ${esc(q.code)}</p><p><strong>Quotation date:</strong> ${esc(fmtDate(q.created_at))}</p><p><strong>Valid till:</strong> ${esc(fmtDate(q.valid_till))}</p></div>
 ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => `<section class="quote-option"><div class="quote-property-heading"><h2>${opts.length > 1 ? `Option ${i + 1}: ` : ''}${esc(o.property_name)}</h2><p>${esc(o.destination)}</p></div>
-<div class="quote-stay"><h3>Stay details</h3><p><strong>${esc(o.room_name)}</strong> · ${o.rooms_count} room${o.rooms_count === 1 ? '' : 's'}<br>${esc(fmtDate(o.check_in))} → ${esc(fmtDate(o.check_out))}<br>${o.adults} adult${o.adults === 1 ? '' : 's'} · ${o.children} child${o.children === 1 ? '' : 'ren'} · ${esc(o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only')}</p></div>
+<div class="quote-stay"><h3>Stay details</h3><p>${extraRoomsOf(o.extra_rooms).length ? `${roomLines(o).map(line => `<strong>${esc(names.get(line.room_id) ?? 'Room')}</strong> · ${line.rooms_count} room${line.rooms_count === 1 ? '' : 's'}`).join('<br>')}<br>Total: ${totalRooms(o)} rooms` : `<strong>${esc(o.room_name)}</strong> · ${o.rooms_count} room${o.rooms_count === 1 ? '' : 's'}`}<br>${esc(fmtDate(o.check_in))} → ${esc(fmtDate(o.check_out))}<br>${o.adults} adult${o.adults === 1 ? '' : 's'} · ${o.children} child${o.children === 1 ? '' : 'ren'} · ${esc(o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only')}</p></div>
 ${amenities(o.property_facilities) ? `<h3>Property amenities</h3><ul class="quote-amenities">${amenities(o.property_facilities)}</ul>` : ''}${amenities(o.room_facilities, true) ? `<div class="${parseJson<string[]>(o.room_facilities, []).length <= 12 ? 'quote-amenity-group' : ''}"><h3>Selected-room amenities</h3><ul class="quote-amenities">${amenities(o.room_facilities, true)}</ul></div>` : ''}
 <div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div></section>`).join('')}
 ${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment Terms &amp; Conditions</h3><p style="white-space:pre-line">${esc(q.payment_terms)}</p>` : ''}
@@ -1007,7 +1062,7 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
         <section class="card">
           <table class="breakdown">
             <tr><td>Guest</td><td>{b.guest_name} · <a href={`tel:${b.guest_phone}`}>{b.guest_phone}</a>{b.guest_email ? ` · ${b.guest_email}` : ''}</td></tr>
-            <tr><td>Property</td><td>{b.property_name} — {b.room_name} × {b.rooms_count}</td></tr>
+            <tr><td>Property</td><td>{b.property_name} — {roomsLabel({ ...b, extra_rooms: b.extra_rooms ?? '[]' }, await roomNames(c.env, [{ ...b, extra_rooms: b.extra_rooms ?? '[]' }]))}</td></tr>
             <tr><td>Dates</td><td>{fmtDate(b.check_in)} → {fmtDate(b.check_out)} ({b.nights} nights)</td></tr>
             <tr><td>Guests</td><td>{b.adults} adults, {b.children} children · ID: {b.id_type ?? 'not given'}</td></tr>
             <tr><td>Meal plan</td><td>{b.meal_plan ? MEAL_PLANS[b.meal_plan] ?? b.meal_plan : 'Room only'}</td></tr>
@@ -1155,6 +1210,8 @@ opsRoutes.post('/staff/bookings/:id/change', requirePerm('manage_bookings'), asy
 
 export async function applyDateChange(c: Context<AppEnv>, b: BookingRow, roomId: number, checkIn: string, checkOut: string) {
   const u = c.get('user')!
+  // Re-pricing here covers one room category; a booking combining categories is changed by cancelling and re-quoting.
+  if (extraRoomsOf(b.extra_rooms).length) return redirectMsg(c, `/staff/bookings/${b.id}`, { err: 'This booking combines room categories. To change its dates or rooms, cancel it and send a new quotation.' })
   // Availability excluding this booking itself.
   const avail = await roomAvailability(c.env, [b.property_id], checkIn, checkOut, undefined, b.id)
   if ((avail.get(roomId)?.free ?? 0) < b.rooms_count) return redirectMsg(c, `/staff/bookings/${b.id}`, { err: 'Not available for those dates.' })

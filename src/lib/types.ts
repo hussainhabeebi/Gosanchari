@@ -213,6 +213,8 @@ export interface QuoteOptionRow {
   /** Per-night selling price set by staff; null = website price by the rate rules. */
   guest_rate: number | null
   addons: string
+  /** Further room categories combined in this option (JSON list of { room_id, rooms_count, guest_rate }). */
+  extra_rooms: string
 }
 
 export interface BookingRow {
@@ -256,6 +258,8 @@ export interface BookingRow {
   cancelled_at: string | null
   created_at: string
   updated_at: string
+  /** Further room categories in this booking (JSON, as on the quotation option); reserved as linked blocked dates. */
+  extra_rooms?: string
 }
 
 export interface ReviewRow {

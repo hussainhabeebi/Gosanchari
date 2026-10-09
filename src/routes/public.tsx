@@ -1,6 +1,7 @@
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
 // Public pages (1–9) and the public quotation link (14).
 
+import { roomNames, roomsLabel, extraRoomsOf, totalRooms } from '../lib/quote-rooms'
 import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import type { AppEnv } from '../env'
@@ -859,6 +860,7 @@ publicRoutes.get('/q/:token', async (c) => {
   }
   const expired = q.status === 'expired' || (q.valid_till != null && q.valid_till < todayIST())
   const closed = expired || ['accepted', 'declined'].includes(q.status)
+  const names = await roomNames(c.env, options)
   const photos = await all<{ property_id: number; r2_key: string }>(c.env, `SELECT property_id, r2_key FROM property_photos WHERE media_type = 'image' AND r2_key != '' AND property_id IN (${options.map(() => '?').join(',') || 'NULL'}) ORDER BY (category = 'facade') DESC, sort LIMIT 30`, ...options.map((o) => o.property_id))
 
   return page(c, { title: `Your quote ${q.code}`, noindex: true }, (
@@ -873,7 +875,7 @@ publicRoutes.get('/q/:token', async (c) => {
         <div class="card quote-option">
           <div class="quote-photos">{photos.filter((ph) => ph.property_id === o.property_id).slice(0, 3).map((ph) => <img src={mediaUrl(ph.r2_key, 400)} alt="" loading="lazy" />)}</div>
           <h2>{options.length > 1 && `Option ${i + 1}: `}{o.property_name}</h2>
-          <p class="muted">{o.destination} · {o.room_name} × {o.rooms_count} · {o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only'}</p>
+          <p class="muted">{o.destination} · {roomsLabel(o, names)}{extraRoomsOf(o.extra_rooms).length ? ` (${totalRooms(o)} rooms)` : ''} · {o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only'}</p>
           <p>{fmtDate(o.check_in)} → {fmtDate(o.check_out)} · {nightsBetween(o.check_in, o.check_out)} nights · {o.adults} adults{o.children ? `, ${o.children} children` : ''}</p>
           <table class="breakdown">
             <tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>

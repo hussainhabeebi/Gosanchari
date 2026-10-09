@@ -1,4 +1,29 @@
 // Go Sanchari client script: small progressive enhancements, no framework.
+// Staff quotation: combine room categories in one option ("+ Add another room category" / ×).
+(function () {
+  'use strict'
+  document.querySelectorAll('[data-extra-rooms]').forEach(function (box) {
+    var list = box.querySelector('[data-extra-room-list]'), tpl = box.querySelector('[data-extra-room-template]')
+    var add = box.querySelector('[data-add-extra-room]')
+    // Re-price through the option's own room field (the price preview listens for its change).
+    function reprice() {
+      var room = box.closest('form') && box.closest('form').elements['room_' + box.dataset.extraRooms]
+      if (room) room.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    if (add && tpl) add.addEventListener('click', function () {
+      var row = tpl.content.firstElementChild.cloneNode(true)
+      list.appendChild(row)
+      var first = row.querySelector('select'); if (first) first.focus()
+      reprice()
+    })
+    box.addEventListener('click', function (event) {
+      var del = event.target.closest('[data-del-extra-room]')
+      if (!del) return
+      del.closest('[data-extra-room]').remove()
+      reprice()
+    })
+  })
+})();
 // Admin → Resort contacts: filter the resort cards instantly by location and search words.
 (function () {
   'use strict'
@@ -1111,7 +1136,7 @@
   }
   function changed(event) {
     var field = event.target;
-    if (!/^(apply_gst|(?:room|in|out|rooms|adults|children|kids|meal|grate|discount|extra|extralabel|addon|addonqty)_\d+(?:_\d+)?)$/.test(field.name || '')) return;
+    if (!/^(apply_gst|(?:room|in|out|rooms|adults|children|kids|meal|grate|discount|extra|extralabel|addon|addonqty|xroom|xrooms|xgrate)_\d+(?:_\d+)?)$/.test(field.name || '')) return;
     revision++;
     clearTimeout(timer);
     if (controller) controller.abort();

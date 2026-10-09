@@ -1,6 +1,7 @@
 import { gstLabel } from '../lib/quotation-pricing'
 // Guest pages (10–18): My trips, bookings, enquiries & quotes, saved, reviews, profile, help chat.
 
+import { roomNames, roomsLabel } from '../lib/quote-rooms'
 import { Hono } from 'hono'
 import type { AppEnv } from '../env'
 import { COVER_PHOTO_SQL } from '../lib/catalog'
@@ -144,7 +145,7 @@ guestRoutes.get('/my/bookings/:id', async (c) => {
         <div class="card">
           <table class="breakdown">
             <tr><td>Booking ID</td><td>{b.code}</td></tr>
-            <tr><td>Room</td><td>{b.room_name} × {b.rooms_count}</td></tr>
+            <tr><td>Room</td><td>{roomsLabel({ ...b, extra_rooms: b.extra_rooms ?? '[]' }, await roomNames(c.env, [{ ...b, extra_rooms: b.extra_rooms ?? '[]' }]))}</td></tr>
             <tr><td>Dates</td><td>{fmtDate(b.check_in)} → {fmtDate(b.check_out)} ({b.nights} nights)</td></tr>
             <tr><td>Guests</td><td>{b.adults} adults{b.children ? `, ${b.children} children` : ''}</td></tr>
             <tr><td>Room charges</td><td>{money(b.subtotal)}</td></tr>

@@ -999,3 +999,10 @@ code { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .date-range { grid-template-columns: 1fr 1fr; } .date-range .range-del { justify-self: end; } }
 .period > [data-add-range] { align-self: flex-start; }
 @media (min-width: 700px) { .period-off .period-head, .period-sea .period-head { grid-template-columns: auto 1fr; } }
+
+/* Staff quotation: several room categories in one option */
+.extra-rooms { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; }
+.extra-room-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 10px; align-items: start; }
+.extra-room-del { font-size: 1.3rem; padding: 0 6px; align-self: center; }
+.extra-rooms [data-add-extra-room] { align-self: flex-start; }
+@media (max-width: 640px) { .extra-room-row { grid-template-columns: 1fr 1fr; } }

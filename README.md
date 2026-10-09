@@ -50,6 +50,8 @@ Phone-OTP login shows the code on screen when WhatsApp isn't configured (develop
 
 Guests log in with any phone number (OTP). Demo quote link: `/q/demo-quote-token-1234567890`.
 
+**Combining room categories in one quote option:** under *Rooms*, click *+ Add another room category* (e.g. 4 Standard Non-AC + 2 Standard AC = 6 rooms). Each category is priced by its own rates and GST slab and the option shows the combined total. Guests are shared across the rooms, and the discount is checked against the combined Staff Rate floor. Converting such a quote makes one booking for the combined price and also reserves the extra categories' rooms (released if the booking is cancelled). To change a combined booking's dates, cancel it and send a new quote.
+
 **Booking flow:** enquiry → staff quote (WhatsApp link) → guest clicks *Accept* → staff get an alert and a task →
 *Convert to booking* (confirms it, blocks the rooms and sends the guest a WhatsApp confirmation) → staff *Record payment* on the booking.
 
