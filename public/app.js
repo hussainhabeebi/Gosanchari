@@ -430,8 +430,23 @@
       needForm.elements.children.value = n.children || ''
       needForm.elements.priceMax.value = n.priceMax || ''
     }
+    // Date bar: moving the check-in keeps the stay length; a check-out before it (or months later) is corrected.
+    var nightsOf = function (a, b) { return a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 86400000) : 0 }
+    var plusDays = function (d, n) { var x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
+    if (needForm) {
+      var lastIn = ''
+      needForm.elements.checkIn.addEventListener('focus', function () { lastIn = needForm.elements.checkIn.value })
+      needForm.elements.checkIn.addEventListener('change', function () {
+        var el = needForm.elements, len = nightsOf(lastIn, el.checkOut.value)
+        if (el.checkIn.value && (!el.checkOut.value || el.checkOut.value <= el.checkIn.value || nightsOf(el.checkIn.value, el.checkOut.value) > 30))
+          el.checkOut.value = plusDays(el.checkIn.value, len > 0 && len <= 30 ? len : 1)
+        lastIn = el.checkIn.value
+      })
+    }
     if (needForm) needForm.addEventListener('submit', function (e) {
       e.preventDefault()
+      var stay = nightsOf(needForm.elements.checkIn.value, needForm.elements.checkOut.value)
+      if (stay > 30 && !window.confirm('That is a ' + stay + '-night stay (' + needForm.elements.checkIn.value + ' → ' + needForm.elements.checkOut.value + '). Is that right?')) return
       var el = needForm.elements, n = Object.assign({}, state.need || {}, {
         destination: el.destination.value, checkIn: el.checkIn.value, checkOut: el.checkOut.value,
         adults: +el.adults.value || undefined, children: +el.children.value || 0, priceMax: +el.priceMax.value || undefined,
@@ -445,13 +460,15 @@
       return '<div class="card as-card' + (o.fits ? '' : ' as-nofit') + (best ? ' as-best' : '') + '">' + (best ? '<span class="pill pill-best">Best match</span>' : '') +
         '<div class="row-between"><strong><a href="/staff/rooms/' + o.id + '">' + esc(o.name) + '</a></strong><span class="muted small">' + esc(o.type) + ' · ' + esc(o.destination) + (o.rating ? ' · ★ ' + o.rating.toFixed(1) : '') + '</span></div>' +
         (o.fits ? '<ul class="small as-lines">' + o.lines.map(function (l) {
-          return '<li>' + l.count + ' × ' + esc(l.room) + ' <span class="muted">(' + l.guests + ' guests' + (l.includedGuests < l.capacity ? '; rate covers ' + l.includedGuests + ', max ' + l.capacity + ' each' : '') + ')</span> — guest ' + money(l.guestPerNight) + '/night' +
+          return '<li>' + l.count + ' × ' + esc(l.room) + ' <span class="muted">(' + l.guests + ' guests' + (l.includedGuests < l.capacity ? '; rate covers ' + l.includedGuests + ', max ' + l.capacity + ' each' : '') + ')</span> — ' + (l.guestPerNight == null ? '<span class="err">guest rate not set</span>' : 'guest ' + money(l.guestPerNight) + '/night') +
             (l.extraGuests ? ' + <strong>' + l.extraGuests + ' extra guest' + (l.extraGuests > 1 ? 's' : '') + ' ' + money(l.extraCharge) + '</strong>' : '') +
             (l.staffPerNight ? ' · <span class="internal">staff ' + money(l.staffPerNight) + '</span>' : '') +
             (l.netPerNight ? ' · <span class="internal">net ' + money(l.netPerNight) + '</span>' : '') +
             (l.seasons.length ? ' <span class="pill pill-kind-special">' + esc(l.seasons.join(', ')) + '</span>' : '') + '</li>'
         }).join('') + '</ul>' : '<p class="small err">Not enough for the whole group — up to ' + o.maxSleeps + ' guests with the ' + o.freeRooms + ' free rooms.</p>') +
-        (o.fits ? '<div class="as-totals"><span>Guest total <strong>' + money(o.guestTotal) + '</strong> <span class="muted small">incl. GST ' + money(o.gst) + '</span></span>' +
+        (o.fits ? '<div class="as-totals">' + (o.guestTotal == null
+          ? '<span>Guest total <strong>not set</strong> <span class="muted small">no website rate for these dates — quote from the staff rate</span></span>'
+          : '<span>Guest total <strong>' + money(o.guestTotal) + '</strong> <span class="muted small">incl. GST ' + money(o.gst) + '</span></span>') +
           (o.staffTotal ? '<span class="internal">Staff total ' + money(o.staffTotal) + '</span>' : '') +
           (o.netTotal ? '<span class="internal">Net total ' + money(o.netTotal) + '</span>' : '') + '</div>' : '') +
         (o.minNightsIssue ? '<p class="small err">' + esc(o.minNightsIssue) + '</p>' : '') +

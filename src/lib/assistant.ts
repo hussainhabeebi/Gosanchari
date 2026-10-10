@@ -15,7 +15,7 @@ import { FACILITIES, MEAL_PLANS, parseQueryRules, PROPERTY_TYPES, sanitizeFilter
 import { getSettings } from './settings'
 import { contact as readContact, dining as readDining, policies as readPolicies, POLICY_FIELDS, STAY_TYPES, stayTypeLabel } from './catalog'
 import type { PropertyRow, RoomRow } from './types'
-import { addDays, isDate, nightsBetween, parseJson, todayIST } from './util'
+import { addDays, fmtDate, isDate, nightsBetween, parseJson, todayIST } from './util'
 
 export interface Need extends SearchFilters {
   intent?: 'find' | 'property_info' | 'other'
@@ -38,9 +38,9 @@ export interface AllocLine {
   extraCharge: number
   extraAdultRate: number | null
   count: number
-  /** Guest price for this many rooms for the whole stay incl. extra-person charges, before GST. */
-  guestSubtotal: number
-  guestPerNight: number
+  /** Guest price for this many rooms for the whole stay incl. extra-person charges, before GST; null = no guest (website) rate set. */
+  guestSubtotal: number | null
+  guestPerNight: number | null
   staffPerNight: number | null
   netPerNight?: number | null
   seasons: string[]
@@ -57,9 +57,10 @@ export interface PropertyOption {
   roomsUsed: number
   sleeps: number
   fits: boolean
-  guestSubtotal: number
-  gst: number
-  guestTotal: number
+  /** Guest (selling) prices; null when a room used has no guest rate set (quote from the staff rate instead). */
+  guestSubtotal: number | null
+  gst: number | null
+  guestTotal: number | null
   staffTotal: number | null
   netTotal?: number | null
   freeRooms: number
@@ -80,7 +81,12 @@ export interface AssistantResult {
   assumedDates: boolean
   options: PropertyOption[]
   info?: Record<string, unknown>
+  /** Set when the dates cannot be right (e.g. a 124-night stay); nothing is priced then. */
+  datesIssue?: string
 }
+
+/** Longest stay the assistant prices; anything longer is almost always a mistyped date. */
+export const MAX_ASSISTANT_NIGHTS = 30
 
 const clampInt = (v: unknown, lo: number, hi: number) => {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseInt(v.replace(/[^\d]/g, ''), 10) : NaN
@@ -183,10 +189,19 @@ export async function readNeed(env: Env, question: string, prev: Need | null): P
   if (bt) out.budgetTotal = bt
   if (isDate(raw.checkIn) && raw.checkIn >= today) out.checkIn = raw.checkIn
   if (isDate(raw.checkOut) && out.checkIn && raw.checkOut > out.checkIn) out.checkOut = raw.checkOut
+  // Dates read by the rules from the message itself ("11 to 12 feb") are exact; they win over the AI's reading,
+  // which can mix a day of this month with a later check-out.
+  if (rules.checkIn) {
+    out.checkIn = rules.checkIn
+    if (rules.checkOut) out.checkOut = rules.checkOut
+    else if (!out.checkOut || out.checkOut <= out.checkIn) out.checkOut = addDays(out.checkIn, out.nights ?? 1)
+  }
+  // An AI check-out far beyond the check-in is a misreading: keep the check-in and the asked length (or 1 night).
+  if (out.checkIn && out.checkOut && nightsBetween(out.checkIn, out.checkOut) > MAX_ASSISTANT_NIGHTS && !rules.checkOut) out.checkOut = addDays(out.checkIn, out.nights ?? 1)
   return out
 }
 
-interface PricedRoom { roomId: number; room: string; capacity: number; base: number; extraStay: number; extraAdultRate: number | null; free: number; guestStay: number; staffNight: number | null; netNight: number | null; seasons: string[]; minNights: number }
+interface PricedRoom { roomId: number; room: string; capacity: number; base: number; extraStay: number; extraAdultRate: number | null; free: number; guestStay: number; guestKnown: boolean; staffNight: number | null; netNight: number | null; seasons: string[]; minNights: number }
 
 /**
  * Cheapest way to sleep the whole group in free rooms. Each room unit can take 1…capacity guests: its rate covers
@@ -233,6 +248,10 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
   const checkOut = need.checkOut ?? addDays(checkIn, need.nights ?? 1)
   const nights = nightsBetween(checkIn, checkOut)
   const guests = Math.max(1, need.guests ?? (need.adults ?? 2) + (need.children ?? 0))
+  if (nights > MAX_ASSISTANT_NIGHTS) {
+    return { need, checkIn, checkOut, nights, guests, assumedDates, options: [],
+      datesIssue: `These dates make a ${nights}-night stay (${fmtDate(checkIn)} → ${fmtDate(checkOut)}). That looks like a mistyped date — please correct the check-in or check-out date above.` }
+  }
   const s = await getSettings(env)
 
   const where: string[] = ["p.status = 'live'"]
@@ -271,22 +290,26 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
         return hit ? `${l} (${seasonKindLabel(hit.kind)})` : l
       })
       const netNight = showNet ? avgNet(r, ss, checkIn, checkOut) : null
-      priced.push({ roomId: r.id, room: r.name, capacity: r.capacity, base: Math.min(r.base_guests ?? r.capacity, r.capacity), extraStay: (r.extra_adult_rate ?? 0) * nights, extraAdultRate: r.extra_adult_rate, free: avail.get(r.id)?.free ?? 0, guestStay: price.subtotal, staffNight: staffRateForStay(r, ss, checkIn, checkOut), netNight, seasons: kinds, minNights: price.minNights })
+      const staffNight = staffRateForStay(r, ss, checkIn, checkOut)
+      // No guest (website) rate for these dates: never show ₹0 — rank the room by its staff rate instead.
+      const guestKnown = price.errors.length === 0 && price.roomCharges > 0
+      priced.push({ roomId: r.id, room: r.name, capacity: r.capacity, base: Math.min(r.base_guests ?? r.capacity, r.capacity), extraStay: (r.extra_adult_rate ?? 0) * nights, extraAdultRate: r.extra_adult_rate, free: avail.get(r.id)?.free ?? 0, guestStay: guestKnown ? price.subtotal : (staffNight ?? 0) * nights, guestKnown, staffNight, netNight, seasons: kinds, minNights: price.minNights })
     }
     if (!priced.length) continue
     const alloc = allocateRooms(priced, guests)
     const lines: AllocLine[] = (alloc ?? []).map(({ room, count, guests: placed, extra }) => ({
       roomId: room.roomId, room: room.room, capacity: room.capacity, includedGuests: room.base, guests: placed, extraGuests: Math.max(0, placed - room.base * count), extraCharge: extra, extraAdultRate: room.extraAdultRate,
-      count, guestSubtotal: room.guestStay * count + extra,
-      guestPerNight: Math.round(room.guestStay / nights), staffPerNight: room.staffNight, ...(showNet ? { netPerNight: room.netNight } : {}), seasons: room.seasons,
+      count, guestSubtotal: room.guestKnown ? room.guestStay * count + extra : null,
+      guestPerNight: room.guestKnown ? Math.round(room.guestStay / nights) : null, staffPerNight: room.staffNight, ...(showNet ? { netPerNight: room.netNight } : {}), seasons: room.seasons,
     }))
-    const guestSubtotal = lines.reduce((a, l) => a + l.guestSubtotal, 0)
+    const guestKnown = lines.length > 0 && lines.every((l) => l.guestSubtotal != null)
+    const guestSubtotal = guestKnown ? lines.reduce((a, l) => a + l.guestSubtotal!, 0) : null
     // GST is charged per room-night slab, so add each line's tax separately.
     let gst = 0
-    for (const l of lines) {
-      const perRoomNight = l.guestSubtotal / (l.count * nights)
+    for (const l of guestKnown ? lines : []) {
+      const perRoomNight = l.guestSubtotal! / (l.count * nights)
       const rate = s.tax_slabs.slice().sort((a, b) => (a.upto ?? Infinity) - (b.upto ?? Infinity)).find((t) => t.upto == null || perRoomNight <= t.upto)?.rate ?? 0
-      gst += Math.round((l.guestSubtotal * rate) / 100)
+      gst += Math.round((l.guestSubtotal! * rate) / 100)
     }
     const staffTotal = lines.every((l) => l.staffPerNight) ? lines.reduce((a, l) => a + (l.staffPerNight ?? 0) * l.count * nights, 0) : null
     const netTotal = showNet && lines.every((l) => l.netPerNight) ? lines.reduce((a, l) => a + (l.netPerNight ?? 0) * l.count * nights, 0) : null
@@ -294,17 +317,19 @@ export async function findOptions(env: Env, need: Need, showNet: boolean): Promi
     const opt: PropertyOption = {
       id: p.id, slug: p.slug, name: p.name, type: stayTypeLabel(p), destination: p.destination, rating: p.rating_avg,
       lines, roomsUsed: lines.reduce((a, l) => a + l.count, 0), sleeps: lines.reduce((a, l) => a + l.count * l.capacity, 0),
-      fits: !!alloc, guestSubtotal, gst, guestTotal: guestSubtotal + gst, staffTotal, ...(showNet ? { netTotal } : {}),
+      fits: !!alloc, guestSubtotal, gst: guestKnown ? gst : null, guestTotal: guestSubtotal == null ? null : guestSubtotal + gst, staffTotal, ...(showNet ? { netTotal } : {}),
       freeRooms: priced.reduce((a, r) => a + r.free, 0), maxSleeps: priced.reduce((a, r) => a + r.free * r.capacity, 0), minNightsIssue: nights < minN ? `Minimum stay is ${minN} nights for these dates` : null,
       facilities: parseJson<string[]>(p.facilities, []).slice(0, 8).map((f) => FACILITIES[f] ?? f),
       mealPlans: parseJson<string[]>(p.meal_plans, []).map((m) => MEAL_PLANS[m] ?? m),
       highlights: [parseJson<string[]>(p.highlights, []).slice(0, 3).join('; '), (p.description ?? '').slice(0, 220)].filter(Boolean).join(' — '),
     }
-    if (need.priceMax && opt.fits && lines.some((l) => l.guestPerNight > need.priceMax! * 1.1)) continue
-    if (need.budgetTotal && opt.fits && opt.guestTotal > need.budgetTotal * 1.1) continue
+    if (need.priceMax && opt.fits && lines.some((l) => (l.guestPerNight ?? l.staffPerNight ?? 0) > need.priceMax! * 1.1)) continue
+    if (need.budgetTotal && opt.fits && (opt.guestTotal ?? opt.staffTotal ?? 0) > need.budgetTotal * 1.1) continue
     options.push(opt)
   }
-  options.sort((a, b) => Number(b.fits) - Number(a.fits) || Number(!!a.minNightsIssue) - Number(!!b.minNightsIssue) || a.guestTotal - b.guestTotal)
+  // Cheapest first by guest total; options without a guest rate compare by their staff total.
+  const cost = (o: PropertyOption) => o.guestTotal ?? o.staffTotal ?? Infinity
+  options.sort((a, b) => Number(b.fits) - Number(a.fits) || Number(!!a.minNightsIssue) - Number(!!b.minNightsIssue) || cost(a) - cost(b))
   return { need, checkIn, checkOut, nights, guests, assumedDates, options: options.slice(0, 6) }
 }
 
@@ -347,6 +372,7 @@ Rules:
 
 /** Write the reply from computed data (rule-based text when AI is off). */
 export async function writeAnswer(env: Env, question: string, history: { role: 'user' | 'assistant'; content: string }[], r: AssistantResult): Promise<string> {
+  if (r.datesIssue) return r.datesIssue
   const data = r.info
     ? { property: r.info }
     : { dates: { checkIn: r.checkIn, checkOut: r.checkOut, nights: r.nights, assumed: r.assumedDates }, guests: r.guests, need: r.need, options: r.options.map(compact) }
@@ -361,7 +387,7 @@ function compact(o: PropertyOption) {
   return {
     name: o.name, type: o.type, destination: o.destination, rating: o.rating || undefined, fits_group: o.fits, free_rooms: o.freeRooms, max_guests_with_free_rooms: o.maxSleeps,
     rooms: o.lines.map((l) => ({ room: l.room, count: l.count, rate_covers_guests_each: l.includedGuests, max_guests_each: l.capacity, guests_placed: l.guests, extra_guests: l.extraGuests || undefined, extra_person_charge_total: l.extraCharge || undefined, guest_per_room_night: l.guestPerNight, staff_per_room_night: l.staffPerNight, ...(l.netPerNight !== undefined ? { net_per_room_night: l.netPerNight } : {}), season: l.seasons.join(', ') || undefined })),
-    guest_subtotal: o.guestSubtotal, gst: o.gst, guest_total_incl_gst: o.guestTotal, staff_total: o.staffTotal, ...(o.netTotal !== undefined ? { net_total: o.netTotal } : {}),
+    guest_subtotal: o.guestSubtotal, gst: o.gst, guest_total_incl_gst: o.guestTotal, ...(o.guestTotal == null ? { guest_rate_not_set: 'No guest (website) rate is set for these rooms/dates — quote from the staff rate' } : {}), staff_total: o.staffTotal, ...(o.netTotal !== undefined ? { net_total: o.netTotal } : {}),
     min_stay_issue: o.minNightsIssue || undefined, meal_plans: o.mealPlans, facilities: o.facilities, about: o.highlights,
   }
 }
@@ -369,12 +395,13 @@ function compact(o: PropertyOption) {
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
 
 export function fallbackAnswer(r: AssistantResult): string {
+  if (r.datesIssue) return r.datesIssue
   if (r.info) return `Here are the details for ${String(r.info.name)} (AI is off, so showing the raw facts).`
   if (!r.options.length) return `No live properties match this${r.need.destination ? ` in ${r.need.destination}` : ''}. Try another destination or fewer filters.`
   const fits = r.options.filter((o) => o.fits)
   const best = fits.find((o) => !o.minNightsIssue) ?? fits[0]
   const out: string[] = []
-  if (best) out.push(`Best pick: ${best.name} — ${best.lines.map((l) => `${l.count} × ${l.room}`).join(' + ')}, ${inr(best.guestTotal)} incl. GST${best.staffTotal ? ` (staff ${inr(best.staffTotal)})` : ''}.`)
+  if (best) out.push(`Best pick: ${best.name} — ${best.lines.map((l) => `${l.count} × ${l.room}`).join(' + ')}, ${best.guestTotal != null ? `${inr(best.guestTotal)} incl. GST${best.staffTotal ? ` (staff ${inr(best.staffTotal)})` : ''}` : `guest rate not set${best.staffTotal ? ` — staff total ${inr(best.staffTotal)}` : ''}`}.`)
   if (fits.length > 1) out.push(`${fits.length - 1} more option${fits.length > 2 ? 's' : ''} below.`)
   const nofit = r.options.filter((o) => !o.fits)
   if (!best && nofit.reduce((a, o) => a + o.maxSleeps, 0) >= r.guests) out.push(`No single property takes all ${r.guests} guests — split the group: ${nofit.map((o) => `${o.name} up to ${o.maxSleeps}`).join(', ')}.`)

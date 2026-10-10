@@ -141,16 +141,34 @@ export function parseQueryRules(text: string, destinations: string[], today = to
   if (/breakfast/.test(t)) f.mealPlan = 'CP'
   if (/all meals/.test(t)) f.mealPlan = 'AP'
 
-  // Dates: "12-14 dec", "12 dec to 14 dec", "dec 12", "this weekend"
-  const range = t.match(/\b(\d{1,2})\s*(?:-|to|–)\s*(\d{1,2})\s+([a-z]{3,9})\b/)
-  const single = t.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})\b/) ?? null
-  if (range && MONTHS[range[3]]) {
-    f.checkIn = futureDate(Number(range[1]), MONTHS[range[3]], today)
-    f.checkOut = futureDate(Number(range[2]), MONTHS[range[3]], today)
-  } else if (single && MONTHS[single[2]]) {
-    f.checkIn = futureDate(Number(single[1]), MONTHS[single[2]], today)
-    const n = t.match(/\b(\d{1,2})\s*nights?\b/)
-    if (f.checkIn) f.checkOut = addDays(f.checkIn, n ? Number(n[1]) : 1)
+  // Dates: "12-14 dec", "12 dec to 14 dec", "24 dec to 2 jan", "dec 12 to 14", "11/2 to 12/2", "dec 12", "this weekend"
+  const D = '(\\d{1,2})(?:st|nd|rd|th)?'
+  const SEP = '\\s*(?:-|–|to|till|until)\\s*'
+  const month = (m: string | undefined) => (m ? MONTHS[m] : undefined)
+  // First match whose month words are real months ("4 guests" is not a date).
+  const find = (re: string, ok: (m: RegExpMatchArray) => boolean) => [...t.matchAll(new RegExp(re, 'g'))].find(ok) ?? null
+  const twoMonths = find(`\\b${D}\\s+([a-z]{3,9})${SEP}${D}\\s+([a-z]{3,9})\\b`, (m) => !!month(m[2]) && !!month(m[4]))
+  const range = find(`\\b${D}${SEP}${D}\\s+([a-z]{3,9})\\b`, (m) => !!month(m[3]))
+  const monthFirst = find(`\\b([a-z]{3,9})\\s+${D}(?:${SEP}${D})?\\b`, (m) => !!month(m[1]))
+  const numeric = t.match(/\b(\d{1,2})[/.](\d{1,2})(?:[/.]\d{2,4})?\s*(?:-|–|to|till|until)\s*(\d{1,2})[/.](\d{1,2})(?:[/.]\d{2,4})?\b/)
+  const single = find(`\\b${D}\\s+([a-z]{3,9})\\b`, (m) => !!month(m[2]))
+  const nightsAsked = t.match(/\b(\d{1,2})\s*nights?\b/)
+  if (twoMonths && month(twoMonths[2]) && month(twoMonths[4])) {
+    f.checkIn = futureDate(Number(twoMonths[1]), month(twoMonths[2])!, today)
+    if (f.checkIn) f.checkOut = futureDate(Number(twoMonths[3]), month(twoMonths[4])!, f.checkIn)
+  } else if (range && month(range[3])) {
+    f.checkIn = futureDate(Number(range[1]), month(range[3])!, today)
+    if (f.checkIn) f.checkOut = futureDate(Number(range[2]), month(range[3])!, f.checkIn)
+  } else if (numeric && Number(numeric[2]) >= 1 && Number(numeric[2]) <= 12 && Number(numeric[4]) >= 1 && Number(numeric[4]) <= 12) {
+    // Indian day/month order: 11/2 = 11 February.
+    f.checkIn = futureDate(Number(numeric[1]), Number(numeric[2]), today)
+    if (f.checkIn) f.checkOut = futureDate(Number(numeric[3]), Number(numeric[4]), f.checkIn)
+  } else if (single && month(single[2])) {
+    f.checkIn = futureDate(Number(single[1]), month(single[2])!, today)
+    if (f.checkIn) f.checkOut = addDays(f.checkIn, nightsAsked ? Number(nightsAsked[1]) : 1)
+  } else if (monthFirst && month(monthFirst[1])) {
+    f.checkIn = futureDate(Number(monthFirst[2]), month(monthFirst[1])!, today)
+    if (f.checkIn) f.checkOut = monthFirst[3] ? futureDate(Number(monthFirst[3]), month(monthFirst[1])!, f.checkIn) : addDays(f.checkIn, nightsAsked ? Number(nightsAsked[1]) : 1)
   } else if (/this weekend/.test(t)) {
     const dow = new Date(today + 'T00:00:00Z').getUTCDay()
     f.checkIn = addDays(today, (6 - dow + 7) % 7)
