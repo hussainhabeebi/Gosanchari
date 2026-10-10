@@ -1,5 +1,6 @@
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
+import { latestVoucher } from './vouchers'
 import { Hono, type Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { addons as readAddons, ADDON_PER, chosenAddons, contact as readContact, extrasLabel, guestsText, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, type ChosenAddon } from '../lib/catalog'
@@ -1031,11 +1032,12 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
     int(c.req.param('id')),
   )
   if (!b) return c.notFound()
-  const [payments, refunds, msgs, rooms] = await Promise.all([
+  const [payments, refunds, msgs, rooms, voucher] = await Promise.all([
     all<{ id: number; amount: number; status: string; gateway: string; gateway_payment_id: string | null; created_at: string; failure_reason: string | null }>(c.env, 'SELECT * FROM payments WHERE booking_id = ? ORDER BY id', b.id),
     all<{ id: number; amount: number; status: string; reason: string; created_at: string }>(c.env, 'SELECT * FROM refunds WHERE booking_id = ? ORDER BY id', b.id),
     all<{ sender: string; body: string; channel: string; created_at: string }>(c.env, 'SELECT sender, body, channel, created_at FROM messages WHERE booking_id = ? ORDER BY id', b.id),
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1', b.property_id),
+    latestVoucher(c.env, b.id),
   ])
   return page(c, { title: `Booking ${b.code}`, area: 'staff', active: 'bookings' }, (
     <div class="stack-lg">
@@ -1089,6 +1091,28 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
               <button class="btn btn-sm">Save payment</button>
             </form>
           )}
+          <section class="voucher-box mt" id="voucher">
+            <h3>Booking confirmation voucher</h3>
+            {voucher && (
+              <p class="small">
+                Voucher <a href={`/vouchers/${voucher.id}`} target="_blank">{voucher.code}</a> <Pill s={voucher.status} />
+                {voucher.status === 'pending' && ' — waiting for admin approval.'}
+                {voucher.status === 'approved' && <> — approved{voucher.decider ? ` by ${voucher.decider}` : ''} {fmtDateTime(voucher.decided_at)}. <a class="btn btn-sm" href={`/vouchers/${voucher.id}`} target="_blank">Open “Booking Confirmed” voucher</a></>}
+                {voucher.status === 'rejected' && <span class="error"> — sent back: {voucher.reject_reason}</span>}
+              </p>
+            )}
+            {b.status === 'cancelled' ? null : b.amount_paid <= 0
+              ? <p class="muted small">Record the guest’s advance payment above, then send the voucher to admin for approval.</p>
+              : voucher?.status !== 'pending' && (
+                <form method="post" action={`/staff/bookings/${b.id}/voucher`} class="stack">
+                  <div class="row wrap-row">
+                    <Field label={`Kids' ages${b.children ? ' *' : ''}`} hint={b.children ? `${b.children} child${b.children > 1 ? 'ren' : ''} on this booking, e.g. 4, 9` : 'No kids on this booking'}><input name="kids_ages" maxlength={120} required={b.children > 0} value={voucher?.kids_ages ?? ''} placeholder="e.g. 4, 9" /></Field>
+                    <Field label="Remarks for the voucher (optional)"><textarea name="remarks" rows={2} maxlength={1000}>{voucher?.status === 'rejected' ? voucher.staff_remarks : ''}</textarea></Field>
+                  </div>
+                  <button class="btn btn-sm">{voucher?.status === 'approved' ? 'Send an updated voucher for approval' : 'Send voucher for admin approval'}</button>
+                </form>
+              )}
+          </section>
           <h3 class="mt">Payments</h3>
           <ul class="plain small">
             {payments.map((p) => <li>{money(p.amount)} · <Pill s={p.status} /> · {p.gateway} {p.gateway_payment_id ?? ''} · {fmtDateTime(p.created_at)} {p.failure_reason && <span class="error">{p.failure_reason}</span>}</li>)}

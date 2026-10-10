@@ -50,6 +50,8 @@ Phone-OTP login shows the code on screen when WhatsApp isn't configured (develop
 
 Guests log in with any phone number (OTP). Demo quote link: `/q/demo-quote-token-1234567890`.
 
+**Booking confirmation voucher (after the advance payment):** a quotation is not a confirmation. Once the guest's advance is recorded on the booking, staff fill in the kids' ages and any remarks and click *Send voucher for admin approval*. Admins approve it in *Bookings → Voucher approvals*, adding their own remarks, or send it back with a reason. The approved voucher, headed **Booking Confirmed**, appears in the requesting staff member's *Bookings → My vouchers* (and on WhatsApp) with a PDF download. It shows the guest, kids' ages, resort name, contact number and location, dates, room categories, amenities, payments, total, advance paid, the balance payable at check-in, and all remarks. Approved vouchers are frozen snapshots; to change one, send an updated voucher for approval. Only admins can approve by default (*Approve booking confirmation vouchers* in Staff & roles).
+
 **Combining room categories in one quote option:** under *Rooms*, click *+ Add another room category* (e.g. 4 Standard Non-AC + 2 Standard AC = 6 rooms). Each category is priced by its own rates and GST slab and the option shows the combined total. Guests are shared across the rooms, and the discount is checked against the combined Staff Rate floor. Converting such a quote makes one booking for the combined price and also reserves the extra categories' rooms (released if the booking is cancelled). To change a combined booking's dates, cancel it and send a new quote.
 
 **Booking flow:** enquiry → staff quote (WhatsApp link) → guest clicks *Accept* → staff get an alert and a task →

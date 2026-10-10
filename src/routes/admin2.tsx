@@ -462,7 +462,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
   const today = parseInt((await c.env.KV.get(`ai:count:${todayIST()}`)) ?? '0', 10)
   const gkey = await geminiKey(c.env)
   const events = Object.keys(s.notifications) as (keyof Settings['notifications'])[]
-  const eventLabel: Record<string, string> = { new_enquiry: 'New enquiry', booking: 'New booking', quote_accepted: 'Quote accepted by guest', refund_request: 'Refund request', low_review: 'Low-rated review', daily_summary: 'Daily summary', rate_expiry: 'Season rates ending (renew rates)' }
+  const eventLabel: Record<string, string> = { new_enquiry: 'New enquiry', booking: 'New booking', quote_accepted: 'Quote accepted by guest', refund_request: 'Refund request', low_review: 'Low-rated review', daily_summary: 'Daily summary', rate_expiry: 'Season rates ending (renew rates)', voucher_request: 'Booking voucher waiting for approval' }
   return page(c, { title: 'Settings', area: 'admin', active: 'settings' }, (
     <form method="post" action="/admin/settings" class="stack-lg">
       <h1>Settings</h1>

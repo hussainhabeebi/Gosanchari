@@ -13,6 +13,7 @@ export interface Permissions {
   approve_discounts: boolean
   manage_bookings: boolean
   approve_cancellations: boolean
+  approve_vouchers: boolean
   manage_properties: boolean
   view_property_contacts: boolean
   manage_rates: boolean
@@ -41,6 +42,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   approve_discounts: 'Approve discounts above the staff limit',
   manage_bookings: 'Manage bookings',
   approve_cancellations: 'Approve cancellations and date changes',
+  approve_vouchers: 'Approve booking confirmation vouchers',
   manage_properties: 'Add and edit properties',
   view_property_contacts: 'See and edit property contact details (contact person, numbers, email, account details)',
   manage_rates: 'Change rates and availability',
@@ -67,6 +69,7 @@ const none: Permissions = {
   approve_discounts: false,
   manage_bookings: false,
   approve_cancellations: false,
+  approve_vouchers: false,
   manage_properties: false,
   view_property_contacts: false,
   manage_rates: false,

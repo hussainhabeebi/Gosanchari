@@ -57,7 +57,7 @@ export interface Settings {
   whatsapp_templates: Record<'confirmation' | 'reminder' | 'quote' | 'followup' | 'otp' | 'checkin', string>
   owner_whatsapp: string
   email: { from: string; reply_to: string }
-  notifications: Record<'new_enquiry' | 'booking' | 'quote_accepted' | 'refund_request' | 'low_review' | 'daily_summary' | 'rate_expiry', Role[]>
+  notifications: Record<'new_enquiry' | 'booking' | 'quote_accepted' | 'refund_request' | 'low_review' | 'daily_summary' | 'rate_expiry' | 'voucher_request', Role[]>
   ai: {
     features: Record<AiFeature, boolean>
     assistant_welcome: string
@@ -106,6 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
     low_review: ['admin', 'manager'],
     daily_summary: ['admin'],
     rate_expiry: ['admin'],
+    voucher_request: ['admin'],
   },
   ai: {
     features: Object.fromEntries(Object.keys(AI_FEATURES).map((k) => [k, true])) as Record<AiFeature, boolean>,

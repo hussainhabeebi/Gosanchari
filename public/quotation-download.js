@@ -40,12 +40,12 @@
       });
       var code = (button.getAttribute('data-quote-code') || 'Quotation').replace(/[^A-Za-z0-9_-]/g, '_');
       return window.html2pdf().set({
-        filename: 'Quotation-' + code + '.pdf',
+        filename: ((button.dataset && button.dataset.filePrefix) || 'Quotation') + '-' + code + '.pdf',
         margin: 12,
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 1, windowWidth: 800, scrollX: 0, scrollY: 0, backgroundColor: '#ffffff' },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'h1', 'h2', 'h3', 'li', '.quote-brand', '.quote-meta', '.quote-notice', '.quote-property-heading', '.quote-stay', '.quote-price', '.pdf-policy-line'] }
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'h1', 'h2', 'h3', 'li', '.v-hero', '.v-brand', '.v-totals', '.v-remarks', '.quote-brand', '.quote-meta', '.quote-notice', '.quote-property-heading', '.quote-stay', '.quote-price', '.pdf-policy-line'] }
       }).from(exportContent).save();
     }).then(function () {
       status.textContent = 'PDF prepared. Check your browser downloads.';

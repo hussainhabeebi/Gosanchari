@@ -135,7 +135,7 @@
   $$('form').forEach(function (f) {
     f.addEventListener('submit', function (e) {
       var b = e.submitter
-      if (b && b.tagName === 'BUTTON' && f.method.toLowerCase() === 'post') setTimeout(function () { b.disabled = true }, 0)
+      if (b && b.tagName === 'BUTTON' && (f.getAttribute('method') || '').toLowerCase() === 'post') setTimeout(function () { b.disabled = true }, 0)
     })
   })
 

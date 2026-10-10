@@ -765,7 +765,7 @@ staffRoutes.get('/staff/profile', async (c) => {
     u.id, since, u.id, since, u.id, since, u.id, since,
   )
   const notify = parseJson<Record<string, boolean>>(me?.notify_settings, {})
-  const events: [string, string][] = [['new_enquiry', 'New enquiries'], ['booking', 'New bookings'], ['quote_accepted', 'Quotes accepted'], ['refund_request', 'Refund requests'], ['low_review', 'Low-rated reviews'], ['daily_summary', 'Daily summary'], ['rate_expiry', 'Season rates ending']]
+  const events: [string, string][] = [['new_enquiry', 'New enquiries'], ['booking', 'New bookings'], ['quote_accepted', 'Quotes accepted'], ['refund_request', 'Refund requests'], ['low_review', 'Low-rated reviews'], ['daily_summary', 'Daily summary'], ['rate_expiry', 'Season rates ending'], ['voucher_request', 'Vouchers to approve']]
   return page(c, { title: 'My profile', area: 'staff', active: 'profile' }, (
     <div class="stack-lg">
       <h1>My profile</h1>
