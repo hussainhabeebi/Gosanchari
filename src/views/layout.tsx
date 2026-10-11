@@ -124,6 +124,7 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'Dashboard', icon: 'dash', items: [{ key: 'admin', href: '/admin', label: 'Overview', perm: 'view_reports' }, { key: 'dashboard', href: '/staff', label: 'My day' }] },
   { label: 'AI assistant', icon: 'ai', items: [{ key: 'assistant', href: '/staff/assistant', label: 'AI assistant', perm: 'manage_quotes' }] },
   { label: 'Properties', icon: 'prop', items: [
+    { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
     { key: 'properties', href: '/admin/properties', label: 'All Properties', perm: 'manage_properties' },
     { key: 'prop_new', href: '/admin/properties/new', label: 'Add New Property', perm: 'manage_properties' },
     { key: 'prop_cats', href: '/admin/lists/property_type', label: 'Categories', perm: 'manage_properties' },
@@ -132,7 +133,6 @@ const NAV_GROUPS: NavGroup[] = [
     { key: 'rate-expiry', href: '/admin/rates/expiring', label: 'Expiring rates', perm: 'manage_rates' },
     { key: 'contacts', href: '/admin/contacts', label: 'Resort contacts', perm: 'view_property_contacts' },
     { key: 'rooms', href: '/staff/rooms', label: 'Rooms & photos' },
-    { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
   ] },
   { label: 'Enquiries', icon: 'enq', items: [
     { key: 'inbox', href: '/staff/enquiries', label: 'My enquiries', perm: 'manage_enquiries' },
