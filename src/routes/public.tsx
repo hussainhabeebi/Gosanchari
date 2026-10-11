@@ -312,6 +312,9 @@ publicRoutes.get('/stay/:slug', async (c) => {
   // Promote the existing exterior cover once; retain all other photo ordering.
   const facadeIndex = photos.findIndex((photo) => photo.category === 'facade')
   if (facadeIndex > 0) photos.unshift(...photos.splice(facadeIndex, 1))
+  // The chosen thumbnail always leads the gallery.
+  const thumbIndex = p.thumbnail_photo_id ? photos.findIndex((photo) => photo.id === p.thumbnail_photo_id) : -1
+  if (thumbIndex > 0) photos.unshift(...photos.splice(thumbIndex, 1))
   const videos = media.filter((m) => m.media_type === 'video')
   const mediaGroups = Object.keys(PHOTO_CATEGORIES).map((k) => [k, photos.filter((m) => m.category === k)] as const).filter(([k, list]) => list.length && k !== 'room')
   const din = readDining(p.dining)

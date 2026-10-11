@@ -116,7 +116,7 @@ The editor is split into sections. Sections 1–10 are filled in first; sections
 | 9 | SEO | Title and description (AI suggestions optional) |
 | 10 | Remarks | Internal notes for staff |
 | 11 | Room categories | Inventory (rooms of each type), guests/adults/children, bed, size, view, weekday/weekend/net rates, extra bed, inclusions, **room amenities** (AC, TV, kettle, balcony…) |
-| 12 | Photos & videos | Upload into sections: common areas, facade, **each room category**, pool, views, restaurant, activities. Videos are MP4/WebM files up to 90 MB, or YouTube/Vimeo links |
+| 12 | Photos & videos | Upload into sections: common areas, facade, **each room category**, pool, views, restaurant, activities. Videos are MP4/WebM files up to 90 MB, or YouTube/Vimeo links. **Thumbnail** (wizard Images & Media step): upload one or pick any photo; it becomes the main image on search results, the home page and the resort page (*Automatic* = exterior photo first) |
 | 13 | Tariff & seasons | One block per season (Onam, Christmas & New Year, summer…) with dates, minimum nights and a rate for each room category |
 
 ## Where each page lives

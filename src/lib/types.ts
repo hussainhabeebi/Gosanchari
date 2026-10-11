@@ -60,6 +60,8 @@ export interface PropertyRow {
   dining: string
   policies: string
   contact: string
+  /** Photo chosen as the property's thumbnail (main image); null = automatic. */
+  thumbnail_photo_id?: number | null
 }
 
 export interface RoomRow {

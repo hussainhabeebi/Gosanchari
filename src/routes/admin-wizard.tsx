@@ -310,16 +310,16 @@ wizardRoutes.post('/admin/properties/new', requirePerm('manage_properties'), asy
 const IMAGE = /^image\/(jpeg|png|webp)$/
 async function storePhotos(c: Context<AppEnv>, propertyId: number, files: File[], category: string, roomId: number | null) {
   let sort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', propertyId))?.m ?? 0
-  let n = 0
+  const ids: number[] = []
   for (const f of files.slice(0, 20)) {
     if (!IMAGE.test(f.type) || f.size > 10 * 1024 * 1024) continue
     const key = `properties/${propertyId}/${category}/${crypto.randomUUID()}.${f.type === 'image/jpeg' ? 'jpg' : f.type.split('/')[1]}`
     await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: f.type } })
     const pid = await insertId(c.env, "INSERT INTO property_photos (property_id, r2_key, sort, category, room_id, media_type) VALUES (?, ?, ?, ?, ?, 'image')", propertyId, key, ++sort, category, roomId)
     await enqueue(c.env, { type: 'photo_tags', photoId: pid })
-    n++
+    ids.push(pid)
   }
-  return n
+  return ids
 }
 
 // Scoped common-photo uploads do not save property fields or touch room photos.
@@ -358,6 +358,7 @@ wizardRoutes.post('/admin/properties/:id/common-photos/:photoId/remove', require
   if (!photo) return c.json({ error: 'Common photo not found.' }, 404)
   // Detach only this gallery record; retain its object so any other references remain safe.
   await run(c.env, 'DELETE FROM property_photos WHERE id = ? AND property_id = ? AND room_id IS NULL', photo.id, p.id)
+  await run(c.env, 'UPDATE properties SET thumbnail_photo_id = NULL WHERE id = ? AND thumbnail_photo_id = ?', p.id, photo.id)
   await afterPropertySave(c, p.id)
   return c.json({ ok: true })
 })
@@ -810,10 +811,12 @@ async function saveStep5(c: Context<AppEnv>, p: PropertyRow) {
 
 // ---------- Step 6: Images & media (per room category) ----------
 async function step6(c: Context<AppEnv>, p: PropertyRow) {
-  const [rooms, photos] = await Promise.all([
+  const [rooms, photos, images] = await Promise.all([
     all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY id', p.id),
     all<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND room_id IS NOT NULL AND media_type = 'image' ORDER BY sort, id", p.id),
+    all<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND media_type = 'image' AND r2_key != '' ORDER BY room_id IS NOT NULL, sort, id", p.id),
   ])
+  const thumb = images.find((x) => x.id === p.thumbnail_photo_id)
   if (!rooms.length) return redirectMsg(c, `/admin/properties/${p.id}/setup/2`, { err: 'Add a room category first.' })
   const done = await progress(c, p)
   const withPhotos = rooms.filter((r) => photos.some((x) => x.room_id === r.id))
@@ -843,6 +846,21 @@ async function step6(c: Context<AppEnv>, p: PropertyRow) {
   return page(c, { title: `Images · ${p.name}`, area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={6} done={done} icon={I.image} title="Images & Media" sub="Upload photos for each room category. You can add multiple images for each category.">
       <form method="post" action={`/admin/properties/${p.id}/setup/6`} enctype="multipart/form-data" class="stack wiz-form">
+        <div class="tint tint-blue" id="thumbnail">
+          <div class="tint-head">{I.image}<div><h3>Thumbnail (main photo)</h3><small class="muted">Shown first everywhere on the website — search results, home page and the resort page. Upload one, or pick from the photos already added.</small></div></div>
+          <div class="tint-body stack">
+            <div class="row wrap-row thumb-now">
+              {thumb ? <img src={mediaUrl(thumb.r2_key, 300)} alt="Current thumbnail" /> : <span class="muted small">No thumbnail chosen — the website uses the best exterior photo automatically.</span>}
+              <label class="btn btn-blue">{I.upload} Upload thumbnail<input type="file" name="thumb_file" accept="image/jpeg,image/png,image/webp" hidden data-autosubmit /></label>
+            </div>
+            {images.length > 0 && (
+              <div class="thumb-pick" role="radiogroup" aria-label="Choose the thumbnail">
+                <label class="thumb-opt thumb-auto"><input type="radio" name="thumbnail" value="auto" checked={!thumb} /><span>Automatic</span></label>
+                {images.map((x) => <label class="thumb-opt"><input type="radio" name="thumbnail" value={x.id} checked={x.id === thumb?.id} /><img src={mediaUrl(x.r2_key, 200)} alt={x.caption || 'Property photo'} loading="lazy" /></label>)}
+              </div>
+            )}
+          </div>
+        </div>
         <div id="img-blocks" class="stack">{blocks.map((r, i) => <Block i={String(i)} room={r} />)}</div>
         <template id="img-block-tpl"><Block i="__I__" /></template>
         <div class="wiz-nav">
@@ -861,9 +879,25 @@ async function saveStep6(c: Context<AppEnv>, p: PropertyRow): Promise<{ err?: st
     const ph = await first<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE id = ? AND property_id = ?', del, p.id)
     if (ph) {
       await run(c.env, 'DELETE FROM property_photos WHERE id = ?', ph.id)
+      await run(c.env, 'UPDATE properties SET thumbnail_photo_id = NULL WHERE id = ? AND thumbnail_photo_id = ?', p.id, ph.id)
       if (ph.r2_key) await c.env.MEDIA.delete(ph.r2_key).catch(() => {})
     }
     return { stay: true }
+  }
+  // Thumbnail: a new upload wins; otherwise the chosen photo (or automatic).
+  const thumbFile = body.thumb_file
+  let thumbChanged = false
+  if (thumbFile instanceof File && thumbFile.size > 0) {
+    const [id] = await storePhotos(c, p.id, [thumbFile], 'common', null)
+    if (!id) return { err: 'Thumbnail must be a JPG, PNG or WebP image up to 10 MB.', stay: true }
+    await run(c.env, 'UPDATE properties SET thumbnail_photo_id = ? WHERE id = ?', id, p.id)
+    thumbChanged = true
+  } else if (body.thumbnail != null) {
+    const pick = String(body.thumbnail)
+    const id = pick === 'auto' ? null : int(pick)
+    if (id === null || (await first(c.env, "SELECT 1 FROM property_photos WHERE id = ? AND property_id = ? AND media_type = 'image'", id, p.id))) {
+      if ((id ?? null) !== (p.thumbnail_photo_id ?? null)) { await run(c.env, 'UPDATE properties SET thumbnail_photo_id = ? WHERE id = ?', id, p.id); thumbChanged = true }
+    }
   }
   const idx = [...new Set(Object.keys(body).map((k) => k.match(/^ib(\d+)_room$/)?.[1]).filter((x): x is string => !!x))]
   let n = 0
@@ -872,9 +906,9 @@ async function saveStep6(c: Context<AppEnv>, p: PropertyRow): Promise<{ err?: st
     if (!rid || !(await first(c.env, 'SELECT 1 FROM rooms WHERE id = ? AND property_id = ?', rid, p.id))) continue
     const v = body[`ib${i}_files`]
     const files = (Array.isArray(v) ? v : [v]).filter((x): x is File => x instanceof File && x.size > 0)
-    n += await storePhotos(c, p.id, files, 'room', rid)
+    n += (await storePhotos(c, p.id, files, 'room', rid)).length
   }
-  if (n) await afterPropertySave(c, p.id)
+  if (n || thumbChanged) await afterPropertySave(c, p.id)
   return { stay: !body.go }
 }
 

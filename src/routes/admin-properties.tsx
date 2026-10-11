@@ -862,6 +862,7 @@ propertyEditorRoutes.post('/admin/photos/:id', requirePerm('manage_properties'),
   const f = await form(c)
   if (f.delete) {
     await run(c.env, 'DELETE FROM property_photos WHERE id = ?', ph.id)
+    await run(c.env, 'UPDATE properties SET thumbnail_photo_id = NULL WHERE id = ? AND thumbnail_photo_id = ?', ph.property_id, ph.id)
     if (ph.r2_key && !ph.r2_key.startsWith('http') && !ph.r2_key.startsWith('/')) await c.env.MEDIA.delete(ph.r2_key)
     await logActivity(c.env, c.get('user')!.id, 'photo.deleted', 'property', ph.property_id, { category: ph.category })
   } else {

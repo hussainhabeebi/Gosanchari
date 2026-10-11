@@ -230,8 +230,10 @@ export function videoEmbedUrl(url: string | null | undefined): string | null {
 }
 
 /** SQL for a property's cover image (images only; facade first). Use inside a query aliasing properties as `p`. */
-export const COVER_PHOTO_SQL = `(SELECT ph.r2_key FROM property_photos ph WHERE ph.property_id = p.id AND ph.media_type = 'image' AND ph.r2_key != ''
-  ORDER BY CASE ph.category WHEN 'facade' THEN 0 WHEN 'common' THEN 1 WHEN 'pool' THEN 2 WHEN 'view' THEN 3 WHEN 'room' THEN 4 ELSE 5 END, ph.sort, ph.id LIMIT 1)`
+/** Main image of property `p`: the chosen thumbnail, else the best photo (exterior first). */
+export const COVER_PHOTO_SQL = `COALESCE((SELECT th.r2_key FROM property_photos th WHERE th.id = p.thumbnail_photo_id AND th.property_id = p.id AND th.media_type = 'image' AND th.r2_key != ''),
+  (SELECT ph.r2_key FROM property_photos ph WHERE ph.property_id = p.id AND ph.media_type = 'image' AND ph.r2_key != ''
+  ORDER BY CASE ph.category WHEN 'facade' THEN 0 WHEN 'common' THEN 1 WHEN 'pool' THEN 2 WHEN 'view' THEN 3 WHEN 'room' THEN 4 ELSE 5 END, ph.sort, ph.id LIMIT 1))`
 
 /** Who a room's rate covers: "sleeps 3" or "2 guests incl., max 4 (+₹1,000/adult, ₹500/child per night)". */
 export function guestsText(r: { capacity: number; base_guests?: number | null; extra_adult_rate?: number | null; extra_child_rate?: number | null }) {

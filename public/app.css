@@ -1012,3 +1012,13 @@ code { overflow-wrap: anywhere; }
 .peak-by-room { margin-top: 8px; }
 .peak-by-room summary { cursor: pointer; font-weight: 600; font-size: .9rem; color: var(--green); }
 .peak-room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 8px; }
+
+/* Wizard images: property thumbnail */
+.thumb-now img { width: 180px; height: 120px; object-fit: cover; border-radius: 10px; border: 2px solid var(--green); }
+.thumb-pick { display: flex; flex-wrap: wrap; gap: 10px; }
+.thumb-opt { position: relative; cursor: pointer; border-radius: 10px; border: 2px solid transparent; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; width: 110px; height: 80px; background: #fff; }
+.thumb-opt img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-opt input { position: absolute; top: 6px; left: 6px; z-index: 1; }
+.thumb-opt:has(input:checked) { border-color: var(--green); box-shadow: 0 0 0 2px rgba(15, 94, 87, .25); }
+.thumb-auto { font-weight: 600; font-size: .85rem; border: 2px dashed var(--line); }
+.thumb-auto span { padding-left: 18px; }
