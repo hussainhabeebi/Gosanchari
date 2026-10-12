@@ -70,6 +70,7 @@ const STAFF_NAV: { key: string; href: string; label: string; perm?: keyof Permis
   { key: 'assistant', href: '/staff/assistant', label: 'AI assistant', perm: 'manage_quotes' },
   { key: 'inbox', href: '/staff/enquiries', label: 'Enquiries', perm: 'manage_enquiries' },
   { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
+  { key: 'rate-calculator', href: '/staff/rate-calculator', label: 'Rate Calculator', perm: 'manage_quotes' },
   { key: 'rooms', href: '/staff/rooms', label: 'Rooms & photos' },
   { key: 'quotes', href: '/staff/quotes', label: 'Quotations', perm: 'manage_quotes' },
   { key: 'bookings', href: '/staff/bookings', label: 'Bookings', perm: 'manage_bookings' },
@@ -90,6 +91,7 @@ const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permiss
   { key: 'offers', href: '/admin/offers', label: 'Offers & coupons', perm: 'manage_offers' },
   { key: 'all-enquiries', href: '/admin/enquiries', label: 'All enquiries', perm: 'view_all_enquiries' },
   { key: 'all-quotes', href: '/admin/quotes', label: 'All quotations', perm: 'approve_discounts' },
+  { key: 'rate-calculator', href: '/staff/rate-calculator', label: 'Rate Calculator', perm: 'manage_quotes' },
   { key: 'confirmation-requests', href: '/staff/confirmation-requests', label: 'Confirmation requests', perm: 'manage_quotes' },
   { key: 'all-bookings', href: '/admin/bookings', label: 'All bookings', perm: 'approve_cancellations' },
   { key: 'booking-approvals', href: '/admin/booking-approvals', label: 'Booking Approvals', perm: 'approve_vouchers' },
@@ -128,6 +130,7 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'AI assistant', icon: 'ai', items: [{ key: 'assistant', href: '/staff/assistant', label: 'AI assistant', perm: 'manage_quotes' }] },
   { label: 'Properties', icon: 'prop', items: [
     { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
+    { key: 'rate-calculator', href: '/staff/rate-calculator', label: 'Rate Calculator', perm: 'manage_quotes' },
     { key: 'properties', href: '/admin/properties', label: 'All Properties', perm: 'manage_properties' },
     { key: 'prop_new', href: '/admin/properties/new', label: 'Add New Property', perm: 'manage_properties' },
     { key: 'prop_cats', href: '/admin/lists/property_type', label: 'Categories', perm: 'manage_properties' },

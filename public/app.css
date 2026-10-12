@@ -1028,3 +1028,49 @@ code { overflow-wrap: anywhere; }
   .row.wrap-row.sticky-actions.quotation-primary-actions { flex-wrap: wrap; }
   .quotation-primary-actions .btn { flex: 1 1 auto; min-height: 44px; }
 }
+
+/* Staff/Admin estimate calculator only. Existing panel/button tokens are reused. */
+.calculator-form,.calculator-top,.calculator-dates,.calculator-details {min-width:0}
+.calculator-top {display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1.5fr) minmax(0,1.15fr) minmax(0,.7fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,1fr) auto;gap:10px 8px;align-items:end}
+.calculator-top .field-label {font-size:11px;min-height:2.3em;display:flex;align-items:end}
+.calculator-top input,.calculator-top select,.calculator-top .btn {min-width:0;max-width:100%;min-height:42px;font-size:12px;padding:9px 8px}
+.calculator-top .btn {white-space:normal}
+.calculator-property {grid-column:1;grid-row:1}.calculator-add {grid-column:3;grid-row:1}.calculator-extra {grid-column:5;grid-row:1}.calculator-kids {grid-column:6;grid-row:1}.calculator-discount {grid-column:7;grid-row:1}.calculator-additional {grid-column:8;grid-row:1}.calculator-top-submit {grid-column:9;grid-row:1}
+.calculator-room-list,.calculator-room:first-child,.calculator-room-placeholder {display:contents}
+.calculator-room-list:not(:empty)+.calculator-room-placeholder {display:none}
+.calculator-room:first-child>label:first-child,.calculator-room-placeholder>.field:first-child {grid-column:2;grid-row:1}
+.calculator-room:first-child>label:nth-child(2),.calculator-room-placeholder>.field:nth-child(2) {grid-column:4;grid-row:1}
+.calculator-room:first-child>button {grid-column:9;grid-row:2;justify-self:end;padding:4px 8px;min-height:32px}
+.calculator-room:first-child>[data-inventory] {grid-column:1/9;grid-row:2}
+.calculator-room:first-child>[data-kids-policy] {grid-column:1/-1;grid-row:3}
+.calculator-room label {display:grid;gap:6px;min-width:0}
+.calculator-room:not(:first-child) {grid-column:1/-1;display:grid;grid-template-columns:minmax(0,2fr) minmax(90px,1fr) auto;gap:8px;align-items:end;padding:10px;border:1px solid var(--line);border-radius:9px}
+.calculator-room [data-inventory],.calculator-room [data-kids-policy] {margin:0;font-size:12px;overflow-wrap:anywhere}
+.calculator-room:not(:first-child)>p {grid-column:1/-1}
+.calculator-room [data-kids-policy]:empty {display:none}
+.calculator-dates {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.calculator-table {max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;border:1px solid var(--line);border-radius:9px}
+.calculator-table:focus-visible {outline:2px solid var(--green-2);outline-offset:2px}
+.calculator-table table {width:100%;border-collapse:collapse;font-size:13px}
+.calculator-table th,.calculator-table td {padding:12px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+.calculator-table th {background:var(--green-soft);font-size:12px}
+.calculator-table th:first-child,.calculator-table td:first-child {text-align:left;white-space:normal;min-width:140px;overflow-wrap:anywhere}
+.calculator-components {font-size:13px;padding:10px 0}.calculator-components summary {cursor:pointer;color:var(--green);font-weight:600}.calculator-components>div {padding:10px 0;border-bottom:1px solid var(--line)}
+.calculator-summaries {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}
+.calculator-summary {padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--green-soft);min-width:0}
+.calculator-summary h3 {font-size:13px;margin:0 0 8px}.calculator-summary strong {font-size:24px;color:var(--green);overflow-wrap:anywhere}.calculator-summary p {margin:6px 0 0}
+.calculator-summary-direct {background:var(--sand)}.calculator-summary-staff {background:var(--green-soft)}
+.calculator-actions {display:flex;justify-content:flex-end;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:16px;flex-wrap:wrap}.calculator-actions [role=status] {margin-right:auto;font-size:13px}.calculator-actions .btn {min-height:44px}
+@media(max-width:1200px){
+ .calculator-top {grid-template-columns:repeat(4,minmax(0,1fr))}
+ .calculator-top>div:not(.calculator-room-list):not(.calculator-room-placeholder),.calculator-top>.btn,.calculator-room:first-child>label,.calculator-room-placeholder>.field,.calculator-room:first-child>button {grid-column:auto;grid-row:auto}
+ .calculator-room:first-child>p {grid-column:1/-1;grid-row:auto}
+ .calculator-top .field-label {min-height:2.3em}.calculator-dates {grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:600px){
+ .calculator-top,.calculator-dates {grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ .calculator-top input,.calculator-top select,.calculator-top .btn {min-height:44px;font-size:14px}
+ .calculator-top .calculator-property,.calculator-top .calculator-additional,.calculator-top .calculator-top-submit {grid-column:1/-1!important}
+ .calculator-room:not(:first-child) {grid-template-columns:minmax(0,1fr) 100px}.calculator-room:not(:first-child)>button {grid-column:1/-1;justify-self:end}
+ .calculator-actions [role=status] {flex-basis:100%}.calculator-actions .btn {flex:1}
+}
