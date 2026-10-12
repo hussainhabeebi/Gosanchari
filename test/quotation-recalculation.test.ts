@@ -138,15 +138,15 @@ describe('unsaved quotation recalculation', () => {
   });
 });
 
-const previewScript = readFileSync('public/app.js','utf8').split('// Unsaved Staff quotation price preview.')[1].split('\n').slice(1).join('\n');
+const previewScript = readFileSync('public/app.js','utf8').split('// Unsaved Staff quotation price preview.')[1].split('// Approval uses')[0].split('\n').slice(1).join('\n');
 function browserFixture() {
   const handlers: Record<string,(e:any)=>void> = {}, requests: any[] = [];
   let task: (()=>void)|null = null;
   const status={textContent:''}, table={rows:[] as any[],replaceChildren(){this.rows=[]},append(row:any){this.rows.push(row)}};
   const benchmarks={textContent:''}, hint={textContent:''}, discountError={textContent:'',hidden:true};
   const field={value:'400',setAttribute:vi.fn(),parentElement:{querySelector(){return hint}}};
-  const section={querySelector(s:string){return s==='[data-price-breakdown]'?table:s==='[data-price-benchmarks]'?benchmarks:s==='[data-discount-error]'?discountError:status}};
-  const form={dataset:{quoteRecalculate:'/staff/quotes/1/recalculate'},elements:{discount_1:field},querySelector(){return section},querySelectorAll(){return [status]},addEventListener(t:string,fn:any){handlers[t]=fn}};
+  const section={querySelectorAll(){return []},querySelector(s:string){return s==='[data-price-breakdown]'?table:s==='[data-price-benchmarks]'?benchmarks:s==='[data-discount-error]'?discountError:status}};
+  const form={dataset:{quoteRecalculate:'/staff/quotes/1/recalculate'},elements:{discount_1:field},querySelector(){return section},querySelectorAll(s:string){return s==='[data-price-status]'?[status]:[]},addEventListener(t:string,fn:any){handlers[t]=fn}};
   runInNewContext(previewScript,{document:{querySelector(){return form},createElement(){return {textContent:'',children:[] as any[],append(x:any){this.children.push(x)}}}},Intl,AbortController,FormData:class {},setTimeout(fn:any){task=fn;return 1},clearTimeout(){task=null},fetch(url:any,init:any){return new Promise(resolve=>requests.push({resolve,url,init}))}});
   const change=(name:string,type='number',event='input')=>handlers[event]({type:event,target:{name,type,tagName:type==='select'?'SELECT':'INPUT'}});
   const flush=()=>{const f=task;task=null;f?.()};

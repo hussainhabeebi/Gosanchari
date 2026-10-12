@@ -25,6 +25,8 @@
         });
       }));
       var exportContent = content.cloneNode(true);
+      // Keep voucher pagination measured at the same A4 layout on mobile and desktop.
+      if (button.getAttribute('data-file-prefix') === 'Booking-Confirmed' && exportContent.classList) exportContent.classList.add('v-pdf-export');
       // Individual policy lines can break between pages without slicing a line.
       exportContent.querySelectorAll('p[style*="pre-line"]').forEach(function (paragraph) {
         var lines = paragraph.textContent.split('\n');
@@ -45,7 +47,7 @@
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 1, windowWidth: 800, scrollX: 0, scrollY: 0, backgroundColor: '#ffffff' },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'h1', 'h2', 'h3', 'li', '.v-hero', '.v-brand', '.v-totals', '.v-remarks', '.quote-brand', '.quote-meta', '.quote-notice', '.quote-property-heading', '.quote-stay', '.quote-price', '.pdf-policy-line'] }
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'h1', 'h2', 'h3', 'li', '.v-hero', '.v-brand', '.v-totals', '.v-remarks', '.quote-brand', '.quote-meta', '.quote-notice', '.quote-property-heading', '.quote-stay', '.quote-price', '.pdf-policy-line', '.v-footer'] }
       }).from(exportContent).save();
     }).then(function () {
       status.textContent = 'PDF prepared. Check your browser downloads.';
@@ -56,4 +58,5 @@
       button.textContent = '⬇ Download PDF';
     });
   });
+  if (button.getAttribute('data-auto-download') === '1') button.click();
 })();

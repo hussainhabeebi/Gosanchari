@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, readdirSync } from 'node:fs'
 import { Hono } from 'hono'
 import { describe, expect, it, vi } from 'vitest'
+import { adminRoutes } from '../src/routes/admin'
 import { opsRoutes } from '../src/routes/staff-ops'
 import { publicRoutes } from '../src/routes/public'
 import { combinedQuotationPrice, quotationPrice, splitGuests } from '../src/lib/quotation-pricing'
@@ -73,7 +74,7 @@ function fixture() {
   const oid = Number(db.prepare("INSERT INTO quotation_options(quotation_id,property_id,room_id,check_in,check_out,adults,rooms_count,meal_plan,subtotal,taxes,total) VALUES(?,?,?,'2030-11-04','2030-11-06',2,1,'CP',6000,300,6300)").run(qid, pid, nonAcId).lastInsertRowid)
   const DB = { prepare(sql: string) { let args: any[] = []; const st = { bind(...v: any[]) { args = v; return st }, async all() { return { results: db.prepare(sql).all(...args) } }, async first() { return db.prepare(sql).get(...args) ?? null }, async run() { const r = db.prepare(sql).run(...args); return { meta: { last_row_id: Number(r.lastInsertRowid) } } } }; return st } }
   const env: any = { DB, KV: { async get() { return null }, async put() {}, async delete() {} }, JOBS: { async send() {} }, MEDIA: { put: vi.fn(async () => {}) }, SITE_URL: 'http://localhost', ENVIRONMENT: 'development' }
-  const app = new Hono<any>().use('*', async (c, next) => { c.set('user', { id: 1, name: 'Admin', role: 'admin', language: 'en' }); await next() }).route('/', opsRoutes)
+  const app = new Hono<any>().use('*', async (c, next) => { c.set('user', { id: 1, name: 'Admin', role: 'admin', language: 'en' }); await next() }).route('/', opsRoutes).route('/', adminRoutes)
   const publicApp = new Hono<any>().use('*', async (c, next) => { c.set('user', null); await next() }).route('/', publicRoutes)
   const url = 'http://localhost/staff/quotes/' + qid
   const form = (extra: [number, number, string?][] = [[acId, 2]]) => {
@@ -163,4 +164,107 @@ describe('combined room categories: quotation builder', () => {
     expect(decodeURIComponent((res.headers.get('location') ?? '').replace(/\+/g, ' '))).toContain('Standard AC is no longer available for 2 rooms')
     expect(f.db.prepare('SELECT COUNT(*) AS n FROM bookings WHERE quotation_id=?').get(f.qid)).toMatchObject({ n: 0 })
   })
+})
+
+describe('unique automatically priced room categories', () => {
+  it('rejects duplicate categories on preview and Save without writing', async () => {
+    const f=fixture(), before=JSON.stringify(f.read());
+    for(const extra of [[[f.nonAcId,2]],[[f.acId,1],[f.acId,1]]] as [number,number][][]){
+      const preview=await f.app.request(f.url+'/recalculate',{method:'POST',body:f.form(extra)},f.env)
+      expect(preview.status).toBe(422);expect(await preview.text()).toContain('only once')
+      expect((await f.app.request(f.url,{method:'POST',body:f.form(extra)},f.env)).status).toBe(422)
+      expect(JSON.stringify(f.read())).toBe(before)
+    }
+  })
+  it('ignores forged manual rates for added categories and resolves the configured rate',async()=>{
+    const f=fixture(), body=f.form([[f.acId,2,'1']]);
+    const preview=await(await f.app.request(f.url+'/recalculate',{method:'POST',body},f.env)).json() as any
+    expect(preview.options[0].rateLines[0]).toMatchObject({roomId:f.acId,label:'₹4,000'})
+    await f.app.request(f.url,{method:'POST',body},f.env)
+    expect(f.read().subtotal).toBe(40000);expect(JSON.parse(f.read().extra_rooms)[0].guest_rate).toBeNull()
+    expect(preview.options[0].total).toBe(f.read().total)
+    const html=await(await f.app.request(f.url,{},f.env)).text()
+    expect(html).toContain('data-extra-room-rate');expect(html).not.toContain(`name="xgrate_${f.oid}"`)
+  })
+  it('validates combined capacity for 4 + 3 rooms and 21 guests',async()=>{
+    const f=fixture();f.db.prepare('UPDATE rooms SET capacity=3 WHERE property_id=?').run(f.pid)
+    const body=f.form([[f.acId,3]]);body.set(`adults_${f.oid}`,'21')
+    const p=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body},f.env)).json() as any).options[0]
+    expect(p.errors).toEqual([]);expect(p.rows[0][0]).toContain('4 rooms');expect(p.rows[1][0]).toContain('3 rooms')
+    body.set(`adults_${f.oid}`,'22')
+    const over=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body},f.env)).json() as any).options[0]
+    expect(over.errors.join(' ')).toContain('21 guests')
+  })
+  it('blocks Save when an added category has no rate, without inventing a fallback',async()=>{
+    const f=fixture(),before=JSON.stringify(f.read());f.db.prepare('UPDATE rooms SET base_rate=0,staff_rate=NULL WHERE id=?').run(f.acId)
+    const p=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body:f.form()},f.env)).json() as any).options[0]
+    expect(p.errors.length).toBeGreaterThan(0);expect(p.rateLines[0].label).toContain('could not be resolved')
+    const r=await f.app.request(f.url,{method:'POST',body:f.form()},f.env);expect(r.headers.get('location')).toContain('err=')
+    expect(JSON.stringify(f.read())).toBe(before)
+  })
+})
+
+
+describe('quotation submission is not booking confirmation',()=>{
+ it('shows three primary actions and preserves standalone edit controls',async()=>{
+  const f=fixture(),html=await(await f.app.request(f.url,{},f.env)).text()
+  const actions=html.split('sticky-actions')[1].split('</div>')[0]
+  for(const label of ['Save to Draft','Download','Send to Approval'])expect(actions).toContain(label)
+  expect(actions).not.toContain('Save & send');expect(actions).not.toContain('Save & email')
+ })
+ it('submits and approves a quotation once without creating any confirmation or payment',async()=>{
+  const f=fixture();const tables=['bookings','payments','booking_vouchers','quotation_confirmation_requests']
+  const counts=()=>tables.map(t=>f.db.prepare('SELECT COUNT(*) AS n FROM '+t).get().n)
+  const before=counts();await f.app.request(f.url+'/request-approval',{method:'POST',body:f.form()},f.env)
+  expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('pending_approval')
+  await f.app.request(f.url+'/request-approval',{method:'POST',body:f.form()},f.env)
+  expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.approval_requested'").get().n).toBe(1)
+  await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at})},f.env)
+  expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('draft')
+  await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at})},f.env)
+  expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.discount_approved'").get().n).toBe(1)
+  expect(counts()).toEqual(before)
+ })
+ it('Download saves edited amounts as draft and opens the existing quotation PDF, never a voucher',async()=>{
+  const f=fixture(),body=f.form();body.set(`kids_${f.oid}`,'400')
+  const response=await f.app.request(f.url+'/download',{method:'POST',body},f.env)
+  expect(response.headers.get('location')).toBe(`/staff/quotes/${f.qid}/print?download=1`)
+  expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('draft')
+  const html=await(await f.app.request(f.url+'/print?download=1',{},f.env)).text()
+  expect(html).toContain('data-auto-download="1"');expect(html).toContain('Please note this is not a confirmation voucher')
+  expect(html).toContain('Balance amount to be paid at the hotel at check-in time.');expect(html).not.toContain('BOOKING CONFIRMED')
+ })
+ it('resolves the added category’s season, weekend and peak rates and keeps categories independent',async()=>{
+  const f=fixture();f.db.prepare("INSERT INTO season_rates(property_id,room_id,name,kind,start_date,end_date,rate,weekend_rate,staff_rate,staff_weekend_rate,meal_plan) VALUES(?,?,'Season','season','2030-11-01','2030-11-30',7000,8000,3500,4000,'CP')").run(f.pid,f.acId)
+  f.db.prepare("INSERT INTO season_rates(property_id,room_id,name,kind,start_date,end_date,supplement) VALUES(?,NULL,'Peak','special','2030-11-02','2030-11-02',1000)").run(f.pid)
+  const body=f.form();body.set(`in_${f.oid}`,'2030-11-01');body.set(`out_${f.oid}`,'2030-11-04')
+  const p=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body},f.env)).json() as any).options[0]
+  expect(p.errors).toEqual([]);expect(p.rateLines[0].label).not.toContain('could not')
+  await f.app.request(f.url,{method:'POST',body},f.env);expect(p.total).toBe(f.read().total)
+  body.set(`in_${f.oid}`,'2030-12-04');body.set(`out_${f.oid}`,'2030-12-06')
+  const base=(await(await f.app.request(f.url+'/recalculate',{method:'POST',body},f.env)).json() as any).options[0]
+  expect(base.rateLines[0].label).toBe('₹4,000')
+ })
+})
+
+it('permits the same categories in separate alternatives without leaking B2B rates to Staff',async()=>{
+ const f=fixture();const second=Number(f.db.prepare('INSERT INTO quotation_options(quotation_id,property_id,room_id,check_in,check_out,adults,rooms_count,meal_plan) SELECT quotation_id,property_id,room_id,check_in,check_out,adults,rooms_count,meal_plan FROM quotation_options WHERE id=?').run(f.oid).lastInsertRowid)
+ const body=f.form();body.append('opt_id',String(second));for(const [key,value] of f.form()){if(key.endsWith('_'+f.oid))body.append(key.slice(0,-String(f.oid).length)+second,value)}
+ const staff=new Hono<any>().use('*',async(c,next)=>{c.set('user',{id:1,name:'Staff',role:'sales',language:'en'});await next()}).route('/',opsRoutes)
+ const response=await staff.request(f.url+'/recalculate',{method:'POST',body},f.env);expect(response.status).toBe(200)
+ const data=await response.json() as any;expect(data.options).toHaveLength(2);expect(JSON.stringify(data)).not.toMatch(/B2B|Net for|internal|net_rate/)
+ expect(data.options[0].rateLines).toEqual(data.options[1].rateLines)
+})
+
+it('records Admin quotation edits and rejects approval from an older reviewed version',async()=>{
+ const f=fixture();await f.app.request(f.url+'/request-approval',{method:'POST',body:f.form()},f.env)
+ const old=f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at
+ const edit=f.form();edit.set(`kids_${f.oid}`,'500');await f.app.request(f.url,{method:'POST',body:edit},f.env)
+ expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('pending_approval')
+ expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.admin_edited'").get().n).toBe(1)
+ await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:old})},f.env)
+ expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('pending_approval')
+ const current=f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at
+ await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:current})},f.env)
+ expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('draft')
 })

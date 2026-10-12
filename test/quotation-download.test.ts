@@ -6,9 +6,9 @@ import { describe, it, expect } from 'vitest'
 
 const script=readFileSync('public/quotation-download.js','utf8')
 const settle=()=>new Promise(resolve=>setTimeout(resolve,0))
-function fixture(fail=false,missing=false,images:any[]=[]){
+function fixture(fail=false,missing=false,images:any[]=[],auto=false){
   let click:()=>void=()=>{},options:any,source:any,saves=0,resolve:()=>void=()=>{}
-  const button={disabled:false,textContent:'⬇ Download PDF',getAttribute:()=> 'GS-QT-8GNW63',addEventListener:(_:string,fn:()=>void)=>{click=fn}}
+  const button={disabled:false,textContent:'⬇ Download PDF',getAttribute:(key:string)=>key==='data-auto-download'?(auto?'1':'0'):'GS-QT-8GNW63',click:()=>click(),addEventListener:(_:string,fn:()=>void)=>{click=fn}}
   const clone={querySelectorAll:()=>[]};const content={scrollHeight:1000,querySelectorAll:()=>images,cloneNode:()=>clone},status={textContent:''}
   const exporter={set(o:any){options=o;return this},from(el:any){source=el;return this},save(){saves++;return fail?Promise.reject(Error('failed')):new Promise<void>(r=>{resolve=r})}}
   runInNewContext(script,{document:{querySelector:(s:string)=>s==='[data-download-quote]'?button:s==='[data-quote-export]'?content:status},window:{html2pdf:missing?undefined:()=>exporter,print(){throw Error('Download must not print')}},Promise})
@@ -41,3 +41,9 @@ it('keeps quotation information and saved pricing while applying compact brand f
  for(const label of ['Please note this is not a confirmation voucher','Voucher not issued by this quotation','Travel quotation','Customer:','Quotation date:','Quotation number:','Valid till:','Stay details','Property amenities','Selected-room amenities','Price breakdown','Room charges','Discount','Total','Included','Not included','Payment Terms &amp; Conditions','Accept online:'])expect(route).toContain(label);
  expect(route).toContain('--quote-navy:#14213d');expect(route).toContain('--quote-teal:#0f5e57');expect(route).toContain('--quote-red:#b42318');expect(route).toContain('grid-template-columns:minmax(0,1fr) minmax(0,1fr)');expect(route).toContain('overflow-wrap:anywhere');expect(route).toContain('labels[i + 1]');expect(route).not.toContain('calculatePrice(');expect(route).not.toContain('quotationPrice(');
 });
+
+
+it('starts the same PDF export for the explicit Download action only',async()=>{
+ const normal=fixture();await settle();expect(normal.saves()).toBe(0)
+ const download=fixture(false,false,[],true);await settle();expect(download.saves()).toBe(1);expect(download.options().filename).toBe('Quotation-GS-QT-8GNW63.pdf');download.finish();await settle();expect(download.button.disabled).toBe(false)
+})

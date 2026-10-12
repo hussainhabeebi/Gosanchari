@@ -6,7 +6,7 @@ import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { Empty, Field, Pill, Table, Tabs } from '../views/components'
 import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
-import { all, enqueue, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
+import { all, enqueue, first, insertId, logActivity, notifyStaff } from '../lib/db'
 import { voucherData, voucherHtml, type VoucherData } from '../lib/vouchers'
 import { fmtDate, fmtDateTime, int, money, nowIso, parseJson, refCode, str } from '../lib/util'
 import { form, redirectMsg } from './helpers'
@@ -46,8 +46,8 @@ async function canView(c: Context<AppEnv>, v: VoucherRow) {
 voucherRoutes.post('/staff/bookings/:id/voucher', requirePerm('manage_bookings'), async (c) => {
   const u = c.get('user')!
   const id = int(c.req.param('id'))
-  const b = await first<{ id: number; code: string; status: string; amount_paid: number; guest_name: string; children: number }>(c.env, 'SELECT id, code, status, amount_paid, guest_name, children FROM bookings WHERE id = ?', id)
-  if (!b) return c.notFound()
+  const b = await first<{ id: number; code: string; status: string; amount_paid: number; guest_name: string; children: number; staff_id:number|null }>(c.env, 'SELECT id, code, status, amount_paid, guest_name, children, staff_id FROM bookings WHERE id = ?', id)
+  if (!b || (b.staff_id !== u.id && !(await permissionsFor(c.env,u.role)).view_all_enquiries)) return c.notFound()
   const back = `/staff/bookings/${b.id}`
   if (b.status === 'cancelled') return redirectMsg(c, back, { err: 'This booking is cancelled.' })
   if (b.amount_paid <= 0) return redirectMsg(c, back, { err: 'Record the guest’s advance payment first, then send the voucher for approval.' })
@@ -56,7 +56,7 @@ voucherRoutes.post('/staff/bookings/:id/voucher', requirePerm('manage_bookings')
   const kidsAges = str(f.kids_ages, 120)
   if (b.children > 0 && !kidsAges) return redirectMsg(c, back, { err: 'Enter the kids’ ages for the voucher.' })
   const code = refCode('VC')
-  await insertId(c.env, 'INSERT INTO booking_vouchers (code, booking_id, kids_ages, staff_remarks, requested_by) VALUES (?, ?, ?, ?, ?)', code, b.id, kidsAges, str(f.remarks, 1000), u.id)
+  await insertId(c.env, "INSERT INTO booking_vouchers (code, booking_id, kids_ages, staff_remarks, requested_by) SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM booking_vouchers WHERE booking_id=? AND status='pending')", code, b.id, kidsAges, str(f.remarks, 1000), u.id, b.id)
   await logActivity(c.env, u.id, 'voucher.requested', 'booking', b.id, { voucher: code })
   await notifyStaff(c.env, 'voucher_request', `Voucher ${code} for booking ${b.code} (${b.guest_name}) is waiting for approval: ${c.env.SITE_URL}/admin/vouchers`)
   return redirectMsg(c, back, { ok: `Voucher ${code} sent to admin for approval. The approved voucher will appear under My vouchers.` })
@@ -113,7 +113,7 @@ voucherRoutes.get('/admin/vouchers', requirePerm('approve_vouchers'), async (c) 
             <div class="grid grid-2">
               <form method="post" action={`/admin/vouchers/${v.id}/approve`} class="stack">
                 <Field label="Admin remarks (shown on the voucher)"><textarea name="admin_remarks" rows={2} maxlength={1000}></textarea></Field>
-                <button class="btn btn-sm">Approve — issue “Booking Confirmed”</button>
+                <label><input type="checkbox" name="payment_verified" value="1" required/> I verified the advance and payable amount.</label><label><input type="checkbox" name="availability_verified" value="1" required/> I verified availability with the resort.</label><button class="btn btn-sm">Approve — issue “Booking Confirmed”</button>
               </form>
               <form method="post" action={`/admin/vouchers/${v.id}/reject`} class="stack">
                 <Field label="Reason for sending back"><textarea name="reason" rows={2} maxlength={500} required></textarea></Field>
@@ -142,16 +142,19 @@ async function tellRequester(c: Context<AppEnv>, userId: number | null, text: st
 
 voucherRoutes.post('/admin/vouchers/:id/approve', requirePerm('approve_vouchers'), async (c) => {
   const u = c.get('user')!
+  if (u.role !== 'admin') return c.text('Admin approval required.',403)
   const v = await pendingVoucher(c)
   if (!v) return redirectMsg(c, '/admin/vouchers', { err: 'This voucher is no longer waiting for approval.' })
-  const b = await first<{ status: string; amount_paid: number }>(c.env, 'SELECT status, amount_paid FROM bookings WHERE id = ?', v.booking_id)
+  const b = await first<{ status: string; amount_paid: number; total:number }>(c.env, 'SELECT status, amount_paid, total FROM bookings WHERE id = ?', v.booking_id)
   if (!b || b.status === 'cancelled') return redirectMsg(c, '/admin/vouchers', { err: `Booking ${v.booking_code} is cancelled — send the voucher back instead.` })
   const f = await form(c)
+  if(f.payment_verified !== '1' || f.availability_verified !== '1' || !b || b.amount_paid <= 0 || b.amount_paid > b.total) return redirectMsg(c,'/admin/vouchers',{err:'Verify the advance, payable amount and resort availability before approval.'})
   const adminRemarks = str(f.admin_remarks, 1000)
   const data = await voucherData(c.env, v.booking_id, { kids_ages: v.kids_ages, staff_remarks: v.staff_remarks, admin_remarks: adminRemarks })
   if (!data) return redirectMsg(c, '/admin/vouchers', { err: 'Booking not found.' })
   // Only one decision wins if two admins click at the same time.
-  await run(c.env, "UPDATE booking_vouchers SET status = 'approved', admin_remarks = ?, snapshot = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = 'pending'", adminRemarks, JSON.stringify(data), u.id, nowIso(), v.id)
+  const won = await c.env.DB.prepare("UPDATE booking_vouchers SET status='approved',admin_remarks=?,snapshot=?,decided_by=?,decided_at=? WHERE id=? AND status='pending' RETURNING id").bind(adminRemarks,JSON.stringify({...data,payment_verified:true}),u.id,nowIso(),v.id).first()
+  if(!won) return redirectMsg(c,'/admin/vouchers',{err:'Another Admin already decided this request.'})
   await logActivity(c.env, u.id, 'voucher.approved', 'booking', v.booking_id, { voucher: v.code })
   await tellRequester(c, v.requested_by, `Voucher ${v.code} for ${v.guest_name} (booking ${v.booking_code}) is approved — Booking Confirmed. Open it: ${c.env.SITE_URL}/vouchers/${v.id}`)
   return redirectMsg(c, '/admin/vouchers', { ok: `Voucher ${v.code} approved. ${v.guest_name}’s booking is confirmed and the voucher is in the staff member’s My vouchers.` })
@@ -159,12 +162,14 @@ voucherRoutes.post('/admin/vouchers/:id/approve', requirePerm('approve_vouchers'
 
 voucherRoutes.post('/admin/vouchers/:id/reject', requirePerm('approve_vouchers'), async (c) => {
   const u = c.get('user')!
+  if (u.role !== 'admin') return c.text('Admin approval required.',403)
   const v = await pendingVoucher(c)
   if (!v) return redirectMsg(c, '/admin/vouchers', { err: 'This voucher is no longer waiting for approval.' })
   const f = await form(c)
   const reason = str(f.reason, 500)
   if (!reason) return redirectMsg(c, '/admin/vouchers', { err: 'Give a reason so the staff member knows what to fix.' })
-  await run(c.env, "UPDATE booking_vouchers SET status = 'rejected', reject_reason = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = 'pending'", reason, u.id, nowIso(), v.id)
+  const won = await c.env.DB.prepare("UPDATE booking_vouchers SET status='rejected',reject_reason=?,decided_by=?,decided_at=? WHERE id=? AND status='pending' RETURNING id").bind(reason,u.id,nowIso(),v.id).first()
+  if(!won) return redirectMsg(c,'/admin/vouchers',{err:'Another Admin already decided this request.'})
   await logActivity(c.env, u.id, 'voucher.rejected', 'booking', v.booking_id, { voucher: v.code, reason })
   await tellRequester(c, v.requested_by, `Voucher ${v.code} for ${v.guest_name} (booking ${v.booking_code}) was sent back: ${reason}`)
   return redirectMsg(c, '/admin/vouchers', { ok: `Voucher ${v.code} sent back to staff.` })

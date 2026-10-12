@@ -19,6 +19,7 @@ import { applyTaxonomy } from './lib/taxonomy'
 import { assistantRoutes } from './routes/staff-assistant'
 import { adminRoutes } from './routes/admin'
 import { contactRoutes } from './routes/admin-contacts'
+import { confirmationRoutes } from './routes/confirmation-requests'
 import { voucherRoutes } from './routes/vouchers'
 import { propertyEditorRoutes } from './routes/admin-properties'
 import { wizardRoutes } from './routes/admin-wizard'
@@ -94,6 +95,7 @@ app.route('/', wizardRoutes)
 app.route('/', propertyEditorRoutes)
 app.route('/', adminRoutes)
 app.route('/', contactRoutes)
+app.route('/', confirmationRoutes)
 app.route('/', voucherRoutes)
 app.route('/', admin2Routes)
 app.route('/', publicRoutes)

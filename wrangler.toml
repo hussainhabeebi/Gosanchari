@@ -18,9 +18,10 @@ TURNSTILE_SITE_KEY = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "gosanchari"
+database_id = "04eb5123-059a-45fb-ae10-6541ad1ae92a"
 migrations_dir = "migrations"
 
-# No IDs needed: `wrangler deploy` finds or creates these resources by name.
+# Deployment resolves and pins the existing KV ID; missing resources stop deployment.
 [[kv_namespaces]]
 binding = "KV"
 

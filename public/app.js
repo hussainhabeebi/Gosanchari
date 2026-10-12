@@ -5,6 +5,18 @@
   document.querySelectorAll('[data-extra-rooms]').forEach(function (box) {
     var list = box.querySelector('[data-extra-room-list]'), tpl = box.querySelector('[data-extra-room-template]')
     var add = box.querySelector('[data-add-extra-room]')
+    function selections() {
+      var form = box.closest('form'), primary = form && form.elements['room_' + box.dataset.extraRooms]
+      var selects = [primary].concat(Array.from(list.querySelectorAll('select'))).filter(Boolean)
+      var selected = selects.map(function (select) { return select.value })
+      selects.forEach(function (select) { Array.from(select.options).forEach(function (option) {
+        option.disabled = option.value !== select.value && selected.indexOf(option.value) !== -1
+      }) })
+      if (add && primary) add.disabled = !Array.from(primary.options).some(function (option) { return selected.indexOf(option.value) === -1 })
+    }
+    var ownerForm = box.closest('form')
+    if (ownerForm) ownerForm.addEventListener('change', selections)
+    selections()
     // Re-price through the option's own room field (the price preview listens for its change).
     function reprice() {
       var room = box.closest('form') && box.closest('form').elements['room_' + box.dataset.extraRooms]
@@ -12,15 +24,19 @@
     }
     if (add && tpl) add.addEventListener('click', function () {
       var row = tpl.content.firstElementChild.cloneNode(true)
+      var used = [ownerForm.elements['room_' + box.dataset.extraRooms].value].concat(Array.from(list.querySelectorAll('select')).map(function (select) { return select.value }))
+      var first = row.querySelector('select'), available = Array.from(first.options).find(function (option) { return used.indexOf(option.value) === -1 })
+      if (!available) return
+      first.value = available.value
       list.appendChild(row)
-      var first = row.querySelector('select'); if (first) first.focus()
+      selections(); first.focus()
       reprice()
     })
     box.addEventListener('click', function (event) {
       var del = event.target.closest('[data-del-extra-room]')
       if (!del) return
       del.closest('[data-extra-room]').remove()
-      reprice()
+      selections(); reprice()
     })
   })
 })();
@@ -1139,6 +1155,12 @@
           row.forEach(function (text) { var td = document.createElement('td'); td.textContent = text; tr.append(td); });
           table.append(tr);
         });
+        var roomSummary = section.querySelector('[data-combined-room-summary]');
+        if (roomSummary && option.roomSummary) roomSummary.textContent = option.roomSummary;
+        section.querySelectorAll('[data-extra-room]').forEach(function (row, k) {
+          var rate = row.querySelector('[data-extra-room-rate]'), line = option.rateLines && option.rateLines[k];
+          if (rate) rate.textContent = line ? line.label : 'Rate could not be resolved.';
+        });
         var benchmarks = section.querySelector('[data-price-benchmarks]');
         benchmarks.textContent = option.benchmarks.join(' · ');
         var discount = form.elements['discount_' + option.id];
@@ -1151,7 +1173,7 @@
         section.querySelector('[data-price-status]').textContent = option.errors.length ? option.errors.join(' ') : 'Price updated. Save to retain your changes.';
       });
     } catch (error) {
-      if (version === revision && error.name !== 'AbortError') status(error.message || 'Could not update price. Please try again.');
+      if (version === revision && error.name !== 'AbortError') { status(error.message || 'Could not update price. Please try again.'); form.querySelectorAll('[data-extra-room-rate]').forEach(function (rate) { rate.textContent = 'Rate could not be resolved.'; }); }
     }
   }
   function changed(event) {
@@ -1161,10 +1183,19 @@
     clearTimeout(timer);
     if (controller) controller.abort();
     status('Updating price…');
+    form.querySelectorAll('[data-extra-room-rate]').forEach(function (rate) { rate.textContent = 'Resolving rate…'; });
     var version = revision;
     if (event.type === 'change' && (field.tagName === 'SELECT' || field.type === 'checkbox' || field.type === 'date')) update(version);
     else timer = setTimeout(function () { update(version); }, 300);
   }
   form.addEventListener('input', changed);
   form.addEventListener('change', changed);
+})();
+
+// Approval uses the saved revision, never unsaved edits from the adjacent form.
+(function () {
+  var edit = document.querySelector('[data-confirmation-edit]') || document.querySelector('[data-quotation-admin-edit]');
+  var approve = document.querySelector('[data-confirmation-approve]') || document.querySelector('[data-quotation-approve]');
+  if (!edit || !approve) return;
+  edit.addEventListener('input', function () { approve.disabled = true; approve.textContent = 'Save Admin edits before approving'; });
 })();

@@ -60,7 +60,7 @@ describe('Booking confirmation voucher', () => {
     expect(preview).toContain('PREVIEW — waiting for admin approval')
     expect(preview).toContain('Awaiting admin approval')
 
-    const ok = await f.location(await f.post(f.admin, `/admin/vouchers/${vid}/approve`, { admin_remarks: 'Early check-in confirmed by resort' }))
+    const ok = await f.location(await f.post(f.admin, `/admin/vouchers/${vid}/approve`, { admin_remarks: 'Early check-in confirmed by resort', payment_verified:'1', availability_verified:'1' }))
     expect(ok).toContain('approved')
     expect(f.sent.some((m) => m.type === 'whatsapp' && /is approved — Booking Confirmed/.test(m.text))).toBe(true)
 
@@ -68,10 +68,10 @@ describe('Booking confirmation voucher', () => {
     expect(mine).toContain('Open voucher')
     const html = await (await f.sales.request(`http://localhost/vouchers/${vid}`, {}, f.env)).text()
     expect(html).not.toContain('PREVIEW')
-    for (const text of ['<h1>Booking Confirmed</h1>', 'Booking Status: Confirmed', 'Anu Thomas', '+91 98470 55555', 'No. of Adults</th><td>2', 'No. of Kids</th><td>2', 'Kids Age</th><td>4, 9',
-      'Ice Hills Resort', '+91 94470 11111 / +91 94470 22222', 'Location</th><td>Chinnakanal, Munnar<', '24 Dec 2030', '26 Dec 2030', 'Standard AC × 1', '<li>Pool</li>', '<li>Wi-Fi</li>',
-      'UPI', 'UTR123', 'Total Room Rent</td><td class="r">₹16,800', 'Advance Paid</td><td class="r">₹6,000', 'Balance Amount</td><td class="r">₹10,800',
-      'balance amount is to be paid at the resort at the time of check-in', 'Honeymoon cake on arrival', 'Early check-in confirmed by resort', '<strong>Go Sanchari</strong>']) expect(html).toContain(text)
+    for (const text of ['<h1>BOOKING CONFIRMED</h1>', 'Booking Status: Confirmed', 'Anu Thomas', '+91 98470 55555', 'No. of Adults</th><td>2', 'No. of Kids</th><td>2', 'Kids Age</th><td>4, 9',
+      'Ice Hills Resort', '+91 94470 11111 / +91 94470 22222', 'Location</th><td>Chinnakanal, Munnar<', '24 Dec 2030', '26 Dec 2030', 'Standard AC × 1', '<span>Pool</span>', '<span>Wi-Fi</span>',
+      'UPI', 'UTR123', 'Full Booking Total</td><td class="r">₹16,800', 'Advance Paid</td><td class="r">₹6,000', 'Balance Amount</td><td class="r">₹10,800',
+      'Balance amount to be paid at the hotel at check-in time.', 'Honeymoon cake on arrival', 'Early check-in confirmed by resort', '<strong>Go Sanchari</strong>']) expect(html).toContain(text)
     expect(html.indexOf('Remarks')).toBeLessThan(html.indexOf('class="v-footer"'))
   })
 
@@ -80,7 +80,7 @@ describe('Booking confirmation voucher', () => {
     f.pay(6000)
     await f.post(f.sales, `/staff/bookings/${f.bid}/voucher`, { kids_ages: '4, 9' })
     const vid = (f.db.prepare('SELECT id FROM booking_vouchers').get() as any).id
-    await f.post(f.admin, `/admin/vouchers/${vid}/approve`)
+    await f.post(f.admin, `/admin/vouchers/${vid}/approve`, {payment_verified:'1', availability_verified:'1'})
     f.pay(10800, 'UTR999')
     const html = await (await f.sales.request(`http://localhost/vouchers/${vid}`, {}, f.env)).text()
     expect(html).toContain('Balance Amount</td><td class="r">₹10,800')
@@ -100,7 +100,7 @@ describe('Booking confirmation voucher', () => {
     const page = await (await f.sales.request(`http://localhost/staff/bookings/${f.bid}`, {}, f.env)).text()
     expect(page).toContain('sent back: Kids ages do not match the ID copies')
     expect(page).toContain('Send voucher for admin approval') // can fix and resend
-    expect(await f.location(await f.post(f.admin, `/admin/vouchers/${vid}/approve`))).toContain('no longer waiting')
+    expect(await f.location(await f.post(f.admin, `/admin/vouchers/${vid}/approve`, {payment_verified:'1', availability_verified:'1'}))).toContain('no longer waiting')
   })
 })
 
@@ -115,4 +115,22 @@ describe('voucher layout', () => {
     expect(html).toContain('from 2:00 PM')
     expect(html).not.toContain('<h2>Remarks</h2>')
   })
+})
+
+describe('legacy voucher approval safety',()=>{
+ it('does not issue confirmed PDFs for pending/rejected previews and requires explicit Admin verification',async()=>{
+  const f=fixture();try{
+   f.pay(6000)
+   expect((await f.post(f.other,`/staff/bookings/${f.bid}/voucher`,{kids_ages:'4,9'})).status).toBe(404)
+   await f.post(f.sales,`/staff/bookings/${f.bid}/voucher`,{kids_ages:'4,9'})
+   const id=(f.db.prepare('SELECT id FROM booking_vouchers').get() as any).id
+   const html=await(await f.sales.request(`http://localhost/vouchers/${id}`,{},f.env)).text()
+   expect(html).not.toContain('<h1>BOOKING CONFIRMED</h1>');expect(html).not.toContain('data-download-quote data-quote-code')
+   await f.post(f.admin,`/admin/vouchers/${id}/approve`)
+   expect((f.db.prepare('SELECT status FROM booking_vouchers').get() as any).status).toBe('pending')
+   f.db.prepare('UPDATE bookings SET amount_paid=total+1 WHERE id=?').run(f.bid)
+   await f.post(f.admin,`/admin/vouchers/${id}/approve`,{payment_verified:'1',availability_verified:'1'})
+   expect((f.db.prepare('SELECT status FROM booking_vouchers').get() as any).status).toBe('pending')
+  }finally{f.db.close()}
+ })
 })

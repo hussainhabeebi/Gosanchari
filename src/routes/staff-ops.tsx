@@ -156,7 +156,7 @@ opsRoutes.get('/staff/finder/compare', requirePerm('manage_quotes'), async (c) =
 })
 
 // ---------- 23. Quotation builder ----------
-async function loadQuoteFor(c: Context<AppEnv>, id: number) {
+export async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   const u = c.get('user')!
   const perms = await permissionsFor(c.env, u.role)
   const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE id = ?', id)
@@ -181,7 +181,12 @@ async function priceOption(c: Context<AppEnv>, o: { room_id: number; check_in: s
   const guests = splitGuests(lines.map(l => ({ capacity: l.room.capacity, base_guests: l.room.base_guests, rooms: l.roomsCount })), o.adults ?? 2, o.children ?? 0)
   const inputs = lines.map((l, i) => ({ ...l, checkIn: o.check_in, checkOut: o.check_out, taxSlabs: s.tax_slabs, adults: guests[i].adults, children: guests[i].children, mealPlan: o.meal_plan }))
   const roomCharges = inputs.reduce((a, l) => a + calculatePrice({ ...l, adults: undefined, children: undefined }).roomCharges, 0)
-  return combinedQuotationPrice(inputs, { discountAmount: o.discount ?? Math.round(roomCharges * o.discount_pct / 100), applyGst: o.apply_gst !== 0, extraCharges: o.extra_charges })
+  const price = combinedQuotationPrice(inputs, { discountAmount: o.discount ?? Math.round(roomCharges * o.discount_pct / 100), applyGst: o.apply_gst !== 0, extraCharges: o.extra_charges })
+  if (lines.length > 1 && price.extraGuests && (o.adults ?? 2) + (o.children ?? 0) > price.extraGuests.max) {
+    price.errors = price.errors.filter(error => !error.includes('sleep at most'))
+    price.errors.push(`Selected room categories accommodate at most ${price.extraGuests.max} guests. Please add rooms or choose another category.`)
+  }
+  return price
 }
 
 /** Presentation only: the existing server result supplies the floor and allowance. */
@@ -223,11 +228,11 @@ function effectiveNightly(o: Pick<QuoteOptionRow, 'subtotal' | 'discount' | 'che
 }
 
 /** One additional room category of an option (combined with the option's first room category). */
-const ExtraRoomRow = ({ oid, rooms, line, disabled }: { oid: number; rooms: RoomRow[]; line?: ExtraRoom; disabled?: boolean }) => (
+const ExtraRoomRow = ({ oid, rooms, line, disabled, rate }: { oid: number; rooms: RoomRow[]; line?: ExtraRoom; disabled?: boolean; rate?: number | null }) => (
   <div class="extra-room-row" data-extra-room>
     <Field label="Room category"><select name={`xroom_${oid}`} disabled={disabled}>{rooms.map(r => <option value={r.id} selected={r.id === line?.room_id}>{r.name} ({guestsText(r)})</option>)}</select></Field>
     <Field label="Rooms"><input type="number" name={`xrooms_${oid}`} value={line?.rooms_count ?? 1} min="1" disabled={disabled} /></Field>
-    <Field label="Guest rate ₹ / room / night" hint="Blank = website rate."><input type="number" name={`xgrate_${oid}`} value={line?.guest_rate ?? ''} min="0" disabled={disabled} /></Field>
+    <Field label="Calculated rate ₹ / room / night" hint="Resolved from the selected dates and meal plan."><output data-extra-room-rate>{rate != null && rate > 0 ? money(rate) : 'Rate not supplied / awaiting calculation'}</output></Field>
     {!disabled && <button type="button" class="linklike extra-room-del" data-del-extra-room aria-label="Remove this room category">×</button>}
   </div>
 )
@@ -312,6 +317,8 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
       <div class="row-between">
         <div><a href="/staff/quotes" class="small">← Quotations</a><h1>Quotation {q.code} <Pill s={q.status} /></h1>{enquiry && <a class="small" href={`/staff/enquiries/${enquiry.id}`}>Enquiry {enquiry.code} · {enquiry.summary ?? ''}</a>}</div>
         <div class="row wrap-row">
+          {c.get('user')!.role==='admin' && q.status==='pending_approval' && <form method="post" action={`/admin/quotes/${q.id}/approve`} class="inline"><input type="hidden" name="reviewed_at" value={q.updated_at}/><button class="btn btn-sm" data-quotation-approve>Approve quotation only</button></form>}
+          <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/confirmation`}>Request Booking Confirmation</a>
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/preview`} target="_blank">Preview</a>
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/print`} target="_blank">PDF</a>
           <form method="post" action={`/staff/quotes/${q.id}/duplicate`} class="inline"><button class="btn btn-sm btn-outline">Duplicate</button></form>
@@ -320,7 +327,7 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
       {q.guest_feedback && <div class="flash">Guest said: “{q.guest_feedback}”</div>}
       {needsApproval && <div class="flash flash-err">This quotation has an unresolved rate or a price below the Staff Rate. Correct it before saving or sending.</div>}
 
-      <form method="post" action={`/staff/quotes/${q.id}`} class="stack" data-quote-recalculate={editable ? `/staff/quotes/${q.id}/recalculate` : undefined}>
+      <form method="post" action={`/staff/quotes/${q.id}`} class="stack" data-quotation-admin-edit={c.get('user')!.role==='admin' && q.status==='pending_approval' ? '1' : undefined} data-quote-recalculate={editable ? `/staff/quotes/${q.id}/recalculate` : undefined}>
         <section class="card stack">
           <div class="row-between"><h2>Guest</h2>{enquiry && editable && <button class="btn btn-sm btn-outline" formaction={`/staff/quotes/${q.id}/fill`} title="AI reads the enquiry and pre-fills dates, guests and a suggested property">✨ Fill from enquiry</button>}</div>
           <div class="row">
@@ -350,8 +357,8 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <Field label="Rooms"><input type="number" name={`rooms_${o.id}`} value={o.rooms_count} min="1" data-inventory-count />
                 <div class="quote-inventory-helper" data-room-inventory aria-live="polite"><span data-inventory-label>{rooms.find(r => r.id === o.room_id)?.units == null ? 'Category inventory not supplied' : `Total rooms in category: ${rooms.find(r => r.id === o.room_id)!.units} — live availability not verified.`}</span><div class="error" data-inventory-warning hidden></div></div></Field>
                 <div class="extra-rooms" data-extra-rooms={o.id}>
-                  <div class="small muted">{extras.length ? `Combined: ${roomsLabel(o, new Map(rooms.map(r => [r.id, r.name])))} = ${totalRooms(o)} rooms` : 'Need rooms from more than one category? Add another room category to this option.'}</div>
-                  <div data-extra-room-list>{extras.map(line => <ExtraRoomRow oid={o.id} rooms={rooms} line={line} disabled={!editable} />)}</div>
+                  <div class="small muted" data-combined-room-summary>{extras.length ? `Combined: ${roomsLabel(o, new Map(rooms.map(r => [r.id, r.name])))} = ${totalRooms(o)} rooms` : 'Need rooms from more than one category? Add another room category to this option.'}{priced?.extraGuests && <span> · Combined maximum capacity: {priced.extraGuests.max} guests</span>}</div>
+                  <div data-extra-room-list>{extras.map((line, k) => <ExtraRoomRow oid={o.id} rooms={rooms} line={line} disabled={!editable} rate={priced?.parts[k + 1] && !priced.parts[k + 1].errors.length ? priced.parts[k + 1].roomCharges / Math.max(1, priced.nights * line.rooms_count) : null} />)}</div>
                   {editable && <template data-extra-room-template><ExtraRoomRow oid={o.id} rooms={rooms.filter(r => r.id !== o.room_id).concat(rooms.filter(r => r.id === o.room_id))} /></template>}
                   {editable && <button type="button" class="linklike add-new" data-add-extra-room>+ Add another room category</button>}
                 </div>
@@ -461,16 +468,8 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
 
         {q.explainer && <AiNote label="Guest will see">{q.explainer}</AiNote>}
 
-        <div class="row wrap-row sticky-actions">
-          {editable && <button class="btn">Save draft</button>}
-          {editable && !needsApproval && options.length > 0 && (
-            <>
-              <button class="btn" formaction={`/staff/quotes/${q.id}/send?via=whatsapp`}>Save & send on WhatsApp</button>
-              <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/send?via=email`}>Save & email</button>
-              <label class="check small"><input type="checkbox" name="hold" value="1" /> Hold rooms until valid date</label>
-            </>
-          )}
-          {editable && needsApproval && q.status !== 'pending_approval' && <button class="btn" formaction={`/staff/quotes/${q.id}/request-approval`}>Request approval</button>}
+        <div class="row wrap-row sticky-actions quotation-primary-actions">
+          {editable && <><button class="btn">{c.get('user')!.role==='admin' && q.status==='pending_approval' ? 'Save Admin edits' : 'Save to Draft'}</button><button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/download`} formtarget="_blank">Download</button><button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/request-approval`} disabled={q.status==='pending_approval'}>Send to Approval</button><span class="small muted">Download saves current edits as a draft. Quotation approval does not confirm a booking.</span></>}
           {!editable && <a class="btn btn-outline" href={`https://wa.me/${(q.phone ?? '').replace(/\D/g, '')}?text=${encodeURIComponent(link)}`} target="_blank">Resend link on WhatsApp</a>}
           {!editable && q.status !== 'accepted' && <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/reopen`}>Edit (reopen)</button>}
           {!editable && q.status !== 'accepted' && options.length > 0 && <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/convert`}>Convert to booking</button>}
@@ -500,10 +499,10 @@ async function calculateDraftOption(c: Context<AppEnv>, o: QuoteOptionRow, f: Fo
   const addonTotal = picked.reduce((a, x) => a + x.total, 0)
   // Further room categories of the same property (rows with no room or no rooms are ignored).
   const propRooms = new Set((await all<{ id: number }>(c.env, 'SELECT id FROM rooms WHERE property_id = ? AND active = 1', o.property_id)).map(r => r.id))
-  const xCounts = f.__all[`xrooms_${oid}`] ?? [], xRates = f.__all[`xgrate_${oid}`] ?? []
+  const xCounts = f.__all[`xrooms_${oid}`] ?? []
   const extraRooms: ExtraRoom[] = f.__all[`xroom_${oid}`] == null && f[`room_${oid}`] == null
     ? extraRoomsOf(o.extra_rooms)
-    : (f.__all[`xroom_${oid}`] ?? []).map((id, k) => ({ room_id: int(id), rooms_count: Math.min(99, int(xCounts[k])), guest_rate: int(xRates[k]) > 0 ? int(xRates[k]) : null }))
+    : (f.__all[`xroom_${oid}`] ?? []).map((id, k) => ({ room_id: int(id), rooms_count: Math.min(99, int(xCounts[k])), guest_rate: null }))
       .filter(x => propRooms.has(x.room_id) && x.rooms_count > 0)
   const next = {
     room_id: int(f[`room_${oid}`], o.room_id), check_in: checkIn, check_out: checkOut, rooms_count: Math.max(1, int(f[`rooms_${oid}`], o.rooms_count)),
@@ -511,6 +510,9 @@ async function calculateDraftOption(c: Context<AppEnv>, o: QuoteOptionRow, f: Fo
     adults: Math.max(1, int(f[`adults_${oid}`], o.adults)), children: Math.max(0, int(f[`children_${oid}`], o.children)),
     meal_plan: f[`meal_${oid}`] || null, extra_rooms: extraRooms,
   }
+  if(roomLines(next).some(line=>!propRooms.has(line.room_id)))throw new HTTPException(422,{res:c.json({error:'Every room category must belong to this option’s property.'},422)})
+  const ids = roomLines(next).map(line => line.room_id)
+  if (new Set(ids).size !== ids.length) throw new HTTPException(422, { res: c.json({ error: 'Each room category may be selected only once within an option.' }, 422) })
   const p = await priceOption(c, next)
   return { next, picked, p, amount, grate, checkIn, checkOut }
 }
@@ -560,6 +562,8 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
       }
     }
     options.push({ discountHint: discountInfo.hint, discountError: discountInfo.error, benchmarks, id: o.id, subtotal: p.subtotal, discount: p.discount, extraCharges: p.extraCharges, taxes: p.taxes, total: p.total,
+      roomSummary: `Combined: ${p.roomsCount} rooms · Maximum configured capacity: ${p.extraGuests?.max ?? 'not supplied'} guests (live availability not verified).`,
+      rateLines: lines.slice(1).map((line, k) => ({ roomId: line.room_id, label: p.parts[k + 1]?.errors.length || !p.parts[k + 1]?.roomCharges ? 'Rate could not be resolved. Check dates and meal plan.' : money(p.parts[k + 1].roomCharges / Math.max(1, p.nights * line.rooms_count)) })),
       rows, errors: p.errors, staffRate, maximumDiscount: p.maximumDiscount,
       quoted: money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount))) })
   }
@@ -580,7 +584,7 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       if (!o) continue
       const { p: base, amount } = await calculateDraftOption(c, o, f, applyGst)
       if (!Number.isSafeInteger(amount) || amount < 0) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Enter a valid whole-rupee Discount Amount.' }) })
-      if (!base) continue
+      if (!base) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Room rate could not be resolved.' }) })
       if (base.errors.length) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: base.errors[0] }) })
     }
     const untouched = await all<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE quotation_id = ?', q.id)
@@ -622,6 +626,7 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
     'UPDATE quotations SET inclusions = ?, exclusions = ?, valid_till = ?, payment_terms = ?, message = ?, updated_at = ? WHERE id = ?',
     str(f.inclusions, 2000), str(f.exclusions, 2000), isDate(f.valid_till) ? f.valid_till : q.valid_till, str(f.payment_terms, 500), str(f.message, 3000), nowIso(), q.id,
   )
+  if(u.role==='admin' && q.status==='pending_approval')await logActivity(c.env,u.id,'quote.admin_edited','quotation',q.id,{quotation:q.code})
   return f
 }
 
@@ -629,7 +634,16 @@ opsRoutes.post('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   await saveQuote(c, q)
-  return redirectMsg(c, `/staff/quotes/${q.id}`, { ok: 'Saved and re-priced.' })
+  if(c.get('user')!.role!=='admin' || q.status!=='pending_approval')await run(c.env, "UPDATE quotations SET status='draft' WHERE id=? AND status IN ('draft','pending_approval','changes_requested')",q.id)
+  return redirectMsg(c, `/staff/quotes/${q.id}`, { ok: c.get('user')!.role==='admin' && q.status==='pending_approval' ? 'Admin edits saved for review.' : 'Saved to Draft.' })
+})
+
+opsRoutes.post('/staff/quotes/:id/download',requirePerm('manage_quotes'),async c=>{
+ const q=await loadQuoteFor(c,int(c.req.param('id')));if(!q)return c.notFound()
+ if(!['draft','pending_approval','changes_requested'].includes(q.status))return c.redirect(`/staff/quotes/${q.id}/print?download=1`,303)
+ await saveQuote(c,q)
+ if(c.get('user')!.role!=='admin' || q.status!=='pending_approval')await run(c.env,"UPDATE quotations SET status='draft' WHERE id=? AND status IN ('draft','pending_approval','changes_requested')",q.id)
+ return c.redirect(`/staff/quotes/${q.id}/print?download=1`,303)
 })
 
 opsRoutes.post('/staff/quotes/:id/add', requirePerm('manage_quotes'), async (c) => {
@@ -685,10 +699,18 @@ opsRoutes.post('/staff/quotes/:id/draft-message', requirePerm('manage_quotes'), 
 opsRoutes.post('/staff/quotes/:id/request-approval', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
+  if(q.status==='pending_approval')return redirectMsg(c,`/staff/quotes/${q.id}`,{ok:'Already submitted for quotation review.'})
+  if(!['draft','changes_requested'].includes(q.status))return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Reopen this quotation before submitting it.'})
+  const count=await first<{n:number}>(c.env,'SELECT COUNT(*) AS n FROM quotation_options WHERE quotation_id=?',q.id)
+  if(!count?.n)return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Add at least one quotation option before submission.'})
+  const submitted=await form(c)
+  if(!submitted.guest_name?.trim()||!normalizePhone(submitted.phone))return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Complete the guest name and contact before submission.'})
+  const savedOptions=await all<{id:number}>(c.env,'SELECT id FROM quotation_options WHERE quotation_id=?',q.id)
+  if(savedOptions.some(o=>!(submitted.__all.opt_id??[]).includes(String(o.id))))return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Review every quotation option before submitting.'})
   await saveQuote(c, q)
-  await run(c.env, "UPDATE quotations SET status = 'pending_approval' WHERE id = ?", q.id)
-  await logActivity(c.env, c.get('user')!.id, 'quote.approval_requested', 'quotation', q.id)
-  return redirectMsg(c, `/staff/quotes/${q.id}`, { ok: 'Sent for approval.' })
+  const won=await c.env.DB.prepare("UPDATE quotations SET status='pending_approval',updated_at=? WHERE id=? AND status IN ('draft','changes_requested') RETURNING id").bind(nowIso(),q.id).first()
+  if(won)await logActivity(c.env, c.get('user')!.id, 'quote.approval_requested', 'quotation', q.id)
+  return redirectMsg(c, `/staff/quotes/${q.id}`, { ok: 'Sent for quotation review only. No booking or voucher has been confirmed.' })
 })
 
 opsRoutes.post('/staff/quotes/:id/reopen', requirePerm('manage_quotes'), async (c) => {
@@ -872,7 +894,7 @@ td:first-child{width:72%}
 @media(max-width:480px){body{padding:0 16px;margin:16px auto}.quote-brand{gap:12px}.quote-brand img{width:130px;height:auto}.quote-brand h1{font-size:18px}.quote-brand a{font-size:10px}.quote-brand p{font-size:10px;letter-spacing:.2px}.quote-meta{column-gap:14px}.quote-meta strong{display:block;min-width:0}.quote-amenities li{gap:12px}.quote-amenities li span{flex-basis:calc(50% - 6px)}td:first-child{width:67%}}
 @media print{body{margin:0;max-width:none;padding:0}[data-quote-actions]{display:none}tr,li,.quote-meta,.quote-brand,.quote-notice,.quote-property-heading,.quote-stay,.quote-price{break-inside:avoid}h2,h3{break-after:avoid}}
 @page{size:A4;margin:12mm}
-</style></head><body><div data-quote-actions><button type="button" data-download-quote data-quote-code="${esc(q.code)}">⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div><script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
+</style></head><body><div data-quote-actions><button type="button" data-download-quote data-auto-download="${c.req.query('download') === '1' ? '1' : '0'}" data-quote-code="${esc(q.code)}">⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div><script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
 <header class="quote-brand"><img src="/brand/logo-wide.webp" alt="Go Sanchari" width="181" height="48"><div><h1>Go Sanchari</h1><a href="mailto:reservation@gosanchari.com">reservation@gosanchari.com</a><p>Travel quotation</p></div></header>
 <div class="quote-notice"><h2>Please note this is not a confirmation voucher</h2><p>Voucher not issued by this quotation</p></div>
 <div class="quote-meta"><p><strong>Customer:</strong> ${esc(q.guest_name)}</p><p><strong>Quotation number:</strong> ${esc(q.code)}</p><p><strong>Quotation date:</strong> ${esc(fmtDate(q.created_at))}</p><p><strong>Valid till:</strong> ${esc(fmtDate(q.valid_till))}</p></div>
@@ -881,7 +903,7 @@ ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => 
 ${amenities(o.property_facilities) ? `<h3>Property amenities</h3><ul class="quote-amenities">${amenities(o.property_facilities)}</ul>` : ''}${amenities(o.room_facilities, true) ? `<div class="${parseJson<string[]>(o.room_facilities, []).length <= 12 ? 'quote-amenity-group' : ''}"><h3>Selected-room amenities</h3><ul class="quote-amenities">${amenities(o.room_facilities, true)}</ul></div>` : ''}
 <div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div></section>`).join('')}
 ${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment Terms &amp; Conditions</h3><p style="white-space:pre-line">${esc(q.payment_terms)}</p>` : ''}
-<footer class="quote-footer"><p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p><p>Go Sanchari · reservation@gosanchari.com</p></footer></main></body></html>`)
+<p class="pdf-policy-line">Balance amount to be paid at the hotel at check-in time.</p><footer class="quote-footer"><p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p><p>Go Sanchari · reservation@gosanchari.com</p></footer></main></body></html>`)
 
 })
 
@@ -930,8 +952,9 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
             {admin && <td>{q.max_disc ? `${q.max_disc}%` : '—'}</td>}
             <td class="nowrap">
               <a class="btn btn-sm" href={`/staff/quotes/${q.id}`}>Edit</a>
+              {admin && q.status === 'pending_approval' && <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}`}>Edit</a>}
               {admin && q.status === 'pending_approval' && perms.approve_discounts && (
-                <form method="post" action={`/admin/quotes/${q.id}/approve`} class="inline"><button class="btn btn-sm">Approve</button></form>
+                <form method="post" action={`/admin/quotes/${q.id}/approve`} class="inline"><input type="hidden" name="reviewed_at" value={q.updated_at}/><button class="btn btn-sm">Approve</button></form>
               )}
               {['sent', 'viewed'].includes(q.status) && q.phone && <a class="btn btn-sm btn-outline" target="_blank" href={`https://wa.me/${q.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`${c.env.SITE_URL}/q/${q.token}`)}`}>Resend</a>}
             </td>

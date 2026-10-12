@@ -896,6 +896,7 @@ publicRoutes.get('/q/:token', async (c) => {
           )}
         </div>
       ))}
+      <p>Balance amount to be paid at the hotel at check-in time.</p>
       {(q.inclusions || q.exclusions || q.payment_terms) && (
         <div class="card">
           {q.inclusions && <><h3>Included</h3><p style="white-space:pre-line">{quotationInclusions(q.inclusions, q.apply_gst)}</p></>}

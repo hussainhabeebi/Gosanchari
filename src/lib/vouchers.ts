@@ -11,6 +11,7 @@ import { fmtDate, money, parseJson } from './util'
 export interface VoucherPayment { date: string; method: string; reference: string; amount: number }
 
 export interface VoucherData {
+  quote_code?: string
   booking_code: string
   status: 'Confirmed'
   guest_name: string
@@ -31,6 +32,12 @@ export interface VoucherData {
   meal_plan: string
   amenities: string[]
   payments: VoucherPayment[]
+  room_rent?: number
+  subtotal?: number
+  discount?: number
+  extras?: number
+  gst?: number
+  payment_verified?: boolean
   total: number
   paid: number
   balance: number
@@ -104,21 +111,21 @@ const time12 = (t: string) => {
 export function voucherHtml(v: VoucherData, meta: { code: string; issued: string | null; draft?: string }): string {
   const row = (label: string, value: string) => `<tr><th>${esc(label)}</th><td>${value}</td></tr>`
   const amenities = v.amenities.length
-    ? `<ul class="v-amenities">${v.amenities.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>`
+    ? `<ul class="v-amenities">${Array.from({length:Math.ceil(v.amenities.length/3)},(_,i)=>`<li>${v.amenities.slice(i*3,i*3+3).map(a=>`<span>${esc(a)}</span>`).join('')}</li>`).join('')}</ul>`
     : '<p class="v-muted">Not listed</p>'
   const payments = v.payments.length
     ? `<table class="v-pay"><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="r">Amount</th></tr></thead><tbody>${v.payments.map((p) => `<tr><td>${esc(fmtDate(p.date))}</td><td>${esc(p.method)}</td><td>${esc(p.reference || '—')}</td><td class="r">${money(p.amount)}</td></tr>`).join('')}</tbody></table>`
-    : '<p class="v-muted">No payment recorded</p>'
+    : v.payment_verified ? '<p class="v-muted">Advance reviewed by Admin as shown below; no independent gateway record supplied.</p>' : '<p class="v-muted">No payment recorded</p>'
   const remarks = [v.staff_remarks, v.admin_remarks].map((x) => x.trim()).filter(Boolean)
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Booking Confirmed ${esc(v.booking_code)}</title><style>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${meta.draft ? 'Voucher request preview' : 'BOOKING CONFIRMED'} ${esc(v.booking_code)}</title><style>
 :root{--navy:#14213d;--teal:#0f5e57;--ok:#1d7a46;--line:#dfe5e3;--soft:#e6f2ef;--muted:#5d6b69}
 *{box-sizing:border-box}
-body{font:12px/1.5 Arial,"Helvetica Neue",sans-serif;max-width:760px;margin:24px auto;padding:0 20px;color:var(--navy);background:#fff;overflow-wrap:anywhere}
+body{font:11.5px/1.4 Arial,"Helvetica Neue",sans-serif;max-width:760px;margin:24px auto;padding:0 20px;color:var(--navy);background:#fff;overflow-wrap:anywhere}
 h1{font-size:22px;line-height:1.2;margin:0;font-weight:700}
-h2{font-size:13px;letter-spacing:.4px;color:var(--teal);margin:16px 0 6px;text-transform:uppercase}
+h2{font-size:13px;letter-spacing:.4px;color:var(--teal);margin:10px 0 5px;text-transform:uppercase}
 p{margin:6px 0}
 a{color:var(--teal)}
-.v-brand{display:flex;justify-content:space-between;gap:24px;align-items:center;border-bottom:2px solid var(--navy);padding:0 0 14px;margin-bottom:14px}
+.v-brand{display:flex;justify-content:space-between;gap:24px;align-items:center;border-bottom:2px solid var(--navy);padding:0 0 10px;margin-bottom:10px}
 .v-brand img{width:181px;height:48px;object-fit:contain;flex:none}
 .v-brand>div{text-align:right}
 .v-brand p{margin:3px 0 0;font-size:11px;color:var(--teal);letter-spacing:.8px}
@@ -129,44 +136,50 @@ a{color:var(--teal)}
 .v-draft{border:1px solid #f0c36d;background:#fff8e6;color:#7a4b00;padding:8px 12px;margin:0 0 12px;font-weight:700}
 .v-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 24px}
 table{width:100%;border-collapse:collapse;font-size:12px}
-.v-table th,.v-table td{padding:6px 0;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.v-table th,.v-table td{padding:4px 0;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 .v-table th{width:42%;font-weight:600;color:var(--muted)}
 .v-pay th,.v-pay td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
 .v-pay thead th{background:#f8fafb;color:var(--muted);font-weight:600}
 .r,.v-pay .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-.v-amenities{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 16px}
-.v-amenities li{padding:3px 0;border-bottom:1px solid #edf0f2}
+.v-amenities{list-style:none;padding:0;margin:0}
+.v-amenities li{display:flex;gap:16px;break-inside:avoid}
+.v-amenities li span{flex:0 0 calc((100% - 32px)/3);min-width:0;padding:3px 0;border-bottom:1px solid #edf0f2;overflow-wrap:anywhere}
 .v-totals{margin-top:10px}
-.v-totals td{padding:7px 10px;border-bottom:1px solid var(--line)}
+.v-totals td{padding:4px 10px;border-bottom:1px solid var(--line)}
 .v-totals .t td{font-weight:700;background:var(--soft);border-top:1px solid #c4dcd6;font-size:14px}
 .v-note{font-size:11px;color:var(--muted);margin-top:4px}
 .v-muted{color:var(--muted)}
 .v-remarks{border:1px solid var(--line);background:#f8fafb;padding:8px 12px;white-space:pre-line}
-.v-footer{border-top:2px solid var(--navy);margin-top:20px;padding-top:10px;text-align:center}
+.v-footer{break-inside:avoid;border-top:2px solid var(--navy);margin-top:12px;padding-top:8px;text-align:center}
 .v-footer strong{font-size:16px;letter-spacing:.5px}
 .v-footer p{margin:2px 0;color:var(--muted);font-size:10px}
 [data-quote-actions]{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
 [data-quote-actions] button{min-height:44px;padding:10px 16px;cursor:pointer;border:1px solid var(--navy);border-radius:6px;font:600 14px Arial}
 [data-download-quote]{background:var(--navy);color:#fff}
 [data-quote-actions] [data-print]{background:#fff;color:var(--navy)}
-@media(max-width:560px){body{padding:0 16px;margin:16px auto}.v-grid{grid-template-columns:1fr}.v-brand img{width:130px;height:auto}.v-amenities{grid-template-columns:repeat(2,minmax(0,1fr))}.v-hero{flex-direction:column;align-items:flex-start}}
+@media(max-width:560px){body{padding:0 16px;margin:16px auto}.v-grid{grid-template-columns:1fr}.v-brand img{width:130px;height:auto}.v-amenities li{gap:8px}.v-amenities li span{flex-basis:calc((100% - 16px)/3)}.v-hero{flex-direction:column;align-items:flex-start}}
+.v-pdf-export .v-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.v-pdf-export .v-hero{flex-direction:row;align-items:center}
+.v-pdf-export .v-brand img{width:181px;height:48px}
+.v-pdf-export .v-amenities li{gap:16px}
+.v-pdf-export .v-amenities li span{flex-basis:calc((100% - 32px)/3)}
 @media print{body{margin:0;max-width:none;padding:0}[data-quote-actions]{display:none}tr,li,.v-hero,.v-brand,.v-totals,.v-remarks{break-inside:avoid}h2{break-after:avoid}}
 @page{size:A4;margin:12mm}
-</style></head><body><div data-quote-actions><button type="button" data-download-quote data-quote-code="${esc(v.booking_code)}" data-file-prefix="Booking-Confirmed">⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div><script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
+</style></head><body>${meta.draft ? '' : `<div data-quote-actions><button type="button" data-download-quote data-quote-code="${esc(v.quote_code ? meta.code : v.booking_code)}" data-file-prefix="Booking-Confirmed">⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div>`}<script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
 ${meta.draft ? `<div class="v-draft">${esc(meta.draft)}</div>` : ''}<header class="v-brand"><img src="/brand/logo-wide.webp" alt="Go Sanchari" width="181" height="48"><div><strong>Go Sanchari</strong><br><a href="mailto:reservation@gosanchari.com">reservation@gosanchari.com</a><p>Booking confirmation voucher</p></div></header>
-<section class="v-hero"><div><h1>Booking Confirmed</h1><p>Voucher ${esc(meta.code)} · Booking ${esc(v.booking_code)}${meta.issued ? ` · Issued ${esc(fmtDate(meta.issued))}` : ''}</p></div><span class="v-badge">${meta.draft ? 'Awaiting admin approval' : `Booking Status: ${esc(v.status)}`}</span></section>
+<section class="v-hero"><div><h1>${meta.draft ? 'VOUCHER REQUEST PREVIEW' : 'BOOKING CONFIRMED'}</h1><p>Voucher ${esc(meta.code)} · ${v.quote_code ? 'Quotation reference' : 'Booking'} ${esc(v.booking_code)}${meta.issued ? ` · Issued ${esc(fmtDate(meta.issued))}` : ''}</p></div><span class="v-badge">${meta.draft ? 'Awaiting admin approval' : `Booking Status: ${esc(v.status)}`}</span></section>
 <div class="v-grid"><div><h2>Guest</h2><table class="v-table">
 ${row('Guest Name', esc(v.guest_name))}${row('Guest Contact Number', esc(v.guest_phone))}${row('No. of Adults', String(v.adults))}${row('No. of Kids', String(v.children))}${row('Kids Age', esc(v.kids_ages || (v.children ? '—' : 'No kids')))}
 </table></div><div><h2>Resort</h2><table class="v-table">
 ${row('Resort Name', esc(v.resort_name))}${row('Resort Contact Number', esc(v.resort_phone || '—'))}${row('Location', `${esc(v.location || '—')}${v.map_url ? `<br><a href="${esc(v.map_url)}">Open in Google Maps</a>` : ''}`)}
 </table></div></div>
 <h2>Stay</h2><table class="v-table">
-${row('Check-in Date', `${esc(fmtDate(v.check_in))} · from ${esc(time12(v.checkin_time))}`)}${row('Check-out Date', `${esc(fmtDate(v.check_out))} · by ${esc(time12(v.checkout_time))}`)}${row('Nights', String(v.nights))}${row('Room Type / Category', esc(v.rooms))}${row('Meal Plan', esc(v.meal_plan))}
+${row('Check-in Date', `${esc(fmtDate(v.check_in))}${v.checkin_time ? ` · from ${esc(time12(v.checkin_time))}` : ''}`)}${row('Check-out Date', `${esc(fmtDate(v.check_out))}${v.checkout_time ? ` · by ${esc(time12(v.checkout_time))}` : ''}`)}${row('Nights', String(v.nights))}${row('Room Type / Category', esc(v.rooms))}${row('Meal Plan', esc(v.meal_plan))}
 </table>
 <h2>Amenities in Resort</h2>${amenities}
 <h2>Payment Details</h2>${payments}
-<table class="v-totals"><tr><td>Total Room Rent</td><td class="r">${money(v.total)}</td></tr><tr><td>Advance Paid</td><td class="r">${money(v.paid)}</td></tr><tr class="t"><td>Balance Amount</td><td class="r">${money(v.balance)}</td></tr></table>
-<p class="v-note">${v.balance > 0 ? 'The balance amount is to be paid at the resort at the time of check-in.' : 'Fully paid — nothing is due at check-in.'}</p>
-${remarks.length ? `<h2>Remarks</h2><div class="v-remarks">${remarks.map(esc).join('\n\n')}</div>` : ''}
+<table class="v-totals"><tr><td>Total Room Rent</td><td class="r">${v.room_rent == null ? 'Not separately itemised' : money(v.room_rent)}</td></tr>${v.subtotal != null ? `<tr><td>Saved accommodation &amp; extra-person subtotal</td><td class="r">${money(v.subtotal)}</td></tr><tr><td>Discount</td><td class="r">${money(v.discount??0)}</td></tr><tr><td>Kids, add-ons and other extras</td><td class="r">${money(v.extras??0)}</td></tr><tr><td>GST</td><td class="r">${money(v.gst??0)}</td></tr>` : ''}<tr><td>Full Booking Total</td><td class="r">${money(v.total)}</td></tr><tr><td>Advance Paid</td><td class="r">${money(v.paid)}</td></tr><tr class="t"><td>Balance Amount</td><td class="r">${money(v.balance)}</td></tr></table>
+<p class="v-note">Balance amount to be paid at the hotel at check-in time.</p>${v.balance === 0 ? '<p class="v-note">Fully paid — nothing is due at check-in.</p>' : ''}<p class="v-note">${v.payment_verified ? 'Advance reviewed and verified by Admin; not independently verified by a payment gateway.' : 'Payment information supplied from booking records; independent verification is not asserted.'}</p>
+${remarks.length ? `<h2>Remarks</h2><div class="v-remarks">${v.staff_remarks ? 'Staff remarks: '+esc(v.staff_remarks) : ''}${v.staff_remarks && v.admin_remarks ? '\n\n' : ''}${v.admin_remarks ? 'Admin remarks: '+esc(v.admin_remarks) : ''}</div>` : ''}
 <footer class="v-footer"><strong>Go Sanchari</strong><p>Travel more, worry less · reservation@gosanchari.com</p></footer></main></body></html>`
 }

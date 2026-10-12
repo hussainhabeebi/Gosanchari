@@ -1,58 +1,95 @@
-// Deploy: make sure the D1 database and KV namespace exist (reusing them if they do), apply migrations,
-// then `wrangler deploy`. Works locally (after `wrangler login`) and in Cloudflare Workers Builds.
-// R2 buckets and the queue are named in wrangler.toml and provisioned by `wrangler deploy`.
+// Production rollout: verify existing resources, apply migrations, then activate the Worker.
+// Never provisions resources. Run only through the approved production deployment pipeline.
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
+export const PRODUCTION_D1_ID = '04eb5123-059a-45fb-ae10-6541ad1ae92a'
 const DB = 'gosanchari'
 const KV_TITLE = 'gosanchari-kv'
 const CONFIG = 'wrangler.toml'
-const run = (args, quiet = false) =>
-  spawnSync('npx', ['wrangler', ...args], { stdio: quiet ? 'pipe' : 'inherit', encoding: 'utf8', env: { ...process.env, CI: '1' } })
-const fail = (msg, code = 1) => { console.error(`✘ ${msg}`); process.exit(code) }
 
-// ---- D1 ----
-// Only a definite "not found" creates the database. Any other lookup error (token permissions, wrong account,
-// network) stops the deploy, so a live site is never pointed at a new, empty database.
-console.log(`▶ D1 database "${DB}"`)
-const info = run(['d1', 'info', DB, '--json'], true)
-const infoOut = `${info.stdout ?? ''}\n${info.stderr ?? ''}`
-if (info.status === 0) {
-  const uuid = infoOut.match(/"uuid"\s*:\s*"([^"]+)"/)?.[1]
-  console.log(`  found${uuid ? ` (${uuid})` : ''}`)
-} else if (/Couldn't find a D1 DB named|database not found/i.test(infoOut)) {
-  console.log('  not found — creating it')
-  if (run(['d1', 'create', DB, '--location', 'apac']).status !== 0) fail('Could not create the D1 database')
-} else fail(`Could not look up the D1 database (check the API token has D1 Edit permission and the right account):\n${infoOut.trim()}`)
-
-// ---- KV: find by title (create if missing) and pin its id in the config used for this deploy ----
-function findKv() {
-  const r = run(['kv', 'namespace', 'list'], true)
-  if (r.status !== 0) fail(`Could not list KV namespaces (check the API token has Workers KV Storage Edit permission):\n${r.stderr || r.stdout}`)
-  const out = r.stdout ?? ''
-  const list = JSON.parse(out.slice(out.indexOf('['), out.lastIndexOf(']') + 1) || '[]')
-  return list.find((n) => n.title === KV_TITLE)?.id
+function jsonOutput(output) {
+  const text = (output ?? '').trim()
+  try { return JSON.parse(text) } catch {
+    const begin = text.indexOf('['), object = text.indexOf('{')
+    const start = begin >= 0 && (object < 0 || begin < object) ? begin : object
+    const end = start === begin ? text.lastIndexOf(']') : text.lastIndexOf('}')
+    if (start < 0 || end < start) throw new Error('Wrangler returned no valid resource JSON.')
+    return JSON.parse(text.slice(start, end + 1))
+  }
 }
-console.log(`▶ KV namespace "${KV_TITLE}"`)
-let kvId = findKv()
-if (!kvId) {
-  console.log('  not found — creating it')
-  if (run(['kv', 'namespace', 'create', KV_TITLE]).status !== 0) fail('Could not create the KV namespace')
-  kvId = findKv()
-  if (!kvId) fail('KV namespace was created but could not be found')
-} else console.log(`  found (${kvId})`)
-const cfg = readFileSync(CONFIG, 'utf8')
-const pinned = cfg.replace(/(\[\[kv_namespaces\]\][ \t]*\nbinding = "KV"[ \t]*\n)(id = "[^"]*"[ \t]*\n)?/, `$1id = "${kvId}"\n`)
-if (!pinned.includes(`id = "${kvId}"`)) fail('Could not set the KV namespace id in wrangler.toml')
-writeFileSync(CONFIG, pinned)
+function section(config, heading) {
+  return config.split(/(?=^\[)/m).filter(block => block.startsWith(`[[${heading}]]`))
+}
+function value(block, key) {
+  return block.match(new RegExp(`^${key}\\s*=\\s*"([^"]*)"\\s*(?:#.*)?$`, 'm'))?.[1]
+}
 
-// ---- Migrations + deploy ----
-// Migrations run before the new code goes live; if one fails, the old code keeps running on the old schema.
-console.log('▶ Applying database migrations')
-if (run(['d1', 'migrations', 'apply', DB, '--remote']).status !== 0) fail('Migrations failed — the Worker was not deployed')
+/** Injected IO keeps tests entirely local: no real Wrangler process or production calls. */
+export function deployProduction({ run, read, write, log = console.log }) {
+  const config = read(CONFIG)
+  const databases = section(config, 'd1_databases')
+  const namespaces = section(config, 'kv_namespaces')
+  if (value(config, 'name') !== DB || databases.length !== 1 ||
+      value(databases[0], 'binding') !== 'DB' || value(databases[0], 'database_name') !== DB ||
+      value(databases[0], 'database_id') !== PRODUCTION_D1_ID ||
+      value(databases[0], 'migrations_dir') !== 'migrations') {
+    throw new Error('Production Worker/D1 configuration is missing or mismatched. Deployment stopped.')
+  }
+  if (namespaces.length !== 1 || value(namespaces[0], 'binding') !== 'KV') {
+    throw new Error('Expected existing KV binding is missing or mismatched. Deployment stopped.')
+  }
 
-console.log('▶ Deploying the Worker')
-const d = run(['deploy', ...process.argv.slice(2)])
-// Restore the committed config when running locally (keeps the repo clean).
-if (!process.env.WORKERS_CI) writeFileSync(CONFIG, cfg)
-process.exit(d.status ?? 1)
+  log(`▶ Verifying existing D1 ${DB} (${PRODUCTION_D1_ID})`)
+  const info = run(['d1', 'info', DB, '--json'], true)
+  if (info.status !== 0) throw new Error(`Could not look up existing production D1. No database will be created.\n${info.stderr || info.stdout || ''}`)
+  const result = jsonOutput(info.stdout)
+  const database = Array.isArray(result) && result.length === 1 ? result[0] : result
+  if (database?.uuid !== PRODUCTION_D1_ID || database?.name !== DB) {
+    throw new Error('D1 lookup does not match the approved production UUID/name. Deployment stopped.')
+  }
+
+  log(`▶ Verifying existing KV ${KV_TITLE}`)
+  const lookup = run(['kv', 'namespace', 'list'], true)
+  if (lookup.status !== 0) throw new Error(`Could not list existing KV namespaces. No namespace will be created.\n${lookup.stderr || lookup.stdout || ''}`)
+  const list = jsonOutput(lookup.stdout)
+  const matches = Array.isArray(list) ? list.filter(item => item.title === KV_TITLE) : []
+  if (matches.length !== 1 || !/^[a-f0-9]{32}$/i.test(matches[0].id)) {
+    throw new Error('Expected existing KV namespace is missing, ambiguous or invalid. Deployment stopped.')
+  }
+  const kvId = matches[0].id, configured = value(namespaces[0], 'id')
+  if (configured && configured !== kvId) throw new Error('Configured KV ID does not match the existing namespace. Deployment stopped.')
+  const kvBlock = configured ? namespaces[0] : namespaces[0].replace(/^(binding\s*=\s*"KV"[^\n]*\n)/m, `$1id = "${kvId}"\n`)
+  const pinned = config.replace(namespaces[0], kvBlock)
+  if (value(section(pinned, 'kv_namespaces')[0], 'id') !== kvId) throw new Error('Could not pin the existing KV identity. Deployment stopped.')
+
+  try {
+    write(CONFIG, pinned)
+    // Wrangler resolves this name through the verified, UUID-pinned binding above.
+    log('▶ Applying migrations to the existing production database')
+    if (run(['d1', 'migrations', 'apply', DB, '--remote']).status !== 0) {
+      throw new Error('Migrations failed — the new Worker was not deployed.')
+    }
+    log('▶ Activating the Worker')
+    if (run(['deploy']).status !== 0) throw new Error('Worker deployment failed. No retry was attempted.')
+  } finally {
+    write(CONFIG, config)
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    if (process.argv.length > 2) throw new Error('Production deployment does not accept configuration or environment overrides.')
+    deployProduction({
+      run: (args, quiet = false) => spawnSync('npx', ['wrangler', ...args], {
+        stdio: quiet ? 'pipe' : 'inherit', encoding: 'utf8', env: { ...process.env, CI: '1' },
+      }),
+      read: path => readFileSync(path, 'utf8'),
+      write: (path, text) => writeFileSync(path, text),
+    })
+  } catch (error) {
+    console.error(`✘ ${error.message}`)
+    process.exitCode = 1
+  }
+}

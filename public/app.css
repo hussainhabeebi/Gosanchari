@@ -1022,3 +1022,9 @@ code { overflow-wrap: anywhere; }
 .thumb-opt:has(input:checked) { border-color: var(--green); box-shadow: 0 0 0 2px rgba(15, 94, 87, .25); }
 .thumb-auto { font-weight: 600; font-size: .85rem; border: 2px dashed var(--line); }
 .thumb-auto span { padding-left: 18px; }
+
+/* Quotation actions wrap on phones without affecting other sticky action bars. */
+@media (max-width: 640px) {
+  .row.wrap-row.sticky-actions.quotation-primary-actions { flex-wrap: wrap; }
+  .quotation-primary-actions .btn { flex: 1 1 auto; min-height: 44px; }
+}

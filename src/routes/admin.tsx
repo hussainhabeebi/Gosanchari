@@ -482,8 +482,12 @@ adminRoutes.get('/admin/quotes', requirePerm('approve_discounts'), (c) => render
 adminRoutes.post('/admin/quotes/:id/approve', requirePerm('approve_discounts'), async (c) => {
   const id = int(c.req.param('id'))
   const u = c.get('user')!
+  if(u.role!=='admin')return c.text('Admin quotation review required.',403)
+  const submitted=await form(c)
+  if(!submitted.reviewed_at)return redirectMsg(c,'/admin/quotes',{err:'Open and review the current quotation before approval.'})
+  const won=await c.env.DB.prepare("UPDATE quotations SET status='draft',updated_at=? WHERE id=? AND status='pending_approval' AND updated_at=? RETURNING id").bind(nowIso(),id,submitted.reviewed_at).first()
+  if(!won)return redirectMsg(c,'/admin/quotes',{err:'This quotation is no longer waiting for review.'})
   await run(c.env, 'UPDATE quotation_options SET discount_approved_by = ? WHERE quotation_id = ?', u.id, id)
-  await run(c.env, "UPDATE quotations SET status = 'draft', updated_at = ? WHERE id = ? AND status = 'pending_approval'", nowIso(), id)
   const q = await first<{ staff_id: number | null; code: string; guest_name: string }>(c.env, 'SELECT staff_id, code, guest_name FROM quotations WHERE id = ?', id)
   if (q?.staff_id) await run(c.env, 'INSERT INTO tasks (assigned_to, quotation_id, guest_name, reason, due_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', q.staff_id, id, q.guest_name, `Price approved on ${q.code} — send it now`, nowIso(), u.id)
   await logActivity(c.env, u.id, 'quote.discount_approved', 'quotation', id)
