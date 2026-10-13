@@ -104,6 +104,33 @@ describe('Booking confirmation voucher', () => {
   })
 })
 
+describe('Quotation PDF after a booking voucher is approved', () => {
+  it('keeps the disclaimer until admin approves, then prints BOOKING CONFIRMED with the verified advance', async () => {
+    const f = fixture()
+    const rid = (f.db.prepare('SELECT room_id FROM bookings WHERE id = ?').get(f.bid) as any).room_id
+    const qid = Number(f.db.prepare("INSERT INTO quotations(code,token,staff_id,guest_name,phone,valid_till,status) VALUES('GS-QT-ICE','ice-token',?,'Anu Thomas','+91 98470 55555','2030-12-01','accepted')").run(f.salesId).lastInsertRowid)
+    f.db.prepare("INSERT INTO quotation_options(quotation_id,property_id,room_id,check_in,check_out,adults,children,rooms_count,meal_plan,subtotal,taxes,total,reported_advance) VALUES(?,?,?,'2030-12-24','2030-12-26',2,2,1,'CP',16000,800,16800,6000)").run(qid, f.pid, rid)
+    f.db.prepare('UPDATE bookings SET quotation_id = ? WHERE id = ?').run(qid, f.bid)
+    const print = async () => (await f.sales.request(`http://localhost/staff/quotes/${qid}/print`, {}, f.env)).text()
+
+    expect(await print()).toContain('Please note this is not a confirmation voucher')
+    f.pay(5000)
+    await f.post(f.sales, `/staff/bookings/${f.bid}/voucher`, { kids_ages: '4, 9' })
+    expect(await print()).toContain('Please note this is not a confirmation voucher') // still pending
+    const vid = (f.db.prepare('SELECT id FROM booking_vouchers').get() as any).id
+    await f.post(f.admin, `/admin/vouchers/${vid}/approve`, { payment_verified: '1', availability_verified: '1' })
+
+    const html = await print()
+    expect(html).toContain('BOOKING CONFIRMED')
+    expect(html).not.toContain('not a confirmation voucher')
+    expect(html).toContain('Advance Received: ₹5,000 (verified by Admin)')
+    expect(html).toContain('Balance Payable: ₹11,800')
+
+    f.db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(f.bid)
+    expect(await print()).toContain('Please note this is not a confirmation voucher')
+  })
+})
+
 describe('voucher layout', () => {
   it('says fully paid when nothing is due and leaves out empty remarks', () => {
     const v: VoucherData = { booking_code: 'B1', status: 'Confirmed', guest_name: 'G', guest_phone: '1', adults: 2, children: 0, kids_ages: '', resort_name: 'R', resort_phone: '', location: 'Munnar', map_url: null,

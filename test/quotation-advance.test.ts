@@ -79,10 +79,13 @@ describe('quotation reported advance',()=>{
    const edit=new URLSearchParams({revision:'0',advance:'21000',room_rent:'60000',guest_name:'Guest',guest_phone:'9999999999',resort_name:'Resort',resort_phone:'9999999998',location:'Munnar',kids_ages:''});
    await f.app.request('http://localhost/admin/booking-approvals/'+r.id+'/edit',{method:'POST',body:edit},f.env);
    const current=f.db.prepare('SELECT * FROM quotation_confirmation_requests').get() as any;expect(JSON.parse(current.details).paid).toBe(21000);expect(JSON.parse(current.details).reported_advance).toBe(20000);
+   const quotePdf=async()=>(await f.app.request(f.url+'/print',{},f.env)).text();let pdf=await quotePdf();expect(pdf).toContain('Please note this is not a confirmation voucher');expect(pdf).not.toContain('BOOKING CONFIRMED');
    const decision='http://localhost/admin/booking-approvals/'+r.id+'/decision';await f.app.request(decision,{method:'POST',body:new URLSearchParams({revision:'1',decision:'approved'})},f.env);expect((await f.app.request(view+'/print',{},f.env)).status).toBe(404);
    await f.app.request(decision,{method:'POST',body:new URLSearchParams({revision:'1',decision:'approved',payment_verified:'1',availability_verified:'1'})},f.env);
    const voucher=await(await f.app.request(view+'/print',{},f.env)).text();for(const text of ['BOOKING CONFIRMED','Advance Received','₹21,000','Balance Payable','₹40,200','verified by Admin'])expect(voucher).toContain(text);
    expect(f.read().reported_advance).toBe(20000);expect(f.read().total).toBe(61200);
+   pdf=await quotePdf();for(const text of ['BOOKING CONFIRMED',r.code,'Advance Received: ₹21,000 (verified by Admin)','Balance Payable: ₹40,200','data-file-prefix="Booking-Confirmed"'])expect(pdf).toContain(text);
+   for(const text of ['not a confirmation voucher','Voucher not issued by this quotation','reported, not verified','Accept online:'])expect(pdf).not.toContain(text);
   }finally{f.db.close()}
  });
  it('does not allow another staff member to report funds against a restricted quotation',async()=>{

@@ -193,3 +193,25 @@ voucherRoutes.get('/vouchers/:id', requireStaff, async (c) => {
 export async function latestVoucher(env: AppEnv['Bindings'], bookingId: number) {
   return first<VoucherRow & { decider: string | null }>(env, 'SELECT v.*, u.name AS decider FROM booking_vouchers v LEFT JOIN users u ON u.id = v.decided_by WHERE v.booking_id = ? ORDER BY v.id DESC LIMIT 1', bookingId)
 }
+
+/** The latest Admin approval that confirms a booking for this quotation, or null: an approved quotation confirmation
+ *  request, or an approved voucher for a (not cancelled) booking made from the quotation. Approval means the admin
+ *  verified the advance payment and resort availability. */
+export async function approvedConfirmationForQuote(env: AppEnv['Bindings'], quotationId: number) {
+  const r = await first<{ code: string; option_id: number; decided_at: string | null; details: string }>(
+    env, "SELECT code, option_id, decided_at, details FROM quotation_confirmation_requests WHERE quotation_id = ? AND status = 'approved' ORDER BY id DESC LIMIT 1", quotationId,
+  )
+  if (r) {
+    const d = parseJson<Partial<VoucherData>>(r.details, {})
+    return { code: r.code, option_id: r.option_id as number | null, decided_at: r.decided_at, paid: d.paid ?? 0, total: d.total ?? null }
+  }
+  const v = await first<{ code: string; decided_at: string | null; snapshot: string | null }>(
+    env,
+    `SELECT v.code, v.decided_at, v.snapshot FROM booking_vouchers v JOIN bookings b ON b.id = v.booking_id
+     WHERE b.quotation_id = ? AND v.status = 'approved' AND b.status != 'cancelled' ORDER BY v.id DESC LIMIT 1`,
+    quotationId,
+  )
+  if (!v) return null
+  const d = parseJson<Partial<VoucherData>>(v.snapshot, {})
+  return { code: v.code, option_id: null, decided_at: v.decided_at, paid: d.paid ?? 0, total: d.total ?? null }
+}

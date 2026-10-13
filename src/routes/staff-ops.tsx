@@ -1,7 +1,7 @@
 import { QuotationPayment, reportedAdvance, quotationPaymentHtml } from '../lib/quotation-payment'
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
-import { latestVoucher } from './vouchers'
+import { approvedConfirmationForQuote, latestVoucher } from './vouchers'
 import { Hono, type Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { addons as readAddons, ADDON_PER, chosenAddons, contact as readContact, extrasLabel, guestsText, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, type ChosenAddon } from '../lib/catalog'
@@ -851,14 +851,19 @@ opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (
 opsRoutes.get('/staff/quotes/:id/print', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
-  const opts = await all<QuoteOptionRow & { property_name: string; room_name: string; destination: string; property_facilities: string; room_facilities: string }>(c.env, 'SELECT o.*, p.name AS property_name, p.destination, p.facilities AS property_facilities, r.facilities AS room_facilities, r.name AS room_name FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE quotation_id = ? ORDER BY o.id', q.id)
+  const allOpts = await all<QuoteOptionRow & { property_name: string; room_name: string; destination: string; property_facilities: string; room_facilities: string }>(c.env, 'SELECT o.*, p.name AS property_name, p.destination, p.facilities AS property_facilities, r.facilities AS room_facilities, r.name AS room_name FROM quotation_options o JOIN properties p ON p.id = o.property_id JOIN rooms r ON r.id = o.room_id WHERE quotation_id = ? ORDER BY o.id', q.id)
+  // After an admin approves the booking confirmation (advance and resort availability verified), the quotation PDF
+  // prints as BOOKING CONFIRMED for the approved option. Until then it keeps the "not a confirmation voucher" notice.
+  const confirmed = await approvedConfirmationForQuote(c.env, q.id)
+  const opts = confirmed ? allOpts.filter((o) => o.id === confirmed.option_id).slice(0, 1) : allOpts
+  if (confirmed && !opts.length && allOpts.length) opts.push(allOpts.find((o) => o.id === q.accepted_option_id) ?? allOpts[0])
   const names = await roomNames(c.env, opts)
   const esc = (x: unknown) => String(x ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!)
   const amenities = (value: string, room = false) => {
     const labels = parseJson<string[]>(value, []).map(key => esc((room ? ROOM_AMENITIES[key] : undefined) ?? FACILITIES[key] ?? key))
     return labels.reduce((rows, label, i) => i % 2 === 0 ? rows + `<li><span>${label}</span>${labels[i + 1] == null ? '' : `<span>${labels[i + 1]}</span>`}</li>` : rows, '')
   }
-  return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Quote ${esc(q.code)}</title><style>
+  return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${confirmed ? 'Booking Confirmed' : 'Quote'} ${esc(q.code)}</title><style>
 :root{--quote-navy:#14213d;--quote-teal:#0f5e57;--quote-red:#b42318;--quote-line:#dfe5e3;--quote-soft:#e6f2ef}
 *{box-sizing:border-box}
 body{font:12px/1.45 Arial,"Helvetica Neue",sans-serif;max-width:760px;margin:24px auto;padding:0 20px;color:var(--quote-navy);background:#fff;overflow-wrap:anywhere}
@@ -875,6 +880,9 @@ a{color:var(--quote-teal)}
 .quote-notice{border:1px solid #eee1d3;border-left:3px solid var(--quote-red);background:#fff9f2;padding:8px 12px;margin:12px 0}
 .quote-notice h2{font-size:14px;color:var(--quote-navy);line-height:1.4;margin:0}
 .quote-notice p{font-size:11px;color:#5d6b69;margin:3px 0 0}
+.quote-confirmed{border:1px solid #bfe0cc;border-left:4px solid #1d7a46;background:#effaf3;padding:10px 12px;margin:12px 0}
+.quote-confirmed h2{font-size:18px;color:#1d7a46;letter-spacing:.6px;line-height:1.3;margin:0}
+.quote-confirmed p{font-size:11px;color:#5d6b69;margin:3px 0 0}
 .quote-meta{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:24px;row-gap:0;padding:0 0 10px}
 .quote-meta p{margin:0;padding:5px 0;border-bottom:1px solid var(--quote-line);font-size:12px}
 .quote-meta strong{display:inline-block;min-width:112px;font-weight:600;color:#5d6b69}
@@ -910,18 +918,18 @@ td:first-child{width:72%}
 [data-quote-actions] button:focus-visible{outline:2px solid var(--quote-teal);outline-offset:3px}
 [data-pdf-status]{font-size:13px}
 @media(max-width:480px){body{padding:0 16px;margin:16px auto}.quote-brand{gap:12px}.quote-brand img{width:130px;height:auto}.quote-brand h1{font-size:18px}.quote-brand a{font-size:10px}.quote-brand p{font-size:10px;letter-spacing:.2px}.quote-meta{column-gap:14px}.quote-meta strong{display:block;min-width:0}.quote-amenities li{gap:12px}.quote-amenities li span{flex-basis:calc(50% - 6px)}td:first-child{width:67%}}
-@media print{body{margin:0;max-width:none;padding:0}[data-quote-actions]{display:none}tr,li,.quote-meta,.quote-brand,.quote-notice,.quote-property-heading,.quote-stay,.quote-price{break-inside:avoid}h2,h3{break-after:avoid}}
+@media print{body{margin:0;max-width:none;padding:0}[data-quote-actions]{display:none}tr,li,.quote-meta,.quote-brand,.quote-notice,.quote-confirmed,.quote-property-heading,.quote-stay,.quote-price{break-inside:avoid}h2,h3{break-after:avoid}}
 @page{size:A4;margin:12mm}
-</style></head><body><div data-quote-actions><button type="button" data-download-quote data-auto-download="${c.req.query('download') === '1' ? '1' : '0'}" data-quote-code="${esc(q.code)}">⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div><script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
-<header class="quote-brand"><img src="/brand/logo-wide.webp" alt="Go Sanchari" width="181" height="48"><div><h1>Go Sanchari</h1><a href="mailto:reservation@gosanchari.com">reservation@gosanchari.com</a><p>Travel quotation</p></div></header>
-<div class="quote-notice"><h2>Please note this is not a confirmation voucher</h2><p>Voucher not issued by this quotation</p></div>
+</style></head><body><div data-quote-actions><button type="button" data-download-quote data-auto-download="${c.req.query('download') === '1' ? '1' : '0'}" data-quote-code="${esc(q.code)}"${confirmed ? ' data-file-prefix="Booking-Confirmed"' : ''}>⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div><script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
+<header class="quote-brand"><img src="/brand/logo-wide.webp" alt="Go Sanchari" width="181" height="48"><div><h1>Go Sanchari</h1><a href="mailto:reservation@gosanchari.com">reservation@gosanchari.com</a><p>${confirmed ? 'Booking confirmation' : 'Travel quotation'}</p></div></header>
+${confirmed ? `<div class="quote-confirmed"><h2>BOOKING CONFIRMED</h2><p>Confirmation ${esc(confirmed.code)}${confirmed.decided_at ? ` · Confirmed ${esc(fmtDate(confirmed.decided_at))}` : ''} · Advance payment and resort availability verified by Admin</p></div>` : `<div class="quote-notice"><h2>Please note this is not a confirmation voucher</h2><p>Voucher not issued by this quotation</p></div>`}
 <div class="quote-meta"><p><strong>Customer:</strong> ${esc(q.guest_name)}</p><p><strong>Quotation number:</strong> ${esc(q.code)}</p><p><strong>Quotation date:</strong> ${esc(fmtDate(q.created_at))}</p><p><strong>Valid till:</strong> ${esc(fmtDate(q.valid_till))}</p></div>
 ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => `<section class="quote-option"><div class="quote-property-heading"><h2>${opts.length > 1 ? `Option ${i + 1}: ` : ''}${esc(o.property_name)}</h2><p>${esc(o.destination)}</p></div>
 <div class="quote-stay"><h3>Stay details</h3><p>${extraRoomsOf(o.extra_rooms).length ? `${roomLines(o).map(line => `<strong>${esc(names.get(line.room_id) ?? 'Room')}</strong> · ${line.rooms_count} room${line.rooms_count === 1 ? '' : 's'}`).join('<br>')}<br>Total: ${totalRooms(o)} rooms` : `<strong>${esc(o.room_name)}</strong> · ${o.rooms_count} room${o.rooms_count === 1 ? '' : 's'}`}<br>${esc(fmtDate(o.check_in))} → ${esc(fmtDate(o.check_out))}<br>${o.adults} adult${o.adults === 1 ? '' : 's'} · ${o.children} child${o.children === 1 ? '' : 'ren'} · ${esc(o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only')}</p></div>
 ${amenities(o.property_facilities) ? `<h3>Property amenities</h3><ul class="quote-amenities">${amenities(o.property_facilities)}</ul>` : ''}${amenities(o.room_facilities, true) ? `<div class="${parseJson<string[]>(o.room_facilities, []).length <= 12 ? 'quote-amenity-group' : ''}"><h3>Selected-room amenities</h3><ul class="quote-amenities">${amenities(o.room_facilities, true)}</ul></div>` : ''}
-<div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div>${quotationPaymentHtml(o.total, o.reported_advance)}</section>`).join('')}
+<div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div>${confirmed ? `<div class="quote-payment"><p>Total Amount: ${money(confirmed.total ?? o.total)} · Advance Received: ${money(confirmed.paid)} (verified by Admin) · <strong>Balance Payable: ${money(Math.max(0, (confirmed.total ?? o.total) - confirmed.paid))}</strong></p></div>` : quotationPaymentHtml(o.total, o.reported_advance)}</section>`).join('')}
 ${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment Terms &amp; Conditions</h3><p style="white-space:pre-line">${esc(q.payment_terms)}</p>` : ''}
-<p class="pdf-policy-line">Balance amount to be paid at the hotel at check-in time.</p><footer class="quote-footer"><p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p><p>Go Sanchari · reservation@gosanchari.com</p></footer></main></body></html>`)
+<p class="pdf-policy-line">Balance amount to be paid at the hotel at check-in time.</p><footer class="quote-footer">${confirmed ? '' : `<p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p>`}<p>Go Sanchari · reservation@gosanchari.com</p></footer></main></body></html>`)
 
 })
 
