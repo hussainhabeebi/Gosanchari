@@ -111,7 +111,7 @@ describe('persisted quotation review status',()=>{
  });
  it('does not issue a confirmation voucher when only the quotation is approved',async()=>{
   const f=fixture();try{await submit(f);await decide(f);const before=counts(f);
-   const html=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(html).toContain('Please note this is not a confirmation voucher');expect(html).not.toContain('<h1>BOOKING CONFIRMED</h1>');expect(counts(f)).toEqual(before);
+   const html=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(html).toContain('<h2>QUOTATION APPROVED</h2>');expect(html).not.toContain('Please note this is not a confirmation voucher');expect(html).not.toContain('<h1>BOOKING CONFIRMED</h1>');expect(counts(f)).toEqual(before);
   }finally{f.db.close()}
  });
  it('enforces CSRF on quotation review decisions',async()=>{
@@ -132,14 +132,14 @@ it('uses the same approved status on quotation links inside the enquiry workspac
 });
 
 describe('quotation PDF versus official confirmation voucher',()=>{
- it('retains the disclaimer in drafts and pending quotations, adds QUOTATION APPROVED only after quotation approval',async()=>{
+ it.each(['','?download=1'])('keeps warnings only for unapproved quotations in print/download mode %s',async mode=>{
   const f=fixture();try{
-   const print=async()=>await(await f.as(1,'sales').request(f.url+'/print?download=1',{},f.env)).text();
+   const print=async()=>await(await f.as(1,'sales').request(f.url+'/print'+mode,{},f.env)).text();
    const draft=await print();expect(draft).toContain('Please note this is not a confirmation voucher');expect(draft).not.toContain('<h2>QUOTATION APPROVED</h2>');
    await submit(f);const pending=await print();expect(pending).not.toContain('<h2>QUOTATION APPROVED</h2>');expect(pending).toContain('Please note this is not a confirmation voucher');
    await decide(f);const approved=await print();expect(approved).toContain('<h2>QUOTATION APPROVED</h2>');expect(approved).toContain('Quotation approval only. Booking confirmation requires separate Admin verification.');
-   expect(approved).toContain('Please note this is not a confirmation voucher');expect(approved).toContain('Voucher not issued by this quotation');expect(approved).not.toContain('<h2>BOOKING CONFIRMED</h2>');expect(approved).toContain('data-auto-download="1"');expect(approved).not.toContain('data-file-prefix="Booking-Confirmed"');
-   await f.as(1,'sales').request(f.url+'/reopen',{method:'POST'},f.env);expect(await print()).not.toContain('<h2>QUOTATION APPROVED</h2>');
+   expect(approved).not.toContain('Please note this is not a confirmation voucher');expect(approved).not.toContain('Voucher not issued by this quotation');expect(approved).not.toContain('<div class="quote-notice">');expect(approved).not.toContain('<h2>BOOKING CONFIRMED</h2>');expect(approved).toContain('data-auto-download="'+(mode?'1':'0')+'"');expect(approved).not.toContain('data-file-prefix="Booking-Confirmed"');
+   await f.as(1,'sales').request(f.url+'/reopen',{method:'POST'},f.env);const reopened=await print();expect(reopened).not.toContain('<h2>QUOTATION APPROVED</h2>');expect(reopened).toContain('Please note this is not a confirmation voucher');
   }finally{f.db.close()}
  });
  it('keeps rejected quotations unconfirmed and preserves the disclaimer',async()=>{
@@ -154,7 +154,7 @@ describe('quotation PDF versus official confirmation voucher',()=>{
    const row=f.db.prepare('SELECT * FROM quotation_confirmation_requests WHERE quotation_id=?').get(f.qid) as any;expect(row.status).toBe('pending');
    const voucher='http://localhost/staff/confirmation-requests/'+row.id+'/print';
    expect((await f.as(1,'sales').request(voucher,{},f.env)).status).toBe(404);
-   const pending=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(pending).toContain('<h2>QUOTATION APPROVED</h2>');expect(pending).toContain('Please note this is not a confirmation voucher');
+   const pending=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(pending).toContain('<h2>QUOTATION APPROVED</h2>');expect(pending).not.toContain('Please note this is not a confirmation voucher');expect(pending).not.toContain('Voucher not issued by this quotation');
    const path='/admin/booking-approvals/'+row.id+'/decision';
    await post(f,f.as(1,'admin'),path,{revision:'0',decision:'approved',payment_verified:'1'});expect((await f.as(1,'sales').request(voucher,{},f.env)).status).toBe(404);
    await post(f,f.as(1,'admin'),path,{revision:'0',decision:'approved',payment_verified:'1',availability_verified:'1'});
