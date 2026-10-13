@@ -1,3 +1,4 @@
+import { REVIEW_STATUS_SQL, QuotationStatus, quotationReviewHistory, ReviewHistory } from '../lib/quotation-review'
 import { QuotationPayment, reportedAdvance, quotationPaymentHtml } from '../lib/quotation-payment'
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
@@ -160,7 +161,7 @@ opsRoutes.get('/staff/finder/compare', requirePerm('manage_quotes'), async (c) =
 export async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   const u = c.get('user')!
   const perms = await permissionsFor(c.env, u.role)
-  const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE id = ?', id)
+  const q = await first<QuotationRow>(c.env, `SELECT q.*, ${REVIEW_STATUS_SQL} AS review_status FROM quotations q WHERE q.id = ?`, id)
   if (!q) return null
   if (!perms.view_all_enquiries && q.staff_id !== u.id && q.staff_id != null) return null
   return q
@@ -280,7 +281,7 @@ opsRoutes.get('/staff/quotes/new', requirePerm('manage_quotes'), createQuote)
 
 opsRoutes.get('/staff/quotes/:id/options', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
-  if (!q || !['draft', 'pending_approval', 'changes_requested'].includes(q.status)) return redirectMsg(c, '/staff/quotes', { err: 'Only draft quotes can be changed.' })
+  if (!q || q.review_status==='approved' || !['draft', 'pending_approval', 'changes_requested'].includes(q.status)) return redirectMsg(c, '/staff/quotes', { err: 'Only draft quotes can be changed.' })
   const e = q.enquiry_id ? await first<EnquiryRow>(c.env, 'SELECT * FROM enquiries WHERE id = ?', q.enquiry_id) : null
   await addOption(c, q.id, int(c.req.query('property')), int(c.req.query('room')) || null, c.req.query('checkIn') ?? e?.check_in ?? null, c.req.query('checkOut') ?? e?.check_out ?? null, e?.adults ?? Math.max(1, int(c.req.query('guests'), 2)), e?.children ?? 0)
   return c.redirect(`/staff/quotes/${q.id}`, 303)
@@ -307,7 +308,8 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   }
   const weekendOf = new Map((await all<{ id: number; weekend_nights: string }>(c.env, `SELECT id, weekend_nights FROM properties WHERE id IN (${placeholders(Math.max(1, options.length))})`, ...(options.length ? options.map((o) => o.property_id) : [0]))).map((x) => [x.id, x.weekend_nights]))
   const allRooms = options.length ? await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(options.length)})`, ...options.map((o) => o.property_id)) : []
-  const editable = ['draft', 'pending_approval', 'changes_requested'].includes(q.status)
+  const editable = q.review_status !== 'approved' && ['draft', 'pending_approval', 'changes_requested'].includes(q.status)
+  const reviewHistory = await quotationReviewHistory(c.env,q.id)
   const resolvedPrices = new Map<number, Awaited<ReturnType<typeof priceOption>>>()
   for (const o of options) resolvedPrices.set(o.id, await priceOption(c, { ...o, apply_gst: q.apply_gst }))
   const needsApproval = options.some(o => resolvedPrices.get(o.id)?.errors.length)
@@ -316,15 +318,17 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   return page(c, { title: `Quotation ${q.code}`, area: 'staff', active: 'quotes' }, (
     <div class="stack-lg">
       <div class="row-between">
-        <div><a href="/staff/quotes" class="small">← Quotations</a><h1>Quotation {q.code} <Pill s={q.status} /></h1>{enquiry && <a class="small" href={`/staff/enquiries/${enquiry.id}`}>Enquiry {enquiry.code} · {enquiry.summary ?? ''}</a>}</div>
+        <div><a href="/staff/quotes" class="small">← Quotations</a><h1>Quotation {q.code} <QuotationStatus q={q} /></h1>{enquiry && <a class="small" href={`/staff/enquiries/${enquiry.id}`}>Enquiry {enquiry.code} · {enquiry.summary ?? ''}</a>}</div>
         <div class="row wrap-row">
           {c.get('user')!.role==='admin' && q.status==='pending_approval' && <form method="post" action={`/admin/quotes/${q.id}/approve`} class="inline"><input type="hidden" name="reviewed_at" value={q.updated_at}/><button class="btn btn-sm" data-quotation-approve>Approve quotation only</button></form>}
+          {c.get('user')!.role==='admin' && q.status==='pending_approval' && <form method="post" action={`/admin/quotes/${q.id}/reject`} class="inline"><input type="hidden" name="reviewed_at" value={q.updated_at}/><input name="reason" aria-label="Quotation rejection reason" placeholder="Reason for rejection" maxlength={1000} required /><button class="btn btn-sm btn-outline">Reject quotation</button></form>}
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/confirmation`}>Request Booking Confirmation</a>
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/preview`} target="_blank">Preview</a>
           <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}/print`} target="_blank">PDF</a>
           <form method="post" action={`/staff/quotes/${q.id}/duplicate`} class="inline"><button class="btn btn-sm btn-outline">Duplicate</button></form>
         </div>
       </div>
+      <ReviewHistory history={reviewHistory} />
       {q.guest_feedback && <div class="flash">Guest said: “{q.guest_feedback}”</div>}
       {needsApproval && <div class="flash flash-err">This quotation has an unresolved rate or a price below the Staff Rate. Correct it before saving or sending.</div>}
 
@@ -478,9 +482,10 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
 
         <div class="row wrap-row sticky-actions quotation-primary-actions">
           {editable && <><button class="btn">{c.get('user')!.role==='admin' && q.status==='pending_approval' ? 'Save Admin edits' : 'Save to Draft'}</button><button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/download`} formtarget="_blank">Download</button><button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/request-approval`} disabled={q.status==='pending_approval'}>Send to Approval</button><span class="small muted">Download saves current edits as a draft. Quotation approval does not confirm a booking.</span></>}
-          {!editable && <a class="btn btn-outline" href={`https://wa.me/${(q.phone ?? '').replace(/\D/g, '')}?text=${encodeURIComponent(link)}`} target="_blank">Resend link on WhatsApp</a>}
+          {q.review_status==='approved' && <a class="btn btn-outline" href={`/staff/quotes/${q.id}/print?download=1`} target="_blank">Download</a>}
+          {!editable && q.review_status !== 'approved' && <a class="btn btn-outline" href={`https://wa.me/${(q.phone ?? '').replace(/\D/g, '')}?text=${encodeURIComponent(link)}`} target="_blank">Resend link on WhatsApp</a>}
           {!editable && q.status !== 'accepted' && <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/reopen`}>Edit (reopen)</button>}
-          {!editable && q.status !== 'accepted' && options.length > 0 && <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/convert`}>Convert to booking</button>}
+          {!editable && q.review_status !== 'approved' && q.status !== 'accepted' && options.length > 0 && <button class="btn btn-outline" formaction={`/staff/quotes/${q.id}/convert`}>Convert to booking</button>}
         </div>
         {q.status !== 'draft' && <p class="small">Guest link: <a href={link} target="_blank">{link}</a> · viewed {q.view_count}× {q.last_viewed_at ? `(last ${fmtDateTime(q.last_viewed_at)})` : ''}</p>}
       </form>
@@ -532,7 +537,7 @@ async function calculateDraftOption(c: Context<AppEnv>, o: QuoteOptionRow, f: Fo
 opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.json({ error: 'Quotation not found.' }, 404)
-  if (!['draft', 'pending_approval', 'changes_requested'].includes(q.status)) return c.json({ error: 'Reopen this quotation before editing.' }, 409)
+  if (q.review_status==='approved' || !['draft', 'pending_approval', 'changes_requested'].includes(q.status)) return c.json({ error: 'Reopen this quotation before editing.' }, 409)
   const f = await form(c)
   const applyGst = f.gst_control === '1' ? (f.apply_gst === '1' ? 1 : 0) : q.apply_gst ?? 1
   const perms = await permissionsFor(c.env, c.get('user')!.role)
@@ -585,6 +590,7 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
 
 /** Save all fields and re-price every option by the rate rules. */
 async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
+  if(q.review_status==='approved')throw new HTTPException(303,{res:redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Quotation Approved. Use Edit (reopen) before changing approved details.'})})
   const u = c.get('user')!
   const f = await form(c)
   const applyGst = f.gst_control === '1' ? (f.apply_gst === '1' ? 1 : 0) : q.apply_gst ?? 1
@@ -651,14 +657,16 @@ opsRoutes.post('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
   if (!q) return c.notFound()
   await saveQuote(c, q)
   if(c.get('user')!.role!=='admin' || q.status!=='pending_approval')await run(c.env, "UPDATE quotations SET status='draft' WHERE id=? AND status IN ('draft','pending_approval','changes_requested')",q.id)
+  if(q.review_status==='pending' || q.review_status==='rejected') { if(c.get('user')!.role!=='admin' || q.status!=='pending_approval')await logActivity(c.env,c.get('user')!.id,'quote.review_reset','quotation',q.id,{reason:'Saved to Draft; review must be submitted again.'}) }
   return redirectMsg(c, `/staff/quotes/${q.id}`, { ok: c.get('user')!.role==='admin' && q.status==='pending_approval' ? 'Admin edits saved for review.' : 'Saved to Draft.' })
 })
 
 opsRoutes.post('/staff/quotes/:id/download',requirePerm('manage_quotes'),async c=>{
  const q=await loadQuoteFor(c,int(c.req.param('id')));if(!q)return c.notFound()
- if(!['draft','pending_approval','changes_requested'].includes(q.status))return c.redirect(`/staff/quotes/${q.id}/print?download=1`,303)
+ if(q.review_status==='approved' || !['draft','pending_approval','changes_requested'].includes(q.status))return c.redirect(`/staff/quotes/${q.id}/print?download=1`,303)
  await saveQuote(c,q)
- if(c.get('user')!.role!=='admin' || q.status!=='pending_approval')await run(c.env,"UPDATE quotations SET status='draft' WHERE id=? AND status IN ('draft','pending_approval','changes_requested')",q.id)
+ if(q.status!=='pending_approval')await run(c.env,"UPDATE quotations SET status='draft' WHERE id=? AND status IN ('draft','changes_requested')",q.id)
+ if(q.review_status==='rejected')await logActivity(c.env,c.get('user')!.id,'quote.review_reset','quotation',q.id,{reason:'Edited and downloaded as draft.'})
  return c.redirect(`/staff/quotes/${q.id}/print?download=1`,303)
 })
 
@@ -674,6 +682,7 @@ opsRoutes.post('/staff/quotes/:id/add', requirePerm('manage_quotes'), async (c) 
 opsRoutes.post('/staff/quotes/:id/options/:oid/delete', requirePerm('manage_quotes'), async (c) => {
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
+  if(q.review_status==='approved')return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Reopen the approved quotation before changing options.'})
   await run(c.env, 'DELETE FROM quotation_options WHERE id = ? AND quotation_id = ?', int(c.req.param('oid')), q.id)
   return c.redirect(`/staff/quotes/${q.id}`, 303)
 })
@@ -718,7 +727,7 @@ opsRoutes.post('/staff/quotes/:id/request-approval', requirePerm('manage_quotes'
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   if(q.status==='pending_approval')return redirectMsg(c,`/staff/quotes/${q.id}`,{ok:'Already submitted for quotation review.'})
-  if(!['draft','changes_requested'].includes(q.status))return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Reopen this quotation before submitting it.'})
+  if(q.review_status==='approved' || !['draft','changes_requested'].includes(q.status))return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Reopen this quotation before submitting it.'})
   const count=await first<{n:number}>(c.env,'SELECT COUNT(*) AS n FROM quotation_options WHERE quotation_id=?',q.id)
   if(!count?.n)return redirectMsg(c,`/staff/quotes/${q.id}`,{err:'Add at least one quotation option before submission.'})
   const submitted=await form(c)
@@ -735,6 +744,7 @@ opsRoutes.post('/staff/quotes/:id/reopen', requirePerm('manage_quotes'), async (
   const q = await loadQuoteFor(c, int(c.req.param('id')))
   if (!q) return c.notFound()
   await run(c.env, "UPDATE quotations SET status = 'draft' WHERE id = ? AND status != 'accepted'", q.id)
+  if(q.status!=='accepted')await logActivity(c.env,c.get('user')!.id,'quote.review_reset','quotation',q.id,{reason:'Explicitly reopened for editing; previous approval is historical.'})
   return c.redirect(`/staff/quotes/${q.id}`, 303)
 })
 
@@ -883,6 +893,9 @@ a{color:var(--quote-teal)}
 .quote-confirmed{border:1px solid #bfe0cc;border-left:4px solid #1d7a46;background:#effaf3;padding:10px 12px;margin:12px 0}
 .quote-confirmed h2{font-size:18px;color:#1d7a46;letter-spacing:.6px;line-height:1.3;margin:0}
 .quote-confirmed p{font-size:11px;color:#5d6b69;margin:3px 0 0}
+.quote-approved{border:1px solid var(--quote-line);border-left:3px solid var(--quote-teal);background:#f8fafb;padding:8px 12px;margin:12px 0}
+.quote-approved h2{font-size:16px;line-height:1.3;margin:0;color:var(--quote-teal)}
+.quote-approved p{font-size:11px;margin:3px 0 0}
 .quote-meta{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:24px;row-gap:0;padding:0 0 10px}
 .quote-meta p{margin:0;padding:5px 0;border-bottom:1px solid var(--quote-line);font-size:12px}
 .quote-meta strong{display:inline-block;min-width:112px;font-weight:600;color:#5d6b69}
@@ -918,10 +931,11 @@ td:first-child{width:72%}
 [data-quote-actions] button:focus-visible{outline:2px solid var(--quote-teal);outline-offset:3px}
 [data-pdf-status]{font-size:13px}
 @media(max-width:480px){body{padding:0 16px;margin:16px auto}.quote-brand{gap:12px}.quote-brand img{width:130px;height:auto}.quote-brand h1{font-size:18px}.quote-brand a{font-size:10px}.quote-brand p{font-size:10px;letter-spacing:.2px}.quote-meta{column-gap:14px}.quote-meta strong{display:block;min-width:0}.quote-amenities li{gap:12px}.quote-amenities li span{flex-basis:calc(50% - 6px)}td:first-child{width:67%}}
-@media print{body{margin:0;max-width:none;padding:0}[data-quote-actions]{display:none}tr,li,.quote-meta,.quote-brand,.quote-notice,.quote-confirmed,.quote-property-heading,.quote-stay,.quote-price{break-inside:avoid}h2,h3{break-after:avoid}}
+@media print{body{margin:0;max-width:none;padding:0}[data-quote-actions]{display:none}tr,li,.quote-meta,.quote-brand,.quote-notice,.quote-confirmed,.quote-approved,.quote-property-heading,.quote-stay,.quote-price{break-inside:avoid}h2,h3{break-after:avoid}}
 @page{size:A4;margin:12mm}
 </style></head><body><div data-quote-actions><button type="button" data-download-quote data-auto-download="${c.req.query('download') === '1' ? '1' : '0'}" data-quote-code="${esc(q.code)}"${confirmed ? ' data-file-prefix="Booking-Confirmed"' : ''}>⬇ Download PDF</button><button type="button" data-print>Print</button><span data-pdf-status role="status" aria-live="polite"></span></div><script src="/vendor/html2pdf-0.14.0.bundle.min.js" defer></script><script src="/quotation-download.js" defer></script><script src="/app.js" defer></script><main data-quote-export>
 <header class="quote-brand"><img src="/brand/logo-wide.webp" alt="Go Sanchari" width="181" height="48"><div><h1>Go Sanchari</h1><a href="mailto:reservation@gosanchari.com">reservation@gosanchari.com</a><p>${confirmed ? 'Booking confirmation' : 'Travel quotation'}</p></div></header>
+${!confirmed && q.review_status === 'approved' ? `<div class="quote-approved"><h2>QUOTATION APPROVED</h2><p>Quotation approval only. Booking confirmation requires separate Admin verification.</p></div>` : ''}
 ${confirmed ? `<div class="quote-confirmed"><h2>BOOKING CONFIRMED</h2><p>Confirmation ${esc(confirmed.code)}${confirmed.decided_at ? ` · Confirmed ${esc(fmtDate(confirmed.decided_at))}` : ''} · Advance payment and resort availability verified by Admin</p></div>` : `<div class="quote-notice"><h2>Please note this is not a confirmation voucher</h2><p>Voucher not issued by this quotation</p></div>`}
 <div class="quote-meta"><p><strong>Customer:</strong> ${esc(q.guest_name)}</p><p><strong>Quotation number:</strong> ${esc(q.code)}</p><p><strong>Quotation date:</strong> ${esc(fmtDate(q.created_at))}</p><p><strong>Valid till:</strong> ${esc(fmtDate(q.valid_till))}</p></div>
 ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => `<section class="quote-option"><div class="quote-property-heading"><h2>${opts.length > 1 ? `Option ${i + 1}: ` : ''}${esc(o.property_name)}</h2><p>${esc(o.destination)}</p></div>
@@ -942,11 +956,13 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
   const where: string[] = []
   const binds: (string | number)[] = []
   if (status === 'viewed3') where.push("q.view_count >= 3 AND q.status IN ('sent','viewed')")
+  else if (status==='quotation_approved' || status==='quotation_rejected') { where.push(`(${REVIEW_STATUS_SQL}) = ?`); binds.push(status==='quotation_approved'?'approved':'rejected') }
+  else if (status==='draft') { where.push(`q.status='draft' AND (${REVIEW_STATUS_SQL}) != 'approved'`) }
   else if (status !== 'all') { where.push('q.status = ?'); binds.push(status) }
   if (!perms.view_all_enquiries) { where.push('q.staff_id = ?'); binds.push(u.id) }
   const rows = await all<QuotationRow & { total: number; property_name: string | null; staff_name: string | null; max_disc: number }>(
     c.env,
-    `SELECT q.*, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total,
+    `SELECT q.*, ${REVIEW_STATUS_SQL} AS review_status, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total,
        (SELECT MAX(discount_pct) FROM quotation_options o WHERE o.quotation_id = q.id) AS max_disc,
        (SELECT p.name FROM quotation_options o JOIN properties p ON p.id = o.property_id WHERE o.quotation_id = q.id LIMIT 1) AS property_name, s.name AS staff_name
      FROM quotations q LEFT JOIN users s ON s.id = q.staff_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY q.updated_at DESC LIMIT 51 OFFSET ?`,
@@ -964,7 +980,7 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
           <Table head={['Staff', 'Sent', 'Accepted', 'Rate']}>{conv.map((r) => <tr><td>{r.name}</td><td>{r.sent}</td><td>{r.accepted}</td><td>{r.sent ? Math.round((r.accepted / r.sent) * 100) : 0}%</td></tr>)}</Table>
         </div>
       )}
-      <Tabs base={base} param="status" active={status} items={[['all', 'All'], ['draft', 'Draft'], ['pending_approval', 'Needs approval'], ['sent', 'Sent'], ['viewed', 'Viewed'], ['viewed3', 'Viewed 3+, not booked'], ['accepted', 'Accepted'], ['changes_requested', 'Changes asked'], ['expired', 'Expired'], ['declined', 'Declined']]} />
+      <Tabs base={base} param="status" active={status} items={[['all', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'], ['quotation_approved','Quotation Approved'], ['quotation_rejected','Rejected'], ['sent', 'Sent'], ['viewed', 'Viewed'], ['viewed3', 'Viewed 3+, not booked'], ['accepted', 'Accepted'], ['changes_requested', 'Changes asked'], ['expired', 'Expired'], ['declined', 'Declined']]} />
       <Table head={['Quote', 'Guest', 'Property', 'Amount', 'Sent', 'Status', ...(admin ? ['Staff', 'Discount'] : []), 'Actions']}>
         {rows.slice(0, 50).map((q) => (
           <tr>
@@ -973,7 +989,7 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
             <td>{q.property_name ?? '—'}</td>
             <td>{money(q.total)}</td>
             <td class="small">{fmtDateTime(q.sent_at)}</td>
-            <td><Pill s={q.status} />{q.view_count >= 3 && !['accepted', 'declined'].includes(q.status) && <span class="pill pill-urgent" title="Viewed 3+ times, not booked">👁 {q.view_count}</span>}</td>
+            <td><QuotationStatus q={q} />{q.view_count >= 3 && !['accepted', 'declined'].includes(q.status) && <span class="pill pill-urgent" title="Viewed 3+ times, not booked">👁 {q.view_count}</span>}</td>
             {admin && <td>{q.staff_name}</td>}
             {admin && <td>{q.max_disc ? `${q.max_disc}%` : '—'}</td>}
             <td class="nowrap">

@@ -1,6 +1,6 @@
 // Admin pages 31–40: dashboard, properties, rates, offers, all enquiries/quotes/bookings, payments, guests.
 
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { stayTypeLabel } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { COVER_PHOTO_SQL } from '../lib/catalog'
@@ -479,20 +479,34 @@ adminRoutes.post('/admin/offers/:id/toggle', requirePerm('manage_offers'), async
 adminRoutes.get('/admin/enquiries', requirePerm('view_all_enquiries'), (c) => renderInbox(c, { admin: true }))
 adminRoutes.get('/admin/quotes', requirePerm('approve_discounts'), (c) => renderQuotes(c, true))
 
-adminRoutes.post('/admin/quotes/:id/approve', requirePerm('approve_discounts'), async (c) => {
-  const id = int(c.req.param('id'))
-  const u = c.get('user')!
+// The lifecycle CHECK has no "approved" value. Persist the separate review decision
+// atomically with its lifecycle transition, and read it consistently from the audit log.
+async function decideQuotation(c: Context<AppEnv>, decision: 'approved' | 'rejected') {
+  const id = int(c.req.param('id')), u = c.get('user')!
   if(u.role!=='admin')return c.text('Admin quotation review required.',403)
-  const submitted=await form(c)
-  if(!submitted.reviewed_at)return redirectMsg(c,'/admin/quotes',{err:'Open and review the current quotation before approval.'})
-  const won=await c.env.DB.prepare("UPDATE quotations SET status='draft',updated_at=? WHERE id=? AND status='pending_approval' AND updated_at=? RETURNING id").bind(nowIso(),id,submitted.reviewed_at).first()
-  if(!won)return redirectMsg(c,'/admin/quotes',{err:'This quotation is no longer waiting for review.'})
-  await run(c.env, 'UPDATE quotation_options SET discount_approved_by = ? WHERE quotation_id = ?', u.id, id)
-  const q = await first<{ staff_id: number | null; code: string; guest_name: string }>(c.env, 'SELECT staff_id, code, guest_name FROM quotations WHERE id = ?', id)
-  if (q?.staff_id) await run(c.env, 'INSERT INTO tasks (assigned_to, quotation_id, guest_name, reason, due_at, created_by) VALUES (?, ?, ?, ?, ?, ?)', q.staff_id, id, q.guest_name, `Price approved on ${q.code} — send it now`, nowIso(), u.id)
-  await logActivity(c.env, u.id, 'quote.discount_approved', 'quotation', id)
-  return redirectMsg(c, '/admin/quotes', { ok: 'Approved. The staff member can now send the quote.' })
-})
+  const submitted=await form(c), reason=str(submitted.reason,1000)
+  if(!submitted.reviewed_at)return redirectMsg(c,'/admin/quotes',{err:'Open and review the current quotation before making a decision.'})
+  if(decision==='rejected'&&!reason)return redirectMsg(c,`/staff/quotes/${id}`,{err:'Enter a reason for rejecting the quotation.'})
+  const version=nowIso()===submitted.reviewed_at ? new Date(Date.parse(submitted.reviewed_at)+1).toISOString() : nowIso()
+  const action=decision==='approved'?'quote.discount_approved':'quote.review_rejected'
+  const status=decision==='approved'?'draft':'changes_requested'
+  const details=JSON.stringify({status:decision,reason,reviewed_at:submitted.reviewed_at,quotation_version:version})
+  // D1 batch is a transaction: a failed status update rolls back the approval audit.
+  // Stale/double submissions insert nothing and update nothing.
+  const result=await c.env.DB.batch([
+    c.env.DB.prepare("INSERT INTO activity_log(user_id,action,entity,entity_id,details) SELECT ?,?,'quotation',CAST(id AS TEXT),? FROM quotations WHERE id=? AND status='pending_approval' AND updated_at=?").bind(u.id,action,details,id,submitted.reviewed_at),
+    c.env.DB.prepare("UPDATE quotations SET status=?,updated_at=? WHERE id=? AND status='pending_approval' AND updated_at=? RETURNING id").bind(status,version,id,submitted.reviewed_at),
+  ])
+  if(!result[1].results?.length)return redirectMsg(c,'/admin/quotes',{err:'This quotation changed or is no longer waiting for review. Open it again.'})
+  if(decision==='approved') {
+    await run(c.env,'UPDATE quotation_options SET discount_approved_by=? WHERE quotation_id=?',u.id,id)
+    const q=await first<{staff_id:number|null;code:string;guest_name:string}>(c.env,'SELECT staff_id,code,guest_name FROM quotations WHERE id=?',id)
+    if(q?.staff_id)await run(c.env,'INSERT INTO tasks(assigned_to,quotation_id,guest_name,reason,due_at,created_by) VALUES(?,?,?,?,?,?)',q.staff_id,id,q.guest_name,`Quotation Approved: ${q.code} — quotation approval only; booking confirmation requires separate verification`,nowIso(),u.id)
+  }
+  return redirectMsg(c,`/staff/quotes/${id}`,{ok:decision==='approved'?'Quotation Approved. No booking or payment has been confirmed.':'Quotation Rejected. The reason is available in approval history.'})
+}
+adminRoutes.post('/admin/quotes/:id/approve',requirePerm('approve_discounts'),c=>decideQuotation(c,'approved'))
+adminRoutes.post('/admin/quotes/:id/reject',requirePerm('approve_discounts'),c=>decideQuotation(c,'rejected'))
 
 adminRoutes.get('/admin/bookings', requirePerm('approve_cancellations'), (c) => renderBookings(c, true))
 

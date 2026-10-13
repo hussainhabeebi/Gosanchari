@@ -1,3 +1,4 @@
+import { REVIEW_STATUS_SQL, QuotationStatus } from '../lib/quotation-review'
 // Staff pages 19–21 and 28–30: dashboard, enquiry inbox, enquiry workspace, guests, follow-ups, profile.
 
 import { Hono, type Context } from 'hono'
@@ -12,7 +13,7 @@ import { leadScore, signalsFromRow } from '../lib/leadscore'
 import { fillTemplate, mediaUrl, sendWhatsApp } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
 import type { Permissions } from '../lib/permissions'
-import type { EnquiryRow, MessageRow } from '../lib/types'
+import type { EnquiryRow, MessageRow, QuotationRow } from '../lib/types'
 import { fmtDate, fmtDateTime, int, isDate, money, normalizePhone, nowIso, parseJson, refCode, str, timeAgo, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
 import { destinations } from '../lib/properties'
@@ -333,7 +334,7 @@ staffRoutes.get('/staff/enquiries/:id', requirePerm('manage_enquiries'), async (
     all<MessageRow & { staff_name: string | null }>(c.env, 'SELECT m.*, s.name AS staff_name FROM messages m LEFT JOIN users s ON s.id = m.user_id WHERE m.enquiry_id = ? ORDER BY m.id', e.id),
     all<{ id: number; code: string; property_name: string; check_in: string; total: number; status: string }>(c.env, "SELECT b.id, b.code, p.name AS property_name, b.check_in, b.total, b.status FROM bookings b JOIN properties p ON p.id = b.property_id WHERE (b.user_id = ? OR b.guest_phone = ?) ORDER BY b.check_in DESC LIMIT 10", e.user_id ?? -1, e.phone ?? '-'),
     all<{ id: number; note: string; kind: string; source: string; created_at: string }>(c.env, 'SELECT * FROM guest_notes WHERE (user_id = ? OR phone = ?) ORDER BY kind DESC, id DESC', e.user_id ?? -1, e.phone ?? '-'),
-    all<{ id: number; code: string; status: string; view_count: number; token: string; total: number }>(c.env, 'SELECT q.id, q.code, q.status, q.view_count, q.token, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total FROM quotations q WHERE q.enquiry_id = ? ORDER BY q.id DESC', e.id),
+    all<Pick<QuotationRow,'id'|'code'|'status'|'review_status'|'view_count'|'token'> & {total:number}>(c.env, `SELECT q.id, q.code, q.status, ${REVIEW_STATUS_SQL} AS review_status, q.view_count, q.token, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total FROM quotations q WHERE q.enquiry_id = ? ORDER BY q.id DESC`, e.id),
     all<{ id: number; code: string; status: string; created_at: string }>(c.env, 'SELECT id, code, status, created_at FROM enquiries WHERE phone = ? AND id != ? ORDER BY id DESC LIMIT 5', e.phone ?? '-', e.id),
     staffList(c),
     all<{ id: number; reason: string; due_at: string }>(c.env, "SELECT id, reason, due_at FROM tasks WHERE enquiry_id = ? AND status = 'open' ORDER BY due_at", e.id),
@@ -469,7 +470,7 @@ staffRoutes.get('/staff/enquiries/:id', requirePerm('manage_enquiries'), async (
           ))}
           <h3 class="mt">Quotations</h3>
           {quotes.length === 0 && <p class="muted small">None yet.</p>}
-          {quotes.map((q) => <div class="list-item sub"><a href={`/staff/quotes/${q.id}`}>{q.code}</a> <Pill s={q.status} /> <span class="small">{money(q.total)} · 👁 {q.view_count}</span></div>)}
+          {quotes.map((q) => <div class="list-item sub"><a href={`/staff/quotes/${q.id}`}>{q.code}</a> <QuotationStatus q={q} /> <span class="small">{money(q.total)} · 👁 {q.view_count}</span></div>)}
           <h3 class="mt">Follow-ups</h3>
           {tasks.map((t) => <div class="small">• {t.reason} — {fmtDateTime(t.due_at)}</div>)}
           <form method="post" action="/staff/tasks" class="stack">

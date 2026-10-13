@@ -167,6 +167,8 @@ export interface MessageRow {
 }
 
 export interface QuotationRow {
+  /** Derived from persisted quotation-review audit events; not a booking status. */
+  review_status?: 'none' | 'pending' | 'approved' | 'rejected'
   apply_gst: number
   id: number
   code: string
