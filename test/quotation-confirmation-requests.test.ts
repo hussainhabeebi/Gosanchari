@@ -65,7 +65,7 @@ describe('quotation confirmation approval workflow',()=>{
    const url='http://localhost/staff/confirmation-requests/1/print'
    const response=await f.sales.request(url,{},f.env), html=await response.text()
    expect(response.headers.get('cache-control')).toBe('private, no-store')
-   for(const text of ['BOOKING CONFIRMED','Booking Status: Confirmed','Total Room Rent','₹19,000','Full Booking Total','₹24,800','₹14,800','Verified with resort','Balance amount to be paid at the hotel at check-in time.','data-file-prefix="Booking-Confirmed"','format']) {
+   for(const text of ['BOOKING CONFIRMED','Booking Status: Confirmed','Total Room Rent','₹19,000','Total Amount','₹24,800','₹14,800','Verified with resort','Balance amount to be paid at the hotel at check-in time.','data-file-prefix="Booking-Confirmed"','format']) {
     if(text!=='format')expect(html).toContain(text)
    }
    expect(html).not.toContain('not a confirmation voucher');expect(html).not.toContain('Staff Rate');expect(html).not.toContain('net_rate')

@@ -70,7 +70,7 @@ describe('Booking confirmation voucher', () => {
     expect(html).not.toContain('PREVIEW')
     for (const text of ['<h1>BOOKING CONFIRMED</h1>', 'Booking Status: Confirmed', 'Anu Thomas', '+91 98470 55555', 'No. of Adults</th><td>2', 'No. of Kids</th><td>2', 'Kids Age</th><td>4, 9',
       'Ice Hills Resort', '+91 94470 11111 / +91 94470 22222', 'Location</th><td>Chinnakanal, Munnar<', '24 Dec 2030', '26 Dec 2030', 'Standard AC × 1', '<span>Pool</span>', '<span>Wi-Fi</span>',
-      'UPI', 'UTR123', 'Full Booking Total</td><td class="r">₹16,800', 'Advance Paid</td><td class="r">₹6,000', 'Balance Amount</td><td class="r">₹10,800',
+      'UPI', 'UTR123', 'Total Amount</td><td class="r">₹16,800', 'Advance Received</td><td class="r">₹6,000', 'Balance Payable</td><td class="r">₹10,800',
       'Balance amount to be paid at the hotel at check-in time.', 'Honeymoon cake on arrival', 'Early check-in confirmed by resort', '<strong>Go Sanchari</strong>']) expect(html).toContain(text)
     expect(html.indexOf('Remarks')).toBeLessThan(html.indexOf('class="v-footer"'))
   })
@@ -83,7 +83,7 @@ describe('Booking confirmation voucher', () => {
     await f.post(f.admin, `/admin/vouchers/${vid}/approve`, {payment_verified:'1', availability_verified:'1'})
     f.pay(10800, 'UTR999')
     const html = await (await f.sales.request(`http://localhost/vouchers/${vid}`, {}, f.env)).text()
-    expect(html).toContain('Balance Amount</td><td class="r">₹10,800')
+    expect(html).toContain('Balance Payable</td><td class="r">₹10,800')
     expect(html).not.toContain('UTR999')
   })
 

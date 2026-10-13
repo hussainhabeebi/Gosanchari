@@ -1159,7 +1159,28 @@
 // Unsaved Staff quotation price preview. The server remains the pricing authority.
 (function () {
   var form = document.querySelector('[data-quote-recalculate]');
+  function payment(section, total) {
+    var box = section.querySelector('[data-quotation-payment]');
+    if (!box) return;
+    if (total != null) box.dataset.paymentTotal = String(total);
+    var amount = box.querySelector('[data-reported-advance]'), error = box.querySelector('[data-payment-error]');
+    var payable = Number(box.dataset.paymentTotal), value = Number(amount.value || 0);
+    amount.max = String(payable);
+    var valid = Number.isSafeInteger(value) && value >= 0 && value <= payable;
+    box.querySelector('[data-payment-total-label]').textContent = '₹' + payable.toLocaleString('en-IN');
+    box.querySelector('[data-payment-balance]').textContent = valid ? '₹' + (payable - value).toLocaleString('en-IN') : 'Check advance amount';
+    error.textContent = valid ? '' : 'Advance Received must be a non-negative whole-rupee amount no greater than Total Amount.';
+    error.hidden = valid;
+    amount.setCustomValidity(valid ? '' : error.textContent);
+  }
+  document.querySelectorAll('[data-confirmation-payment]').forEach(function (confirmation) {
+    payment(confirmation);
+    confirmation.addEventListener('input', function (event) {
+      if (event.target.hasAttribute('data-reported-advance')) payment(confirmation);
+    });
+  });
   if (!form) return;
+  form.querySelectorAll('[data-quote-option]').forEach(function (section) { payment(section); });
   var timer, controller, revision = 0;
   function status(message) {
     form.querySelectorAll('[data-price-status]').forEach(function (node) { node.textContent = message; });
@@ -1174,6 +1195,7 @@
       data.options.forEach(function (option) {
         var section = form.querySelector('[data-quote-option="' + option.id + '"]');
         if (!section) return;
+        payment(section, option.total);
         var table = section.querySelector('[data-price-breakdown]');
         table.replaceChildren();
         option.rows.forEach(function (row) {
@@ -1206,7 +1228,11 @@
   }
   function changed(event) {
     var field = event.target;
-    if (!/^(apply_gst|(?:room|in|out|rooms|adults|children|kids|meal|grate|discount|extra|extralabel|addon|addonqty|xroom|xrooms|xgrate)_\d+(?:_\d+)?)$/.test(field.name || '')) return;
+    if (/^advance_\d+$/.test(field.name || '')) {
+      payment(field.closest('[data-quote-option]'));
+      // Balance is display arithmetic, not a second pricing engine. Invalidate pending prices.
+    }
+    if (!/^(apply_gst|(?:room|in|out|rooms|adults|children|kids|meal|grate|discount|advance|extra|extralabel|addon|addonqty|xroom|xrooms|xgrate)_\d+(?:_\d+)?)$/.test(field.name || '')) return;
     revision++;
     clearTimeout(timer);
     if (controller) controller.abort();

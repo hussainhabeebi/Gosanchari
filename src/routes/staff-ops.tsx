@@ -1,3 +1,4 @@
+import { QuotationPayment, reportedAdvance, quotationPaymentHtml } from '../lib/quotation-payment'
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
 
 import { latestVoucher } from './vouchers'
@@ -433,6 +434,13 @@ opsRoutes.get('/staff/quotes/:id', requirePerm('manage_quotes'), async (c) => {
                 <tr class="total"><td>Total</td><td>{money(o.total)}</td></tr>
                 {perms.view_net_rates && margin != null && <tr class="internal"><td>Room margin (internal, before GST)</td><td>{money(margin)}</td></tr>}
               </table>
+              <div data-quotation-payment data-payment-total={o.total} class="stack">
+                <Field label="Advance Received ₹" hint="Reported advance for this option only; not verified payment."><input type="number" name={`advance_${o.id}`} value={o.reported_advance ?? 0} min="0" max={o.total} step="1" disabled={!editable} data-reported-advance /></Field>
+                <p class="small">Total Amount: <strong data-payment-total-label>{money(o.total)}</strong> · Balance Payable: <strong data-payment-balance>{money(o.total - (o.reported_advance ?? 0))}</strong></p>
+                <p class="small error" data-payment-error hidden></p>
+                <p class="small muted">Advance is reported, not verified. Booking confirmation requires separate Admin payment and availability verification.</p>
+                <p class="small">Balance amount to be paid at the hotel at check-in time.</p>
+              </div>
               <p class="muted small" data-price-status role="status" aria-live="polite">{editable ? 'Prices update automatically. Save to retain your changes.' : 'Prices reflect the saved quotation.'}</p>
             </section>
           )
@@ -514,7 +522,11 @@ async function calculateDraftOption(c: Context<AppEnv>, o: QuoteOptionRow, f: Fo
   const ids = roomLines(next).map(line => line.room_id)
   if (new Set(ids).size !== ids.length) throw new HTTPException(422, { res: c.json({ error: 'Each room category may be selected only once within an option.' }, 422) })
   const p = await priceOption(c, next)
-  return { next, picked, p, amount, grate, checkIn, checkOut }
+  let advance = 0
+  let paymentError = ''
+  try { advance = reportedAdvance(f[`advance_${oid}`] ?? o.reported_advance, p?.total ?? o.total) }
+  catch (error) { paymentError = (error as Error).message }
+  return { next, picked, p, amount, grate, checkIn, checkOut, advance, paymentError }
 }
 
 opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), async (c) => {
@@ -530,7 +542,7 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
     if (!o) return c.json({ error: 'Quotation option not found.' }, 404)
     const selectedRoom = await first<{ property_id: number }>(c.env, 'SELECT property_id FROM rooms WHERE id = ?', int(f[`room_${oid}`], o.room_id))
     if (!selectedRoom || selectedRoom.property_id !== o.property_id) return c.json({ error: 'Select a room belonging to this option’s property.' }, 422)
-    const { next, picked, p } = await calculateDraftOption(c, o, f, applyGst)
+    const { next, picked, p, advance, paymentError } = await calculateDraftOption(c, o, f, applyGst)
     if (!p) return c.json({ error: 'Room rate could not be resolved.' }, 422)
     const staffRate = await optionStaffRate(c, next)
     const lines = roomLines(next)
@@ -564,7 +576,7 @@ opsRoutes.post('/staff/quotes/:id/recalculate', requirePerm('manage_quotes'), as
     options.push({ discountHint: discountInfo.hint, discountError: discountInfo.error, benchmarks, id: o.id, subtotal: p.subtotal, discount: p.discount, extraCharges: p.extraCharges, taxes: p.taxes, total: p.total,
       roomSummary: `Combined: ${p.roomsCount} rooms · Maximum configured capacity: ${p.extraGuests?.max ?? 'not supplied'} guests (live availability not verified).`,
       rateLines: lines.slice(1).map((line, k) => ({ roomId: line.room_id, label: p.parts[k + 1]?.errors.length || !p.parts[k + 1]?.roomCharges ? 'Rate could not be resolved. Check dates and meal plan.' : money(p.parts[k + 1].roomCharges / Math.max(1, p.nights * line.rooms_count)) })),
-      rows, errors: p.errors, staffRate, maximumDiscount: p.maximumDiscount,
+      rows, advance, balance: paymentError ? null : p.total - advance, paymentError, errors: [...p.errors, ...(paymentError ? [paymentError] : [])], staffRate, maximumDiscount: p.maximumDiscount,
       quoted: money(Math.round((p.roomCharges - p.discount) / Math.max(1, p.nights * p.roomsCount))) })
   }
   c.header('Cache-Control', 'private, no-store')
@@ -582,7 +594,8 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
     for (const oid of f.__all.opt_id ?? []) {
       const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE id = ? AND quotation_id = ?', int(oid), q.id)
       if (!o) continue
-      const { p: base, amount } = await calculateDraftOption(c, o, f, applyGst)
+      const { p: base, amount, paymentError } = await calculateDraftOption(c, o, f, applyGst)
+      if (paymentError) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: paymentError }) })
       if (!Number.isSafeInteger(amount) || amount < 0) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Enter a valid whole-rupee Discount Amount.' }) })
       if (!base) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: 'Room rate could not be resolved.' }) })
       if (base.errors.length) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: base.errors[0] }) })
@@ -593,6 +606,8 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       if (applyGst === q.apply_gst) continue
       const price = await priceOption(c, { ...option, apply_gst: applyGst })
       if (!price || price.errors.length) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: price?.errors[0] ?? 'Room rate could not be resolved.' }) })
+      try { reportedAdvance(option.reported_advance, price.total) }
+      catch (error) { throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${q.id}`, { err: (error as Error).message }) }) }
       gstUpdates.push({ option, price })
     }
     await run(c.env, 'UPDATE quotations SET guest_name = ?, phone = ?, email = ?, apply_gst = ?, explainer = CASE WHEN apply_gst != ? THEN NULL ELSE explainer END WHERE id = ?', str(f.guest_name, 80) || q.guest_name, normalizePhone(f.phone) ?? q.phone, str(f.email, 120) || null, applyGst, applyGst, q.id)
@@ -601,7 +616,7 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
     for (const oid of f.__all.opt_id ?? []) {
       const o = await first<QuoteOptionRow>(c.env, 'SELECT * FROM quotation_options WHERE id = ? AND quotation_id = ?', int(oid), q.id)
       if (!o) continue
-      const { next, picked, p, amount, grate, checkIn, checkOut } = await calculateDraftOption(c, o, f, applyGst)
+      const { next, picked, p, amount, grate, checkIn, checkOut, advance } = await calculateDraftOption(c, o, f, applyGst)
       if (!p) continue
       const disc = amount === o.discount && p.subtotal === o.subtotal
         ? o.discount_pct // Retain legacy descriptive percentage; it no longer controls authorization.
@@ -612,10 +627,11 @@ async function saveQuote(c: Context<AppEnv>, q: QuotationRow) {
       await run(
         c.env,
         `UPDATE quotation_options SET room_id = ?, check_in = ?, check_out = ?, rooms_count = ?, adults = ?, children = ?, meal_plan = ?, discount_pct = ?, extra_charges = ?, extra_label = ?,
-           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ?, guest_rate = ?, addons = ?, extra_rooms = ? WHERE id = ?`,
+           subtotal = ?, discount = ?, taxes = ?, total = ?, discount_approved_by = ?, guest_rate = ?, addons = ?, extra_rooms = ?, reported_advance = ? WHERE id = ?`,
         next.room_id, checkIn, checkOut, next.rooms_count, Math.max(1, int(f[`adults_${oid}`], o.adults)), Math.max(0, int(f[`children_${oid}`], o.children)), f[`meal_${oid}`] || null,
-        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, grate, JSON.stringify(picked), JSON.stringify(next.extra_rooms), o.id,
+        disc, next.extra_charges, str(f[`extralabel_${oid}`], 60) || null, p.subtotal, p.discount, p.taxes, p.total, approved, grate, JSON.stringify(picked), JSON.stringify(next.extra_rooms), advance, o.id,
       )
+      if (advance !== o.reported_advance) await logActivity(c.env, u.id, 'quote.reported_advance', 'quotation', q.id, { option: o.id, from: o.reported_advance, to: advance, verified: false })
       if (disc !== o.discount_pct) await logActivity(c.env, u.id, 'quote.discount', 'quotation', q.id, { option: o.id, from: o.discount_pct, to: disc })
       if (grate !== o.guest_rate) await logActivity(c.env, u.id, 'quote.guest_rate', 'quotation', q.id, { option: o.id, from: o.guest_rate, to: grate, staff_rate: staffRate })
       if (JSON.stringify(next.extra_rooms) !== JSON.stringify(extraRoomsOf(o.extra_rooms))) await logActivity(c.env, u.id, 'quote.room_categories', 'quotation', q.id, { option: o.id, from: extraRoomsOf(o.extra_rooms), to: next.extra_rooms })
@@ -676,6 +692,8 @@ opsRoutes.post('/staff/quotes/:id/fill', requirePerm('manage_quotes'), async (c)
     const option = fill.propertyId ? { ...old, check_in: fill.checkIn ?? old.check_in, check_out: fill.checkOut ?? old.check_out, adults: fill.adults, children: fill.children } : old
     const price = await priceOption(c, { ...option, apply_gst: q.apply_gst })
     if (!price || price.errors.length) return redirectMsg(c, `/staff/quotes/${q.id}`, { err: price?.errors[0] ?? 'Room rate could not be resolved.' })
+    try { reportedAdvance(option.reported_advance, price.total) }
+    catch (error) { return redirectMsg(c, `/staff/quotes/${q.id}`, { err: (error as Error).message }) }
     updates.push({ option, price })
   }
   for (const { option: o, price: p } of updates) await run(c.env,
@@ -822,10 +840,10 @@ opsRoutes.get('/staff/quotes/:id/preview', requirePerm('manage_quotes'), async (
         <div class="card">
           <h2>{opts.length > 1 ? `Option ${i + 1}: ` : ''}{o.property_name}</h2>
           <p>{o.destination} · {roomsLabel(o, names)} · {fmtDate(o.check_in)} → {fmtDate(o.check_out)} · {o.adults + o.children} guests</p>
-          <table class="breakdown"><tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>{o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}{o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}<tr><td>{gstLabel(q.apply_gst)}</td><td>{money(o.taxes)}</td></tr><tr class="total"><td>Total</td><td>{money(o.total)}</td></tr></table>
+          <table class="breakdown"><tr><td>Room charges</td><td>{money(o.subtotal)}</td></tr>{o.discount > 0 && <tr><td>Discount</td><td>− {money(o.discount)}</td></tr>}{o.extra_charges > 0 && <tr><td>{extrasLabel(o)}</td><td>{money(o.extra_charges)}</td></tr>}<tr><td>{gstLabel(q.apply_gst)}</td><td>{money(o.taxes)}</td></tr><tr class="total"><td>Total</td><td>{money(o.total)}</td></tr></table><QuotationPayment total={o.total} advance={o.reported_advance} />
         </div>
       ))}
-      <p class="muted">Valid till {fmtDate(q.valid_till)}</p>
+      <p>Balance amount to be paid at the hotel at check-in time.</p><p class="muted">Valid till {fmtDate(q.valid_till)}</p>
     </div>
   ))
 })
@@ -901,7 +919,7 @@ td:first-child{width:72%}
 ${q.explainer ? `<p><em>${esc(q.explainer)}</em></p>` : ''}${opts.map((o, i) => `<section class="quote-option"><div class="quote-property-heading"><h2>${opts.length > 1 ? `Option ${i + 1}: ` : ''}${esc(o.property_name)}</h2><p>${esc(o.destination)}</p></div>
 <div class="quote-stay"><h3>Stay details</h3><p>${extraRoomsOf(o.extra_rooms).length ? `${roomLines(o).map(line => `<strong>${esc(names.get(line.room_id) ?? 'Room')}</strong> · ${line.rooms_count} room${line.rooms_count === 1 ? '' : 's'}`).join('<br>')}<br>Total: ${totalRooms(o)} rooms` : `<strong>${esc(o.room_name)}</strong> · ${o.rooms_count} room${o.rooms_count === 1 ? '' : 's'}`}<br>${esc(fmtDate(o.check_in))} → ${esc(fmtDate(o.check_out))}<br>${o.adults} adult${o.adults === 1 ? '' : 's'} · ${o.children} child${o.children === 1 ? '' : 'ren'} · ${esc(o.meal_plan ? MEAL_PLANS[o.meal_plan] ?? o.meal_plan : 'Room only')}</p></div>
 ${amenities(o.property_facilities) ? `<h3>Property amenities</h3><ul class="quote-amenities">${amenities(o.property_facilities)}</ul>` : ''}${amenities(o.room_facilities, true) ? `<div class="${parseJson<string[]>(o.room_facilities, []).length <= 12 ? 'quote-amenity-group' : ''}"><h3>Selected-room amenities</h3><ul class="quote-amenities">${amenities(o.room_facilities, true)}</ul></div>` : ''}
-<div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div></section>`).join('')}
+<div class="quote-price"><h3>Price breakdown</h3><table><tr><td>Room charges</td><td class="r">${money(o.subtotal)}</td></tr>${o.discount ? `<tr><td>Discount</td><td class="r">− ${money(o.discount)}</td></tr>` : ''}${o.extra_charges ? `<tr><td>${esc(extrasLabel(o))}</td><td class="r">${money(o.extra_charges)}</td></tr>` : ''}<tr><td>${gstLabel(q.apply_gst)}</td><td class="r">${money(o.taxes)}</td></tr><tr class="t"><td>Total</td><td class="r">${money(o.total)}</td></tr></table></div>${quotationPaymentHtml(o.total, o.reported_advance)}</section>`).join('')}
 ${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotationInclusions(q.inclusions, q.apply_gst))}</p>` : ''}${q.exclusions ? `<h3>Not included</h3><p style="white-space:pre-line">${esc(q.exclusions)}</p>` : ''}${q.payment_terms ? `<h3>Payment Terms &amp; Conditions</h3><p style="white-space:pre-line">${esc(q.payment_terms)}</p>` : ''}
 <p class="pdf-policy-line">Balance amount to be paid at the hotel at check-in time.</p><footer class="quote-footer"><p>Accept online: ${esc(c.env.SITE_URL)}/q/${esc(q.token)}</p><p>Go Sanchari · reservation@gosanchari.com</p></footer></main></body></html>`)
 

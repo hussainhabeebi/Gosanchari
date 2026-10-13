@@ -1,3 +1,4 @@
+import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
 // Public pages (1–9) and the public quotation link (14).
 
@@ -887,6 +888,7 @@ publicRoutes.get('/q/:token', async (c) => {
             <tr><td>{gstLabel(q.apply_gst)}</td><td>{money(o.taxes)}</td></tr>
             <tr class="total"><td>Total</td><td>{money(o.total)}</td></tr>
           </table>
+          <QuotationPayment total={o.total} advance={o.reported_advance} />
           <a href={`/stay/${o.slug}`} target="_blank" class="small">View property details →</a>
           {!closed && (
             <form method="post" action={`/q/${q.token}/accept`} class="mt-sm">

@@ -145,13 +145,16 @@ function browserFixture() {
   const status={textContent:''}, table={rows:[] as any[],replaceChildren(){this.rows=[]},append(row:any){this.rows.push(row)}};
   const benchmarks={textContent:''}, hint={textContent:''}, discountError={textContent:'',hidden:true};
   const field={value:'400',setAttribute:vi.fn(),parentElement:{querySelector(){return hint}}};
-  const section={querySelectorAll(){return []},querySelector(s:string){return s==='[data-price-breakdown]'?table:s==='[data-price-benchmarks]'?benchmarks:s==='[data-discount-error]'?discountError:status}};
-  const form={dataset:{quoteRecalculate:'/staff/quotes/1/recalculate'},elements:{discount_1:field},querySelector(){return section},querySelectorAll(s:string){return s==='[data-price-status]'?[status]:[]},addEventListener(t:string,fn:any){handlers[t]=fn}};
-  runInNewContext(previewScript,{document:{querySelector(){return form},createElement(){return {textContent:'',children:[] as any[],append(x:any){this.children.push(x)}}}},Intl,AbortController,FormData:class {},setTimeout(fn:any){task=fn;return 1},clearTimeout(){task=null},fetch(url:any,init:any){return new Promise(resolve=>requests.push({resolve,url,init}))}});
-  const change=(name:string,type='number',event='input')=>handlers[event]({type:event,target:{name,type,tagName:type==='select'?'SELECT':'INPUT'}});
+  const advance={value:'0',max:'',setCustomValidity(message:string){this.validation=message},validation:''};
+  const balance={textContent:''}, totalLabel={textContent:''}, paymentError={textContent:'',hidden:true};
+  const payment={dataset:{paymentTotal:'61200'},querySelector(s:string){return s==='[data-reported-advance]'?advance:s==='[data-payment-error]'?paymentError:s==='[data-payment-total-label]'?totalLabel:balance}};
+  const section={querySelectorAll(){return []},querySelector(s:string){if(s==='[data-quotation-payment]')return payment;return s==='[data-price-breakdown]'?table:s==='[data-price-benchmarks]'?benchmarks:s==='[data-discount-error]'?discountError:status}};
+  const form={dataset:{quoteRecalculate:'/staff/quotes/1/recalculate'},elements:{discount_1:field},querySelector(){return section},querySelectorAll(s:string){return s==='[data-price-status]'?[status]:s==='[data-quote-option]'?[section]:[]},addEventListener(t:string,fn:any){handlers[t]=fn}};
+  runInNewContext(previewScript,{document:{querySelector(){return form},querySelectorAll(){return []},createElement(){return {textContent:'',children:[] as any[],append(x:any){this.children.push(x)}}}},Intl,AbortController,FormData:class {},setTimeout(fn:any){task=fn;return 1},clearTimeout(){task=null},fetch(url:any,init:any){return new Promise(resolve=>requests.push({resolve,url,init}))}});
+  const change=(name:string,type='number',event='input')=>handlers[event]({type:event,target:{name,type,tagName:type==='select'?'SELECT':'INPUT',closest(){return section}}});
   const flush=()=>{const f=task;task=null;f?.()};
-  const finish=(index:number,total:string,ok=true)=>requests[index].resolve({ok,json:async()=>ok?{options:[{id:1,rows:[['Total',total]],errors:[],benchmarks:['Quoted: ₹3,499 / room / night','Website rate: ₹3,999'],maximumDiscount:500,discountHint:'Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹500',discountError:''}]}:{error:'Preview unavailable'}});
-  return {change,flush,finish,requests,status,table,field,benchmarks,hint,discountError};
+  const finish=(index:number,total:string,ok=true)=>requests[index].resolve({ok,json:async()=>ok?{options:[{id:1,total:65000,rows:[['Total',total]],errors:[],benchmarks:['Quoted: ₹3,499 / room / night','Website rate: ₹3,999'],maximumDiscount:500,discountHint:'Staff floor: ₹3,250 / room / night · Maximum discount for this stay: ₹500',discountError:''}]}:{error:'Preview unavailable'}});
+  return {change,flush,finish,requests,status,table,field,benchmarks,hint,discountError,advance,balance,paymentError,totalLabel};
 }
 const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve()};
 describe('automatic browser preview',()=>{
@@ -171,4 +174,13 @@ describe('automatic browser preview',()=>{
     for(const name of ['room_1','in_1','out_1','rooms_1','adults_1','children_1','kids_1','meal_1','grate_1','discount_1','extra_1','extralabel_1','addon_1','addonqty_1_0','apply_gst']){f.change(name);f.flush()}
     expect(f.requests).toHaveLength(15);f.change('guest_name');f.flush();expect(f.requests).toHaveLength(15);
   });
+});
+
+describe('immediate quotation balance display',()=>{
+ it('updates an advance instantly, adopts new server totals, and rejects excess without changing inputs',async()=>{
+  const f=browserFixture();expect(f.balance.textContent).toBe('₹61,200');f.advance.value='20000';f.change('advance_1');expect(f.balance.textContent).toBe('₹41,200');expect(f.requests).toHaveLength(0);
+  f.flush();f.finish(0,'₹65,000');await settle();expect(f.balance.textContent).toBe('₹45,000');expect(f.advance.value).toBe('20000');
+  f.advance.value='70000';f.change('advance_1');expect(f.balance.textContent).toBe('Check advance amount');expect(f.paymentError.hidden).toBe(false);expect(f.advance.validation).toContain('Advance Received');
+  f.advance.value='0';f.change('advance_1');expect(f.balance.textContent).toBe('₹65,000');expect(f.advance.validation).toBe('');
+ });
 });
