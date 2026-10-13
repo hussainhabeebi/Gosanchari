@@ -1074,3 +1074,8 @@ code { overflow-wrap: anywhere; }
  .calculator-room:not(:first-child) {grid-template-columns:minmax(0,1fr) 100px}.calculator-room:not(:first-child)>button {grid-column:1/-1;justify-self:end}
  .calculator-actions [role=status] {flex-basis:100%}.calculator-actions .btn {flex:1}
 }
+
+/* Common-image cover controls; existing room thumbnail picker is unchanged. */
+.common-thumbnail-control {white-space:normal;min-height:44px;padding:6px 8px;font-size:12px;line-height:1.25}
+.common-thumbnail-control[aria-pressed="true"] {background:var(--green-soft);color:var(--green);border-color:var(--green);opacity:1}
+.common-photo:has(.common-thumbnail-control[aria-pressed="true"]),.photo-tile:has(.common-thumbnail-control[aria-pressed="true"]) {outline:2px solid var(--green);outline-offset:3px;border-radius:8px}

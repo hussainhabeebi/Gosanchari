@@ -573,6 +573,30 @@
       $$('[data-autosubmit]', last).forEach(autoSubmit)
     })
   })
+  // Common-image covers: persist the existing property thumbnail without saving other fields.
+  document.addEventListener('click', async function (event) {
+    var button = event.target.closest('[data-select-common-thumbnail]');
+    if (!button) return;
+    event.preventDefault();
+    var area = button.closest('[data-common-thumbnail]');
+    if (!area || !area.dataset.thumbnailUrl || area.dataset.thumbnailBusy === '1') return;
+    var status = $('[data-thumbnail-status]', area);
+    area.dataset.thumbnailBusy = '1'; button.disabled = true;
+    if (status) status.textContent = 'Saving thumbnail…';
+    try {
+      var data = new URLSearchParams(); data.set('photo_id', button.dataset.selectCommonThumbnail);
+      var response = await fetch(area.dataset.thumbnailUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: data });
+      var result = await response.json();
+      if (!response.ok || result.error || String(result.thumbnail_photo_id) !== button.dataset.selectCommonThumbnail) throw new Error(result.error || 'Could not save the thumbnail. Please retry.');
+      $$('[data-select-common-thumbnail]', area).forEach(function (control) {
+        var selected = control.dataset.selectCommonThumbnail === String(result.thumbnail_photo_id);
+        control.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        control.textContent = selected ? 'Selected Thumbnail' : 'Use as Thumbnail'; control.disabled = selected;
+      });
+      if (status) status.textContent = 'Thumbnail saved. Public property cards use this image.';
+    } catch (error) { if (status) status.textContent = error.message; button.disabled = button.getAttribute('aria-pressed') === 'true'; }
+    finally { area.dataset.thumbnailBusy = '0'; }
+  });
   // Common photos: preview selection; upload to the existing property's gallery without resaving fields.
   $$('[data-common-photos]').forEach(function (area) {
     var form = area.closest('form'), input = $('[data-common-photo-input]', area), thumbs = $('[data-common-photo-thumbs]', area), status = $('[data-common-photo-status]', area);
@@ -599,7 +623,7 @@
     }
     function bindRemove(button, card) {
       button.addEventListener('click', async function () {
-        if (busy || !confirm('Remove this common photo?')) return;
+        if (busy || area.dataset.thumbnailBusy === '1' || !confirm('Remove this common photo?')) return;
         busy = true; button.disabled = true; input.disabled = true;
         try { await request(area.dataset.uploadUrl + '/' + button.dataset.removeCommonPhoto + '/remove', new FormData()); card.remove(); pending = pending.filter(function (item) { return item.card !== card; }); state('Photo removed. Other photos are unchanged.'); }
         catch (error) { state(error.message); }
@@ -620,6 +644,10 @@
           item.saved = true; item.card.dataset.photoId = String(photo.id); item.image.src = photo.url;
           URL.revokeObjectURL(item.preview); item.note.textContent = 'Saved'; item.remove.dataset.removeCommonPhoto = String(photo.id);
           bindRemove(item.remove, item.card);
+          if (area.dataset.uploadUrl) {
+            area.dataset.thumbnailUrl = area.dataset.uploadUrl.replace(/common-photos$/, 'common-thumbnail');
+            if (!item.cover) { var cover = document.createElement('button'); cover.type = 'button'; cover.className = 'btn btn-sm btn-outline common-thumbnail-control'; cover.textContent = 'Use as Thumbnail'; cover.dataset.selectCommonThumbnail = String(photo.id); cover.setAttribute('aria-pressed', 'false'); item.card.appendChild(cover); item.cover = cover; }
+          }
         } catch (error) { failures++; item.note.textContent = error.message; item.note.className = 'photo-failed'; item.retry.hidden = false; }
         item.progress.hidden = true;
       }
@@ -646,7 +674,7 @@
       if (area.dataset.uploadUrl && !busy && pending.some(function (item) { return !item.saved; })) uploadAll();
     });
     form.addEventListener('submit', async function (event) {
-      if (busy) { event.preventDefault(); state('Please wait for the current photo operation to finish.'); return; }
+      if (busy || area.dataset.thumbnailBusy === '1') { event.preventDefault(); state('Please wait for the current photo operation to finish.'); return; }
       if (!pending.some(function (item) { return !item.saved; })) return;
       event.preventDefault();
       if (!form.reportValidity()) return;

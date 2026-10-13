@@ -24,7 +24,7 @@ function fixture() {
 function ui(f:ReturnType<typeof fixture>,id?:number) {
   const node=(tag='span'):any=>({tag,children:[] as any[],dataset:{} as Record<string,string>,listeners:{} as Record<string,Function[]>,textContent:'',hidden:false,disabled:false,
     addEventListener(k:string,fn:Function){(this.listeners[k]??=[]).push(fn)},async fire(k:string,event:any={}){await Promise.all((this.listeners[k]??[]).map((fn:Function)=>fn(event)))},
-    append(...c:any[]){c.forEach(x=>this.appendChild(x))},appendChild(c:any){this.children.push(c);c.parent=this},remove(){this.parent.children=this.parent.children.filter((c:any)=>c!==this)},setAttribute(k:string,v:string){this[k]=v},closest(){return this.parent}})
+    append(...c:any[]){c.forEach(x=>this.appendChild(x))},appendChild(c:any){this.children.push(c);c.parent=this},remove(){this.parent.children=this.parent.children.filter((c:any)=>c!==this)},setAttribute(k:string,v:string){this[k]=v},getAttribute(k:string){return this[k]??null},closest(){return this.parent}})
   const input=node('input');input.files=[];input.value=''
   const thumbs=node(),status=node(),form=node('form'),area=node();area.dataset.uploadUrl=id?`/admin/properties/${id}/common-photos`:'';area.closest=()=>form
   form.action=id?`http://localhost/admin/properties/${id}/setup/1`:'http://localhost/admin/properties/new';form.reportValidity=()=>true;form.requestSubmit=vi.fn()
@@ -41,10 +41,13 @@ function ui(f:ReturnType<typeof fixture>,id?:number) {
   const document=node();document.createElement=(tag:string)=>node(tag)
   const history={replaceState:vi.fn()},window=node()
   const source=readFileSync('public/app.js','utf8') as string
-  runInNewContext(source.slice(source.indexOf('  // Common photos:'),source.indexOf('  // Best For:')),{document,window,history,location:{href:'http://localhost/admin/properties/new'},URL:URLDouble,FormData:Data,XMLHttpRequest:XHR,crypto,confirm:()=>true,
-    $:(s:string)=>s==='[data-common-photo-input]'?input:s==='[data-common-photo-thumbs]'?thumbs:status,$$:(s:string)=>s==='[data-common-photos]'?[area]:[]})
+  const selectCover=vi.fn((url:string,options:any)=>f.app.request(new URL(url,'http://localhost').href,options,f.env))
+  const scope={document,window,history,location:{href:'http://localhost/admin/properties/new'},URL:URLDouble,URLSearchParams,FormData:Data,XMLHttpRequest:XHR,crypto,confirm:()=>true,fetch:selectCover,
+    $:(s:string)=>s==='[data-common-photo-input]'?input:s==='[data-common-photo-thumbs]'?thumbs:status,$$:(s:string)=>s==='[data-common-photos]'?[area]:s==='[data-select-common-thumbnail]'?thumbs.children.flatMap((card:any)=>card.children.filter((child:any)=>child.dataset.selectCommonThumbnail)):[]}
+  runInNewContext(source.slice(source.indexOf('  // Common-image covers:'),source.indexOf('  // Common photos:')),scope)
+  runInNewContext(source.slice(source.indexOf('  // Common photos:'),source.indexOf('  // Best For:')),scope)
   const settle=async()=>{for(let i=0;i<8;i++){await Promise.all(requests);await new Promise(r=>setTimeout(r,0))}}
-  return {input,thumbs,status,form,area,history,requests,revokes,settle,async select(files:File[]){input.files=files;await input.fire('change')},close(){URL.createObjectURL=originalCreate;URL.revokeObjectURL=originalRevoke}}
+  return {input,thumbs,status,form,area,history,requests,revokes,settle,selectCover,async choose(card:any){const button=card.children.find((c:any)=>c.dataset.selectCommonThumbnail);button.closest=(s:string)=>s==='[data-select-common-thumbnail]'?button:area;await document.fire('click',{target:button,preventDefault(){}})},async select(files:File[]){input.files=files;await input.fire('change')},close(){URL.createObjectURL=originalCreate;URL.revokeObjectURL=originalRevoke}}
 }
 
 const photo=(name:string)=>new File(['image'],name,{type:'image/jpeg'})
@@ -158,4 +161,27 @@ describe('wizard common photos',()=>{
     }finally{f.db.close()}
   })
 
+})
+
+
+describe('common-photo thumbnail interaction',()=>{
+ it('offers cover selection immediately after upload and updates the visible selected indicator when changing images',async()=>{
+  const f=fixture(),u=ui(f,1);try{
+   await u.select([photo('cover-one.jpg'),photo('cover-two.jpg')]);await u.settle()
+   const buttons=u.thumbs.children.map((card:any)=>card.children.find((child:any)=>child.dataset.selectCommonThumbnail))
+   expect(buttons.map((b:any)=>b.textContent)).toEqual(['Use as Thumbnail','Use as Thumbnail'])
+   await u.choose(u.thumbs.children[0]);expect(buttons[0].textContent).toBe('Selected Thumbnail');expect(buttons[0].disabled).toBe(true);expect(buttons[0].getAttribute('aria-pressed')).toBe('true')
+   await u.choose(u.thumbs.children[1]);expect(buttons[0].textContent).toBe('Use as Thumbnail');expect(buttons[0].disabled).toBe(false);expect(buttons[1].textContent).toBe('Selected Thumbnail')
+   expect(f.db.prepare('SELECT thumbnail_photo_id FROM properties WHERE id=1').get()).toEqual({thumbnail_photo_id:Number(u.thumbs.children[1].dataset.photoId)})
+   expect(f.put).toHaveBeenCalledTimes(2);expect(u.thumbs.children).toHaveLength(2)
+  }finally{u.close();f.db.close()}
+ })
+ it('keeps thumbnails and the old selection after a failed request and permits retry',async()=>{
+  const f=fixture(),u=ui(f,1);try{
+   await u.select([photo('cover.jpg')]);await u.settle();const card=u.thumbs.children[0],button=card.children.find((c:any)=>c.dataset.selectCommonThumbnail)
+   u.selectCover.mockRejectedValueOnce(new Error('Network interruption'));await u.choose(card)
+   expect(u.status.textContent).toBe('Network interruption');expect(button.disabled).toBe(false);expect(button.textContent).toBe('Use as Thumbnail');expect(u.thumbs.children).toHaveLength(1)
+   await u.choose(card);expect(button.textContent).toBe('Selected Thumbnail');expect(f.put).toHaveBeenCalledTimes(1)
+  }finally{u.close();f.db.close()}
+ })
 })

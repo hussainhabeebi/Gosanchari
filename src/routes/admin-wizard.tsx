@@ -231,9 +231,9 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
         <label class="wf"><span class="wl">Short Highlights about Property (3-4 points) <b>*</b></span>
           <textarea name="highlights" rows={3} maxlength={300} required placeholder="Enter key highlights (e.g. scenic location, private pool, family friendly, etc.)">{parseJson<string[]>(p?.highlights, []).join('\n')}</textarea><Counter max={300} />
         </label>
-        <div class="wf common-photos" data-common-photos data-upload-url={p ? `/admin/properties/${p.id}/common-photos` : undefined}>
+        <div class="wf common-photos" data-common-photos data-common-thumbnail data-thumbnail-url={p ? `/admin/properties/${p.id}/common-thumbnail` : undefined} data-upload-url={p ? `/admin/properties/${p.id}/common-photos` : undefined}>
           <span class="wl">Common Photos & Video Link</span>
-          <span class="muted small">Add common photos and/or a YouTube/Drive video link. New-property photos are saved with Save & Continue.</span>
+          <span class="muted small">Choose “Use as Thumbnail” on a saved image to set the public property cover. Add common photos and/or a YouTube/Drive video link. New-property photos are saved with Save & Continue.</span>
           <div class="wiz-2 media-row">
             <label class="drop">
               <input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple data-common-photo-input />
@@ -245,9 +245,10 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
               <small class="muted">e.g. https://www.youtube.com/watch?v=xxxx</small>
             </div>
           </div>
+          <p class="muted small" role="status" aria-live="polite" data-thumbnail-status></p>
           <p class="muted small" role="status" aria-live="polite" data-common-photo-status>{p ? 'Select photos to upload and preview them here.' : 'Selected photos will appear here before saving.'}</p>
           <div class="thumbs" data-common-photo-thumbs>
-            {photos.filter((x) => x.r2_key && x.media_type === 'image').map((x) => <span class="common-photo" data-photo-id={x.id}><img src={mediaUrl(x.r2_key, 200)} alt={x.caption || 'Common property photo'} /><button type="button" class="thumb-x" data-remove-common-photo={x.id} aria-label="Remove common property photo">×</button><small>Saved</small></span>)}
+            {photos.filter((x) => x.r2_key && x.media_type === 'image').map((x) => <span class="common-photo" data-photo-id={x.id}><img src={mediaUrl(x.r2_key, 200)} alt={x.caption || 'Common property photo'} /><button type="button" class="thumb-x" data-remove-common-photo={x.id} aria-label="Remove common property photo">×</button><small>Saved</small>{x.category !== 'room' && <button class="btn btn-sm btn-outline common-thumbnail-control" name="photo_id" value={x.id} formaction={`/admin/properties/${p!.id}/common-thumbnail`} formnovalidate data-select-common-thumbnail={x.id} aria-pressed={x.id === p?.thumbnail_photo_id ? 'true' : 'false'} disabled={x.id === p?.thumbnail_photo_id}>{x.id === p?.thumbnail_photo_id ? 'Selected Thumbnail' : 'Use as Thumbnail'}</button>}</span>)}
           </div>
         </div>
         <div class="wf">
@@ -321,6 +322,20 @@ async function storePhotos(c: Context<AppEnv>, propertyId: number, files: File[]
   }
   return ids
 }
+
+// Select an existing common photo only; no uploads, room changes or property-form save.
+wizardRoutes.post('/admin/properties/:id/common-thumbnail', requirePerm('manage_properties'), async c => {
+  const p = await loadProperty(c)
+  if (!p) return c.json({ error: 'Property not found.' }, 404)
+  const f = await form(c), id = int(f.photo_id)
+  const changed = id > 0 ? await first<{ id: number }>(c.env, `UPDATE properties SET thumbnail_photo_id = ? WHERE id = ? AND EXISTS
+    (SELECT 1 FROM property_photos WHERE id = ? AND property_id = ? AND room_id IS NULL AND category != 'room' AND media_type = 'image' AND r2_key != '') RETURNING id`, id, p.id, id, p.id) : null
+  if (!changed) return c.json({ error: 'Choose an uploaded common image belonging to this property.' }, 422)
+  await afterPropertySave(c, p.id)
+  if (c.req.header('accept')?.includes('application/json')) return c.json({ thumbnail_photo_id: id })
+  const legacy = (c.req.header('referer') || '').split(/[?#]/)[0].endsWith(`/admin/properties/${p.id}`)
+  return redirectMsg(c, legacy ? `/admin/properties/${p.id}#media` : `/admin/properties/${p.id}/setup/1`, { ok: 'Property thumbnail selected.' })
+})
 
 // Scoped common-photo uploads do not save property fields or touch room photos.
 wizardRoutes.post('/admin/properties/:id/common-photos', requirePerm('manage_properties'), async (c) => {

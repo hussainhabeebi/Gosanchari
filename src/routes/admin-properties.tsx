@@ -398,8 +398,8 @@ function propertyForm(
             </details>
           </section>
 
-          <section class="card stack" id="media">
-            <h2>{num('media')}. Photos & videos</h2>
+          <section class="card stack" id="media" data-common-thumbnail data-thumbnail-url={`/admin/properties/${p.id}/common-thumbnail`}>
+            <h2>{num('media')}. Photos & videos</h2><p class="small muted">Choose “Use as Thumbnail” on a common image to set the property cover. Room photos keep their existing behaviour.</p><p class="small muted" role="status" aria-live="polite" data-thumbnail-status/>
             <div class="grid grid-2">
               <form method="post" action={`/admin/properties/${p.id}/media`} enctype="multipart/form-data" class="upload-box stack">
                 <h3>Room photos</h3>
@@ -436,6 +436,7 @@ function propertyForm(
                       {ph.media_type === 'video'
                         ? ph.video_url ? <div class="video-thumb">▶ <a href={ph.video_url} target="_blank" rel="noopener">Video link</a></div> : <video src={mediaUrl(ph.r2_key)} preload="metadata" muted controls></video>
                         : <img src={mediaUrl(ph.r2_key, 300)} alt="" loading="lazy" />}
+                      {ph.room_id == null && ph.category !== 'room' && ph.media_type === 'image' && ph.r2_key && <button class="btn btn-sm btn-outline common-thumbnail-control" name="photo_id" value={ph.id} formaction={`/admin/properties/${p.id}/common-thumbnail`} formnovalidate data-select-common-thumbnail={ph.id} aria-pressed={ph.id === p.thumbnail_photo_id ? 'true' : 'false'} disabled={ph.id === p.thumbnail_photo_id}>{ph.id === p.thumbnail_photo_id ? 'Selected Thumbnail' : 'Use as Thumbnail'}</button>}
                       <Select name="category" value={ph.category} options={Object.entries(PHOTO_CATEGORIES)} />
                       {(ph.category === 'room' || ph.room_id) && <Select name="room_id" value={ph.room_id ?? ''} options={roomOpts} />}
                       <input name="caption" value={ph.caption ?? ''} placeholder="Caption" />
