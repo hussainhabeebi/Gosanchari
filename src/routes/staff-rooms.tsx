@@ -40,7 +40,7 @@ staffRoomRoutes.get('/staff/rooms', async (c) => {
     `SELECT p.id, p.name, p.destination, p.type, p.stay_type, p.status,
        (SELECT COUNT(*) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS rooms,
        (SELECT COUNT(*) FROM property_photos ph WHERE ph.property_id = p.id AND ph.room_id IS NOT NULL) AS photos
-     FROM properties p WHERE p.status != 'hidden' ${q ? 'AND (p.name LIKE ? OR p.destination LIKE ?)' : ''} ORDER BY p.status = 'live' DESC, p.name LIMIT 200`,
+     FROM properties p WHERE p.status = 'live' ${q ? 'AND (p.name LIKE ? OR p.destination LIKE ?)' : ''} ORDER BY p.name LIMIT 200`,
     ...(q ? [like, like] : []),
   )
   const keep = guest ? `?enquiry=${guest.id}` : ''
@@ -71,7 +71,8 @@ staffRoomRoutes.get('/staff/rooms', async (c) => {
 })
 
 staffRoomRoutes.get('/staff/rooms/:id', async (c) => {
-  const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', int(c.req.param('id')))
+  // Staff only see Live (published) resorts; drafts and hidden resorts stay in Admin → Properties.
+  const p = await first<PropertyRow>(c.env, "SELECT * FROM properties WHERE id = ? AND status = 'live'", int(c.req.param('id')))
   if (!p) return c.notFound()
   const u = c.get('user')!
   const [perms, settings, guest] = await Promise.all([permissionsFor(c.env, u.role), getSettings(c.env), enquiryGuest(c)])

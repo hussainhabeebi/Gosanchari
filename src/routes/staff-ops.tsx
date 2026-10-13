@@ -133,7 +133,8 @@ opsRoutes.get('/staff/finder/compare', requirePerm('manage_quotes'), async (c) =
   const perms = await permissionsFor(c.env, u.role)
   const ids = c.req.queries('ids')?.map(Number).filter(Boolean).slice(0, 3) ?? []
   if (!ids.length) return redirectMsg(c, '/staff/finder', { err: 'Select up to 3 properties to compare.' })
-  const props = await all<PropertyRow>(c.env, `SELECT * FROM properties WHERE id IN (${placeholders(ids.length)})`, ...ids)
+  const props = await all<PropertyRow>(c.env, `SELECT * FROM properties WHERE status = 'live' AND id IN (${placeholders(ids.length)})`, ...ids)
+  if (!props.length) return redirectMsg(c, '/staff/finder', { err: 'Select up to 3 Live properties to compare.' })
   const rooms = await all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(ids.length)}) ORDER BY base_rate`, ...ids)
   const rows: [string, (p: PropertyRow) => unknown][] = [
     ['Type', (p) => stayTypeLabel(p)], ['Destination', (p) => p.destination], ['Rating', (p) => `★ ${p.rating_avg.toFixed(1)} (${p.rating_count})`],
@@ -240,9 +241,10 @@ const ExtraRoomRow = ({ oid, rooms, line, disabled, rate }: { oid: number; rooms
 )
 
 async function addOption(c: Context<AppEnv>, quoteId: number, propertyId: number, roomId: number | null, checkIn: string | null, checkOut: string | null, adults: number, children: number) {
-  const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1 ORDER BY base_rate', propertyId)
+  // Only Live (published) resorts can be added to a quotation.
+  const rooms = await all<RoomRow>(c.env, "SELECT r.* FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.property_id = ? AND r.active = 1 AND p.status = 'live' ORDER BY r.base_rate", propertyId)
   const room = rooms.find((r) => r.id === roomId) ?? rooms.find((r) => r.capacity >= adults + children) ?? rooms[0]
-  if (!room) return
+  if (!room) throw new HTTPException(303, { res: redirectMsg(c, `/staff/quotes/${quoteId}`, { err: 'Only Live resorts with active rooms can be added to a quotation.' }) })
   const ci = checkIn && isDate(checkIn) ? checkIn : addDays(todayIST(), 14)
   const co = checkOut && isDate(checkOut) && checkOut > ci ? checkOut : addDays(ci, 2)
   const roomsCount = Math.max(1, Math.ceil((adults + children) / room.capacity))
@@ -1350,7 +1352,7 @@ opsRoutes.get('/staff/calendar', requirePerm('manage_bookings'), async (c) => {
   const to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10)
   const days = eachNight(from, to)
   const dest = c.req.query('destination') ?? ''
-  const props = await all<{ id: number; name: string; destination: string }>(c.env, `SELECT id, name, destination FROM properties WHERE status != 'draft' ${dest ? 'AND destination = ?' : ''} ORDER BY destination, name`, ...(dest ? [dest] : []))
+  const props = await all<{ id: number; name: string; destination: string }>(c.env, `SELECT id, name, destination FROM properties WHERE status = 'live' ${dest ? 'AND destination = ?' : ''} ORDER BY destination, name`, ...(dest ? [dest] : []))
   const rooms = await all<{ property_id: number; units: number }>(c.env, 'SELECT property_id, units FROM rooms WHERE active = 1')
   const occ = await Promise.all(props.map((p) => monthOccupancy(c.env, p.id, from, to)))
   const prev = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7)
@@ -1401,7 +1403,7 @@ opsRoutes.get('/staff/calendar/day', requirePerm('manage_bookings'), async (c) =
   const perms = await permissionsFor(c.env, u.role)
   const pid = int(c.req.query('property'))
   const date = isDate(c.req.query('date')) ? c.req.query('date')! : todayIST()
-  const p = await first<{ id: number; name: string }>(c.env, 'SELECT id, name FROM properties WHERE id = ?', pid)
+  const p = await first<{ id: number; name: string }>(c.env, "SELECT id, name FROM properties WHERE id = ? AND status = 'live'", pid)
   if (!p) return c.notFound()
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1', pid)
   const occ = await monthOccupancy(c.env, pid, date, addDays(date, 1))
@@ -1460,6 +1462,7 @@ opsRoutes.post('/staff/calendar/hold', requirePerm('manage_bookings'), async (c)
   const block = f.block === '1'
   if (block && !perms.manage_rates) return c.text('Not allowed', 403)
   const roomId = int(f.room_id) || null
+  if (!await first(c.env, "SELECT 1 FROM properties WHERE id = ? AND status = 'live'", pid)) return c.notFound()
   const quoteId = int(f.quotation_id) || null
   const until = block ? null : new Date(Date.now() + Math.max(1, Math.min(336, int(f.hours, 48))) * 3600_000).toISOString()
   const reason = block ? str(f.reason, 100) || 'Blocked' : `Hold${quoteId ? ` for quote #${quoteId}` : ''} by ${u.name}`
