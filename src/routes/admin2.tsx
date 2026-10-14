@@ -1,6 +1,6 @@
 // Admin pages 41–47: staff & roles, reports, Ask AI, reviews, website content, settings, activity log.
 
-import { Hono } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, ChartHead, Empty, Field, jsonScript, Pager, Pill, Select, Stat, Table } from '../views/components'
@@ -12,7 +12,7 @@ import { AI_FEATURES, DEFAULT_SETTINGS, getContent, getSettings, saveContent, sa
 import { mediaUrl } from '../lib/integrations'
 import type { TaxSlab } from '../lib/pricing'
 import type { ReviewRow } from '../lib/types'
-import { addDays, fmtDate, fmtDateTime, int, isDate, money, normalizePhone, parseJson, slugify, str, toCsv, todayIST } from '../lib/util'
+import { addDays, fmtDate, fmtDateTime, int, isDate, money, normalizePhone, parseJson, randomToken, slugify, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
 import { destinations } from '../lib/properties'
 import { MOODS, sceneSvg, type Mood } from '../views/moods'
@@ -25,11 +25,18 @@ admin2Routes.use('/admin/*', requireStaff)
 const CONFIRMED = "status IN ('confirmed','checked_in','completed')"
 
 // ---------- 41. Staff and roles ----------
+const staffAdminOnly: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (c.get('user')?.role !== 'admin') return c.text('Admin only', 403)
+  await next()
+}
+type StaffAccount = { id: number; name: string; phone: string | null; email: string | null; role: Role; active: number }
+const staffAccount = (c: import('hono').Context<AppEnv>, id: number) => first<StaffAccount>(c.env, "SELECT id, name, phone, email, role, active FROM users WHERE id = ? AND role != 'guest' AND merged_into IS NULL", id)
+const activeAdminCount = (c: import('hono').Context<AppEnv>) => first<{ n: number }>(c.env, "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND blocked = 0 AND merged_into IS NULL")
+
 admin2Routes.get('/admin/staff', requirePerm('manage_staff'), async (c) => {
   const s = await getSettings(c.env)
   const staff = await all<{ id: number; name: string; phone: string | null; email: string | null; role: Role; active: number; created_at: string }>(c.env, "SELECT id, name, phone, email, role, active, created_at FROM users WHERE role != 'guest' ORDER BY active DESC, role, name")
   const dests = await all<{ user_id: number; destination: string }>(c.env, 'SELECT * FROM staff_destinations')
-  const allDests = await destinations(c.env)
   const editable: Role[] = ['manager', 'sales', 'accounts']
   const keys = Object.keys(PERMISSION_LABELS) as PermissionKey[]
   const effective = (r: Role) => ({ ...DEFAULT_PERMISSIONS[r], ...(s.role_permissions[r] ?? {}) }) as Permissions
@@ -39,17 +46,17 @@ admin2Routes.get('/admin/staff', requirePerm('manage_staff'), async (c) => {
       <Table head={['Name', 'Phone / email', 'Role', 'Destinations', 'Status', '']}>
         {staff.map((u) => (
           <tr class={u.active ? '' : 'muted'}>
-            <td colSpan={6}>
-              <form method="post" action={`/admin/staff/${u.id}`} class="row wrap-row">
-                <input name="name" value={u.name} required class="w-md" />
-                <span class="small">{u.phone}<br />{u.email}</span>
-                <Select name="role" value={u.role} options={STAFF_ROLES.map((r) => [r, ROLE_LABELS[r]])} />
-                <select name="destinations" multiple size={3} class="w-md">{allDests.map((d) => <option value={d} selected={dests.some((x) => x.user_id === u.id && x.destination === d)}>{d}</option>)}</select>
-                <label class="check"><input type="checkbox" name="active" value="1" checked={!!u.active} /> active</label>
-                <input type="password" name="password" placeholder="New password (optional)" minlength={8} class="w-md" autocomplete="new-password" />
-                <button class="btn btn-sm btn-outline">Save</button>
+            <td><strong>{u.name}</strong></td>
+            <td>{u.phone ?? '—'}<br />{u.email ?? '—'}</td>
+            <td>{ROLE_LABELS[u.role]}</td>
+            <td>{dests.filter((d) => d.user_id === u.id).map((d) => d.destination).join(', ') || '—'}</td>
+            <td>{u.active ? 'Active' : 'Inactive'}</td>
+            <td>{c.get('user')?.role === 'admin' && <div class="row wrap-row">
+              <a class="btn btn-sm btn-outline" href={`/admin/staff/${u.id}/edit`}>Edit</a>
+              <form method="post" action={`/admin/staff/${u.id}/delete`} data-confirm={`Delete ${u.name} (${u.email || u.phone || u.id})? This deactivates login and preserves historical records.`}>
+                <button class="btn btn-sm btn-outline" disabled={!u.active || u.id === c.get('user')!.id} title="Deactivate staff; historical records are preserved">Delete</button>
               </form>
-            </td>
+            </div>}</td>
           </tr>
         ))}
       </Table>
@@ -122,19 +129,84 @@ admin2Routes.post('/admin/staff/permissions', requirePerm('manage_staff'), async
   return redirectMsg(c, '/admin/staff', { ok: 'Permissions saved.' })
 })
 
-admin2Routes.post('/admin/staff/:id', requirePerm('manage_staff'), async (c) => {
+admin2Routes.get('/admin/staff/:id/edit', requirePerm('manage_staff'), staffAdminOnly, async (c) => {
+  const u = await staffAccount(c, int(c.req.param('id')))
+  if (!u) return c.notFound()
+  const assigned = await all<{ destination: string }>(c.env, 'SELECT destination FROM staff_destinations WHERE user_id = ?', u.id)
+  const options = [...new Set([...(await destinations(c.env)), ...assigned.map((d) => d.destination)])]
+  return page(c, { title: 'Edit staff', area: 'admin', active: 'staff' }, (
+    <form method="post" action={`/admin/staff/${u.id}`} class="card stack">
+      <h1>Edit staff — {u.name}</h1>
+      <div class="grid grid-2">
+        <Field label="Name"><input name="name" value={u.name} required maxlength={80} /></Field>
+        <Field label="Phone"><input name="phone" value={u.phone ?? ''} inputmode="tel" /></Field>
+        <Field label="Email"><input name="email" type="email" value={u.email ?? ''} maxlength={120} /></Field>
+        <Field label="Role"><Select name="role" value={u.role} options={STAFF_ROLES.map((r) => [r, ROLE_LABELS[r]])} /></Field>
+        <Field label="Assigned destinations" hint="Select all destinations assigned to this staff member."><select name="destinations" multiple size={5}>{options.map((d) => <option value={d} selected={assigned.some((x) => x.destination === d)}>{d}</option>)}</select></Field>
+        <Field label="Reset password (optional)" hint="Leave blank to keep the current password."><input name="password" type="password" minlength={8} maxlength={128} autocomplete="new-password" /></Field>
+      </div>
+      <label class="check"><input name="active" type="checkbox" value="1" checked={!!u.active} /> Active — allow login</label>
+      <div class="row wrap-row"><button class="btn">Save Changes</button><a class="btn btn-outline" href="/admin/staff">Cancel</a></div>
+    </form>
+  ))
+})
+
+admin2Routes.post('/admin/staff/:id', requirePerm('manage_staff'), staffAdminOnly, async (c) => {
   const id = int(c.req.param('id'))
   const me = c.get('user')!
+  const before = await staffAccount(c, id)
+  if (!before) return c.notFound()
+  const back = `/admin/staff/${id}/edit`
   const f = await form(c)
-  const role = (STAFF_ROLES as string[]).includes(f.role) ? (f.role as Role) : 'sales'
-  if (id === me.id && (role !== 'admin' || !f.active)) return redirectMsg(c, '/admin/staff', { err: "You can't remove your own admin access." })
-  const before = await first<{ role: string; active: number }>(c.env, 'SELECT role, active FROM users WHERE id = ?', id)
-  await run(c.env, "UPDATE users SET name = ?, role = ?, active = ? WHERE id = ? AND role != 'guest'", str(f.name, 80), role, f.active ? 1 : 0, id)
-  if (f.password && f.password.length >= 8) await run(c.env, 'UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(f.password), id)
-  await run(c.env, 'DELETE FROM staff_destinations WHERE user_id = ?', id)
-  for (const d of f.__all.destinations ?? []) await run(c.env, 'INSERT OR IGNORE INTO staff_destinations (user_id, destination) VALUES (?, ?)', id, d)
-  await logActivity(c.env, me.id, 'staff.updated', 'user', id, { before, role, active: !!f.active, destinations: f.__all.destinations ?? [] })
-  return redirectMsg(c, '/admin/staff', { ok: 'Saved.' })
+  const name = str(f.name, 80), phone = normalizePhone(f.phone), email = str(f.email, 120).toLowerCase() || null
+  const active = f.active === '1' ? 1 : 0
+  if (!name || (!phone && !email)) return redirectMsg(c, back, { err: 'Name and a phone or email are required.' })
+  if ((str(f.phone) && (!phone || !/^\+[1-9]\d{7,14}$/.test(phone))) || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return redirectMsg(c, back, { err: 'Enter a valid phone number and email address.' })
+  if (!(STAFF_ROLES as string[]).includes(f.role)) return redirectMsg(c, back, { err: 'Choose a valid staff role.' })
+  const role = f.role as Role
+  if (f.password && (f.password.length < 8 || f.password.length > 128)) return redirectMsg(c, back, { err: 'Password must contain 8–128 characters.' })
+  if (id === me.id && (role !== 'admin' || !active)) return redirectMsg(c, back, { err: "You can't remove your own admin access." })
+  if (before.role === 'admin' && before.active && (role !== 'admin' || !active) && (await activeAdminCount(c))!.n <= 1) return redirectMsg(c, back, { err: "You can't deactivate or demote the last active Admin." })
+  const conflict = await first(c.env, 'SELECT id FROM users WHERE id != ? AND ((phone = ? AND ? IS NOT NULL) OR (lower(email) = ? AND ? IS NOT NULL))', id, phone, phone, email, email)
+  if (conflict) return redirectMsg(c, back, { err: 'That phone or email belongs to another account.' })
+  const assigned = [...new Set(f.__all.destinations ?? [])]
+  const existingDests = await all<{ destination: string }>(c.env, 'SELECT destination FROM staff_destinations WHERE user_id = ?', id)
+  const allowed = new Set([...(await destinations(c.env)), ...existingDests.map((d) => d.destination)])
+  if (assigned.some((d) => !allowed.has(d))) return redirectMsg(c, back, { err: 'Choose valid assigned destinations.' })
+  const passwordHash = f.password ? await hashPassword(f.password) : null
+  const audit = JSON.stringify({ operation_id: randomToken(16), before, after: { name, phone, email, role, active }, destinations: assigned, password_reset: !!f.password })
+  // Keep account, assignments and audit together. The audit gate prevents a
+  // concurrent last-Admin guard failure from touching destination assignments.
+  const auditGate = "EXISTS (SELECT 1 FROM activity_log WHERE user_id = ? AND action = 'staff.updated' AND entity_id = ? AND details = ?)"
+  let results: D1Result[]
+  try {
+    results = await c.env.DB.batch([
+      c.env.DB.prepare("UPDATE users SET name = ?, phone = ?, email = ?, role = ?, active = ?, password_hash = COALESCE(?, password_hash) WHERE id = ? AND role != 'guest' AND (role != 'admin' OR active != 1 OR (? = 'admin' AND ? = 1) OR (SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND blocked = 0 AND merged_into IS NULL) > 1)").bind(name, phone, email, role, active, passwordHash, id, role, active),
+      c.env.DB.prepare("INSERT INTO activity_log (user_id, action, entity, entity_id, details) SELECT ?, 'staff.updated', 'user', ?, ? WHERE changes() = 1").bind(me.id, String(id), audit),
+      c.env.DB.prepare(`DELETE FROM staff_destinations WHERE user_id = ? AND ${auditGate}`).bind(id, me.id, String(id), audit),
+      ...assigned.map((d) => c.env.DB.prepare(`INSERT INTO staff_destinations (user_id, destination) SELECT ?, ? WHERE ${auditGate}`).bind(id, d, me.id, String(id), audit)),
+    ])
+  } catch (e) {
+    if (/UNIQUE constraint/i.test(String(e))) return redirectMsg(c, back, { err: 'That phone or email belongs to another account.' })
+    throw e
+  }
+  if (!results[0].meta.changes) return redirectMsg(c, back, { err: "Staff access changed. The last active Admin cannot be removed." })
+  return redirectMsg(c, '/admin/staff', { ok: 'Staff changes saved.' })
+})
+
+admin2Routes.post('/admin/staff/:id/delete', requirePerm('manage_staff'), staffAdminOnly, async (c) => {
+  const id = int(c.req.param('id')), me = c.get('user')!
+  const before = await staffAccount(c, id)
+  if (!before) return c.notFound()
+  if (id === me.id) return redirectMsg(c, '/admin/staff', { err: "You can't delete your own Admin account." })
+  if (!before.active) return redirectMsg(c, '/admin/staff', { ok: 'Staff member is already inactive.' })
+  // Atomic guard also protects against concurrent Admin deactivations.
+  const results = await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE users SET active = 0 WHERE id = ? AND active = 1 AND role != 'guest' AND (role != 'admin' OR (SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND blocked = 0 AND merged_into IS NULL) > 1)").bind(id),
+    c.env.DB.prepare("INSERT INTO activity_log (user_id, action, entity, entity_id, details) SELECT ?, 'staff.deactivated', 'user', ?, ? WHERE changes() = 1").bind(me.id, String(id), JSON.stringify({ before, active: false, method: 'soft_delete' })),
+  ])
+  if (!results[0].meta.changes) return redirectMsg(c, '/admin/staff', { err: "You can't deactivate the last active Admin." })
+  return redirectMsg(c, '/admin/staff', { ok: 'Staff member deactivated. Login is disabled; historical records are preserved.' })
 })
 
 // ---------- 42. Reports ----------
