@@ -137,7 +137,7 @@ describe('quotation PDF versus official confirmation voucher',()=>{
    const print=async()=>await(await f.as(1,'sales').request(f.url+'/print'+mode,{},f.env)).text();
    const draft=await print();expect(draft).toContain('Please note this is not a confirmation voucher');expect(draft).not.toContain('<h2>QUOTATION APPROVED</h2>');
    await submit(f);const pending=await print();expect(pending).not.toContain('<h2>QUOTATION APPROVED</h2>');expect(pending).toContain('Please note this is not a confirmation voucher');
-   await decide(f);const approved=await print();expect(approved).toContain('<h2>QUOTATION APPROVED</h2>');expect(approved).toContain('Quotation approval only. Booking confirmation requires separate Admin verification.');
+   await decide(f);const approved=await print();expect(approved).toContain('<h2>QUOTATION APPROVED</h2>');expect(approved).not.toContain('Quotation approval only. Booking confirmation requires separate Admin verification.');
    expect(approved).not.toContain('Please note this is not a confirmation voucher');expect(approved).not.toContain('Voucher not issued by this quotation');expect(approved).not.toContain('<div class="quote-notice">');expect(approved).not.toContain('<h2>BOOKING CONFIRMED</h2>');expect(approved).toContain('data-auto-download="'+(mode?'1':'0')+'"');expect(approved).not.toContain('data-file-prefix="Booking-Confirmed"');
    await f.as(1,'sales').request(f.url+'/reopen',{method:'POST'},f.env);const reopened=await print();expect(reopened).not.toContain('<h2>QUOTATION APPROVED</h2>');expect(reopened).toContain('Please note this is not a confirmation voucher');
   }finally{f.db.close()}
@@ -274,6 +274,41 @@ describe('Admin My Quotations only',()=>{
     const html=await(await f.app.request('http://localhost/staff/quotes?status='+status,{},f.env)).text();expect(html).toContain('class="active">Draft');expect(html).toContain('GS-QT-4FTY2J');
    }
    const staff=await(await f.as(1,'sales').request('http://localhost/staff/quotes?status=sent',{},f.env)).text();expect(staff).toContain('class="active">Sent');expect(staff).not.toContain('GS-QT-4FTY2J');
+  }finally{f.db.close()}
+ });
+});
+
+describe('customer quotation Print and PDF presentation',()=>{
+ it('removes requested PDF fields, keeps dynamic saved amounts and places escaped guest remarks before the footer',async()=>{
+  const f=fixture();try{
+   f.db.prepare('UPDATE quotations SET message=?,payment_terms=? WHERE id=?').run('Arrival after 3 pm.\n<script>Guest remark</script>','Existing custom payment terms',f.qid);
+   f.db.prepare('UPDATE quotation_options SET subtotal=60000,taxes=1200,total=61200,reported_advance=20000 WHERE id=?').run(f.oid);
+   f.db.prepare('UPDATE properties SET facilities=? WHERE id=?').run('["pool","Custom property amenity"]',f.pid);
+   f.db.prepare('UPDATE rooms SET facilities=? WHERE id=?').run('["Custom room-only amenity"]',f.nonAcId);
+   const before=JSON.stringify([quote(f),f.read()]);
+   const print=await(await f.app.request(f.url+'/print',{},f.env)).text();
+   const download=await(await f.app.request(f.url+'/print?download=1',{},f.env)).text();
+   const content=(html:string)=>html.split('<main data-quote-export>')[1];
+   expect(content(print)).toBe(content(download));
+   for(const html of [print,download]){
+    for(const text of ['Valid till:','Selected-room amenities','Custom room-only amenity','(reported, not verified)','Payment reported by staff; not verified by Admin. This quotation does not confirm a booking.','Quotation approval only. Booking confirmation requires separate Admin verification.'])expect(html).not.toContain(text);
+    for(const text of ['Advance Received: ₹20,000','Balance Payable: ₹41,200','Total Amount: ₹61,200','Property amenities','Custom property amenity','Existing custom payment terms','Balance amount to be paid at the hotel at check-in time.','<h3>Remarks</h3>','Arrival after 3 pm.','&lt;script&gt;Guest remark&lt;/script&gt;'])expect(html).toContain(text);
+    expect(html.indexOf('<section class="quote-remarks">')).toBeLessThan(html.indexOf('<footer class="quote-footer">'));
+    expect(html.indexOf('<section class="quote-remarks">')).toBeGreaterThan(html.indexOf('Payment Terms &amp; Conditions'));
+    expect(html).toContain('Please note this is not a confirmation voucher');expect(html).not.toContain('BOOKING CONFIRMED');
+   }
+   expect(JSON.stringify([quote(f),f.read()])).toBe(before);
+   const screen=await(await f.app.request(f.url,{},f.env)).text();expect(screen).toContain('Advance is reported, not verified.');
+  }finally{f.db.close()}
+ });
+ it('keeps a clean blank Remarks section and quotation-approved heading without producing a booking confirmation',async()=>{
+  const f=fixture();try{
+   const financial=counts(f);await submit(f);await decide(f);f.db.prepare("UPDATE quotations SET message='' WHERE id=?").run(f.qid);
+   const html=await(await f.app.request(f.url+'/print',{},f.env)).text();
+   expect(html).toContain('<h2>QUOTATION APPROVED</h2>');expect(html).not.toContain('BOOKING CONFIRMED');
+   expect(html).not.toContain('Quotation approval only. Booking confirmation requires separate Admin verification.');
+   expect(html).toContain('<section class="quote-remarks"><h3>Remarks</h3><p>—</p></section>');
+   expect(counts(f)).toEqual(financial);
   }finally{f.db.close()}
  });
 });

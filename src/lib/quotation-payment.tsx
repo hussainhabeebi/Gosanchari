@@ -12,5 +12,5 @@ export function QuotationPayment({ total, advance = 0 }: { total: number; advanc
   return <div class="small quotation-payment"><p>Total Amount: {money(total)} · Advance Received: {money(advance)} (reported, not verified) · <strong>Balance Payable: {money(total - advance)}</strong></p><p class="muted">Payment reported by staff; not verified by Admin. This quotation does not confirm a booking.</p></div>
 }
 export function quotationPaymentHtml(total: number, advance = 0) {
-  return `<div class="quote-payment"><p>Total Amount: ${money(total)} · Advance Received: ${money(advance)} (reported, not verified) · <strong>Balance Payable: ${money(total - advance)}</strong></p><p>Payment reported by staff; not verified by Admin. This quotation does not confirm a booking.</p></div>`
+  return `<div class="quote-payment"><p>Total Amount: ${money(total)} · Advance Received: ${money(advance)} · <strong>Balance Payable: ${money(total - advance)}</strong></p></div>`
 }
