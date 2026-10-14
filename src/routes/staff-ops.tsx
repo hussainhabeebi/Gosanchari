@@ -954,10 +954,14 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
   const u = c.get('user')!
   const perms = await permissionsFor(c.env, u.role)
   const requestedStatus = c.req.query('status')
+  const adminMyQuotes = !admin && u.role === 'admin'
+  const adminMyTabs: [string, string][] = [['draft', 'Draft'], ['quotation_approved', 'Approved Quote'], ['quotation_rejected', 'Rejected Quote']]
   const adminTabs: [string, string][] = [['pending_approval', 'Pending for Approval'], ['quotation_approved', 'Approved Quote'], ['quotation_rejected', 'Rejected Quotations']]
   const status = admin
     ? (adminTabs.some(([key]) => key === requestedStatus) ? requestedStatus! : 'pending_approval')
-    : (requestedStatus ?? 'all')
+    : adminMyQuotes
+      ? (adminMyTabs.some(([key]) => key === requestedStatus) ? requestedStatus! : 'draft')
+      : (requestedStatus ?? 'all')
   const pg = pageNum(c)
   const where: string[] = []
   const binds: (string | number)[] = []
@@ -975,10 +979,10 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
     ...binds, (pg - 1) * 50,
   )
   const base = admin ? '/admin/quotes' : '/staff/quotes'
-  return page(c, { title: admin ? 'All quotations' : 'Quotations', area: admin ? 'admin' : 'staff', active: admin ? 'all-quotes' : 'quotes' }, (
+  return page(c, { title: admin ? 'All quotations' : adminMyQuotes ? 'My Quotations' : 'Quotations', area: admin ? 'admin' : 'staff', active: admin ? 'all-quotes' : 'quotes' }, (
     <div class="stack-lg">
-      <div class="row-between"><h1>{admin ? 'All quotations' : 'Quotations'}</h1><a class={admin ? 'btn' : 'btn btn-sm'} href="/staff/quotes/new">{admin ? '+ Add New Quote' : '+ New quotation'}</a></div>
-      <Tabs base={base} param="status" active={status} items={admin ? adminTabs : [['all', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'], ['quotation_approved','Quotation Approved'], ['quotation_rejected','Rejected'], ['sent', 'Sent'], ['viewed', 'Viewed'], ['viewed3', 'Viewed 3+, not booked'], ['accepted', 'Accepted'], ['changes_requested', 'Changes asked'], ['expired', 'Expired'], ['declined', 'Declined']]} />
+      <div class="row-between"><h1>{admin ? 'All quotations' : adminMyQuotes ? 'My Quotations' : 'Quotations'}</h1><a class={admin || adminMyQuotes ? 'btn' : 'btn btn-sm'} href="/staff/quotes/new">{admin ? '+ Add New Quote' : adminMyQuotes ? '+ Create New Quote' : '+ New quotation'}</a></div>
+      <Tabs base={base} param="status" active={status} items={admin ? adminTabs : adminMyQuotes ? adminMyTabs : [['all', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'], ['quotation_approved','Quotation Approved'], ['quotation_rejected','Rejected'], ['sent', 'Sent'], ['viewed', 'Viewed'], ['viewed3', 'Viewed 3+, not booked'], ['accepted', 'Accepted'], ['changes_requested', 'Changes asked'], ['expired', 'Expired'], ['declined', 'Declined']]} />
       <Table head={['Quote', 'Guest', 'Property', 'Amount', 'Sent', 'Status', ...(admin ? ['Staff', 'Discount'] : []), 'Actions']}>
         {rows.slice(0, 50).map((q) => (
           <tr>

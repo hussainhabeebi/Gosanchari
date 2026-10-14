@@ -228,3 +228,52 @@ describe('simplified Admin quotation list', () => {
   }finally{f.db.close()}
  });
 });
+
+describe('Admin My Quotations only',()=>{
+ it('shows Draft, Approved Quote, Rejected Quote and Create New Quote without changing All Quotations or Staff tabs',async()=>{
+  const f=fixture();try{
+   const html=await(await f.app.request('http://localhost/staff/quotes',{},f.env)).text();
+   const tabs=html.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
+   expect(tabs.match(/<a /g)).toHaveLength(3);
+   for(const [key,label] of [['draft','Draft'],['quotation_approved','Approved Quote'],['quotation_rejected','Rejected Quote']])expect(tabs).toContain(`href="/staff/quotes?status=${key}"`),expect(tabs).toContain(label);
+   expect(tabs).toContain('class="active">Draft');expect(html).toContain('href="/staff/quotes/new">+ Create New Quote');
+   for(const key of ['all','pending_approval','sent','viewed','viewed3','accepted','changes_requested','expired','declined'])expect(tabs).not.toContain(`status=${key}"`);
+   const all=await(await f.app.request('http://localhost/admin/quotes',{},f.env)).text();
+   expect(all).toContain('class="active">Pending for Approval');expect(all).toContain('Rejected Quotations');expect(all).toContain('+ Add New Quote');expect(all).not.toContain('+ Create New Quote');
+   for(const role of ['sales','manager','accounts']){
+    const response=await f.as(1,role).request('http://localhost/staff/quotes',{},f.env);
+    if(role==='accounts'){expect(response.status).toBe(403);continue}
+    const staff=await response.text();const staffTabs=staff.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
+    for(const key of ['all','pending_approval','sent','viewed','accepted','changes_requested','expired','declined'])expect(staffTabs).toContain(`status=${key}"`);
+    expect(staff).toContain('+ New quotation');expect(staff).not.toContain('+ Create New Quote');
+   }
+   expect((await f.as(1,'guest').request('http://localhost/staff/quotes',{},f.env)).status).toBe(403);
+  }finally{f.db.close()}
+ });
+ it('filters ordinary drafts, audit-approved legacy drafts and rejected quotes without changing records',async()=>{
+  const f=fixture();try{
+   const tables=['quotations','quotation_options','activity_log','bookings','payments','booking_vouchers','quotation_confirmation_requests'];
+   const snapshot=()=>JSON.stringify(tables.map(t=>f.db.prepare('SELECT * FROM '+t).all()));
+   let html=await(await f.app.request('http://localhost/staff/quotes',{},f.env)).text();expect(html).toContain('GS-QT-4FTY2J');
+   await submit(f);html=await(await f.app.request('http://localhost/staff/quotes',{},f.env)).text();expect(html).not.toContain('GS-QT-4FTY2J');
+   await decide(f);expect(quote(f).status).toBe('draft');let before=snapshot();
+   html=await(await f.app.request('http://localhost/staff/quotes?status=draft',{},f.env)).text();expect(html).not.toContain('GS-QT-4FTY2J');
+   html=await(await f.app.request('http://localhost/staff/quotes?status=quotation_approved',{},f.env)).text();expect(html).toContain('GS-QT-4FTY2J');expect(html).toContain(`href="/staff/quotes/${f.qid}"`);expect(html).not.toContain('BOOKING CONFIRMED');expect(snapshot()).toBe(before);
+   await f.as(1,'sales').request(f.url+'/reopen',{method:'POST'},f.env);await submit(f);await decide(f,'reject',{reason:'Please review.'});before=snapshot();
+   html=await(await f.app.request('http://localhost/staff/quotes?status=quotation_rejected',{},f.env)).text();expect(html).toContain('GS-QT-4FTY2J');
+   for(const status of ['draft','quotation_approved']){
+    html=await(await f.app.request('http://localhost/staff/quotes?status='+status,{},f.env)).text();expect(html).not.toContain('GS-QT-4FTY2J');
+   }
+   expect(snapshot()).toBe(before);
+   const details=await(await f.app.request(f.url,{},f.env)).text();expect(details).toContain('Quotation approval history');expect(details).toContain('Please review.');
+  }finally{f.db.close()}
+ });
+ it('defaults removed Admin My Quotations filters to Draft while preserving Staff filter behavior',async()=>{
+  const f=fixture();try{
+   for(const status of ['all','pending_approval','sent','viewed','accepted','changes_requested','expired','declined','invalid']){
+    const html=await(await f.app.request('http://localhost/staff/quotes?status='+status,{},f.env)).text();expect(html).toContain('class="active">Draft');expect(html).toContain('GS-QT-4FTY2J');
+   }
+   const staff=await(await f.as(1,'sales').request('http://localhost/staff/quotes?status=sent',{},f.env)).text();expect(staff).toContain('class="active">Sent');expect(staff).not.toContain('GS-QT-4FTY2J');
+  }finally{f.db.close()}
+ });
+});
