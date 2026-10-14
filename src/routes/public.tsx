@@ -55,9 +55,24 @@ publicRoutes.get('/', async (c) => {
 
   return page(c, { title: settings.business.name, description: content.hero.subtitle, canonical: c.env.SITE_URL + '/' }, (
     <>
-      <section class="hero reference-hero">
+      <section class="hero reference-hero home-search-hero">
         <div class="wrap">
           <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
+          <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
+            <Field label="⌖ Destination"><Select name="destination" value={destNames.includes('Munnar') ? 'Munnar' : ''} options={[['', 'Anywhere in Kerala'], ...destNames.map((d) => [d, d] as [string, string])]} /></Field>
+            <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
+            <Field label="▣ Check-out"><input type="date" name="checkOut" min={today} /></Field>
+            <details class="guest-picker"><summary><span class="field-label">♙ Guests</span><strong data-guest-summary>2 Adults, 0 Kids</strong></summary><div class="guest-panel"><Field label="Adults"><input name="guests" type="number" min="1" max="40" value="2" /></Field><Field label="Children"><input name="children" type="number" min="0" max="20" value="0" /></Field></div></details>
+            <button class="btn find-stay">⌕ &nbsp; Find My Stay</button>
+          </form>
+          <div class="trust-strip"><span>✦ <strong>Best Price Guarantee</strong><small>Unbeatable Deals</small></span><span>♧ <strong>24/7 Support</strong><small>We're always here</small></span><span>◇ <strong>Trusted Partner</strong><small>Verified Resorts</small></span><span>★ <strong>Curated Experiences</strong><small>Handpicked Stays</small></span></div>
+        </div>
+      </section>
+      <section class="wrap section popular-stays">
+        <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
+        <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
+      </section>
+      <div class="wrap home-ai-insights">
           <div class="hero-ai-priority" id="ai-search">
             <div class="hero-ai-heading"><span class="ai-badge">AI</span><strong>AI Search</strong><span>Describe your perfect escape</span></div>
             <form class="ai-search priority-ai-form" method="get" action="/search" role="search">
@@ -66,23 +81,8 @@ publicRoutes.get('/', async (c) => {
             </form>
             <div class="ai-example-chips" aria-label="Try a search">{['Munnar for 2 with a pool', 'Family stay in Wayanad under ₹6000', 'Alleppey houseboat for 4'].map((example) => <a href={`/search?ai=${encodeURIComponent(example)}`}>{example}</a>)}</div>
           </div>
-          <details class="manual-search"><summary>Prefer to choose destination, dates &amp; guests?</summary>
-          <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
-            <Field label="⌖ Destination"><Select name="destination" value={destNames.includes('Munnar') ? 'Munnar' : ''} options={[['', 'Anywhere in Kerala'], ...destNames.map((d) => [d, d] as [string, string])]} /></Field>
-            <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
-            <Field label="▣ Check-out"><input type="date" name="checkOut" min={today} /></Field>
-            <details class="guest-picker"><summary><span class="field-label">♙ Guests</span><strong data-guest-summary>2 Adults, 0 Kids</strong></summary><div class="guest-panel"><Field label="Adults"><input name="guests" type="number" min="1" max="40" value="2" /></Field><Field label="Children"><input name="children" type="number" min="0" max="20" value="0" /></Field></div></details>
-            <button class="btn find-stay">⌕ &nbsp; Find My Stay</button>
-          </form>
-          </details>
-          <div class="trust-strip"><span>✦ <strong>Best Price Guarantee</strong><small>Unbeatable Deals</small></span><span>♧ <strong>24/7 Support</strong><small>We're always here</small></span><span>◇ <strong>Trusted Partner</strong><small>Verified Resorts</small></span><span>★ <strong>Curated Experiences</strong><small>Handpicked Stays</small></span></div>
-        </div>
-      </section>
-      <div class="wrap home-ai-insights"><AiInsights entries={insights} /></div>
-      <section class="wrap section popular-stays">
-        <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
-        <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
-      </section>
+        <AiInsights entries={insights} />
+      </div>
 
       {(offers.length > 0 || content.banners.length > 0) && (
         <section class="wrap section">

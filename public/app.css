@@ -1079,3 +1079,38 @@ code { overflow-wrap: anywhere; }
 .common-thumbnail-control {white-space:normal;min-height:44px;padding:6px 8px;font-size:12px;line-height:1.25}
 .common-thumbnail-control[aria-pressed="true"] {background:var(--green-soft);color:var(--green);border-color:var(--green);opacity:1}
 .common-photo:has(.common-thumbnail-control[aria-pressed="true"]),.photo-tile:has(.common-thumbnail-control[aria-pressed="true"]) {outline:2px solid var(--green);outline-offset:3px;border-radius:8px}
+
+/* Homepage: the existing stay search leads directly into Popular Stays. */
+.area-public .home-search-hero {min-height:0;padding:108px 0 28px}
+.area-public .home-search-hero .hero-copy {min-height:0;padding-top:0}
+.home-search-hero .reference-search {grid-template-columns:minmax(150px,1.15fr) repeat(2,minmax(125px,1fr)) minmax(135px,1fr) auto;gap:0;max-width:1040px;margin:20px auto 0;padding:8px;border-radius:20px}
+.home-search-hero .reference-search>.field,.home-search-hero .guest-picker {min-width:0;padding:0 14px}
+.home-search-hero .reference-search input,.home-search-hero .reference-search select {min-height:44px;max-width:100%}
+.home-search-hero .guest-picker summary {min-height:60px;display:flex;flex-direction:column;justify-content:center;gap:4px}
+.home-search-hero .guest-panel {max-width:calc(100vw - 48px)}
+.home-search-hero .find-stay {grid-column:auto;min-height:48px;padding:14px 22px}
+.home-search-hero .reference-search :is(input,select,summary):focus-visible {outline:2px solid var(--cta-orange);outline-offset:2px;border-radius:6px}
+.home-search-hero .trust-strip {margin-top:20px}
+.area-public .home-search-hero:after {height:24px;clip-path:none;background:linear-gradient(transparent,#fff);pointer-events:none}
+.home-ai-insights>.hero-ai-priority {margin:0 auto 22px}
+@media(max-width:900px) {
+ .home-search-hero .reference-search {grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-width:700px}
+ .home-search-hero .reference-search>.field {border-right:0}
+ .home-search-hero .find-stay {grid-column:1/-1}
+}
+@media(max-width:650px) {
+ .area-public .home-search-hero {padding:96px 0 22px}
+ .area-public .home-search-hero .hero-copy {width:100%;padding-top:0;min-height:0}
+ .home-search-hero .hero-copy p {font-size:13px;line-height:1.5}
+ .home-search-hero .reference-search {margin:18px auto 0;gap:6px;padding:10px;border-radius:18px}
+ .home-search-hero .reference-search>.field,.home-search-hero .guest-picker {padding:0 8px}
+ .home-search-hero .trust-strip {margin-top:18px;gap:10px;padding:10px}
+ .home-search-hero .trust-strip strong {font-size:12px}
+ .home-search-hero .trust-strip small {font-size:10px}
+}
+@media(max-width:380px) {
+ .home-search-hero .reference-search {grid-template-columns:minmax(0,1fr)}
+ .home-search-hero .reference-search>.field,.home-search-hero .guest-picker {padding:0 6px}
+ .home-search-hero .find-stay {grid-column:auto}
+ .home-search-hero .trust-strip {gap:8px}
+}

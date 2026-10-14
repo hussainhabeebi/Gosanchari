@@ -23,15 +23,43 @@ function fixture(categories: string[] = []) {
 }
 
 describe('public AI discovery', () => {
-  it('puts working AI search and insights before popular stays', async () => {
+  it('exposes the existing stay-search fields in the hero and follows it directly with Popular Stays', async () => {
+    const { db, env, app } = fixture()
+    try {
+      const html = await (await app.request('http://localhost/', {}, env)).text()
+      const start = html.indexOf('<section class="hero')
+      const end = html.indexOf('</section>', start) + '</section>'.length
+      const hero = html.slice(start, end)
+      expect(hero).toContain('Discover Kerala,')
+      expect(hero).toContain('Your Way')
+      expect(hero).toContain('method="get" action="/search" data-stay-search')
+      for (const name of ['destination', 'checkIn', 'checkOut', 'guests', 'children']) {
+        expect(hero).toContain(`name="${name}"`)
+      }
+      expect(hero).toContain('Find My Stay')
+      expect(hero).toContain('data-guest-summary')
+      for (const text of ['Best Price Guarantee', '24/7 Support', 'Trusted Partner', 'Curated Experiences']) {
+        expect(hero).toContain(text)
+      }
+      expect(hero).not.toContain('Prefer to choose')
+      expect(html.slice(end)).toMatch(/^\s*<section class="wrap section popular-stays">/)
+      expect(html).toContain('href="/#ai-search"')
+      expect(html).toContain('href="/#ai-insights"')
+    } finally { db.close() }
+  })
+  it('keeps AI search and insights available below Popular Stays without the hero AI box', async () => {
     const { db, env, app } = fixture()
     try {
       db.exec("UPDATE properties SET review_summary='Quiet surroundings and welcoming hosts',rating_count=5 WHERE status='live'")
       const response = await app.request('http://localhost/', {}, env)
       expect(response.status).toBe(200)
       const html = await response.text()
-      expect(html.indexOf('id="ai-search"')).toBeLessThan(html.indexOf('class="manual-search"'))
-      expect(html.indexOf('id="ai-insights"')).toBeLessThan(html.indexOf('popular-stays'))
+      const hero=html.slice(html.indexOf('<section class="hero'),html.indexOf('</section>',html.indexOf('<section class="hero')))
+      expect(hero).not.toContain('hero-ai-priority')
+      expect(hero).not.toContain('ai-example-chips')
+      expect(hero).not.toContain('manual-search')
+      expect(html.indexOf('id="ai-search"')).toBeGreaterThan(html.indexOf('popular-stays'))
+      expect(html.indexOf('id="ai-insights"')).toBeGreaterThan(html.indexOf('popular-stays'))
       expect(html).toContain('name="ai"')
       expect(html).toContain('Quiet surroundings and welcoming hosts')
       expect(html).toContain('AI-generated summaries of guest reviews')
