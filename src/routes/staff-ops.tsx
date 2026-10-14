@@ -953,7 +953,11 @@ ${q.inclusions ? `<h3>Included</h3><p style="white-space:pre-line">${esc(quotati
 export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
   const u = c.get('user')!
   const perms = await permissionsFor(c.env, u.role)
-  const status = c.req.query('status') ?? (admin ? 'pending_approval' : 'all')
+  const requestedStatus = c.req.query('status')
+  const adminTabs: [string, string][] = [['pending_approval', 'Pending for Approval'], ['quotation_approved', 'Approved Quote'], ['quotation_rejected', 'Rejected Quotations']]
+  const status = admin
+    ? (adminTabs.some(([key]) => key === requestedStatus) ? requestedStatus! : 'pending_approval')
+    : (requestedStatus ?? 'all')
   const pg = pageNum(c)
   const where: string[] = []
   const binds: (string | number)[] = []
@@ -970,19 +974,11 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
      FROM quotations q LEFT JOIN users s ON s.id = q.staff_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY q.updated_at DESC LIMIT 51 OFFSET ?`,
     ...binds, (pg - 1) * 50,
   )
-  const conv = admin
-    ? await all<{ name: string; sent: number; accepted: number }>(c.env, "SELECT s.name, COUNT(*) AS sent, SUM(q.status = 'accepted') AS accepted FROM quotations q JOIN users s ON s.id = q.staff_id WHERE q.sent_at IS NOT NULL AND q.sent_at >= ? GROUP BY s.id", new Date(Date.now() - 90 * 86400_000).toISOString())
-    : []
   const base = admin ? '/admin/quotes' : '/staff/quotes'
   return page(c, { title: admin ? 'All quotations' : 'Quotations', area: admin ? 'admin' : 'staff', active: admin ? 'all-quotes' : 'quotes' }, (
     <div class="stack-lg">
-      <div class="row-between"><h1>{admin ? 'All quotations' : 'Quotations'}</h1><a class="btn btn-sm" href="/staff/quotes/new">+ New quotation</a></div>
-      {admin && conv.length > 0 && (
-        <div class="card"><h3>Conversion by staff (90 days)</h3>
-          <Table head={['Staff', 'Sent', 'Accepted', 'Rate']}>{conv.map((r) => <tr><td>{r.name}</td><td>{r.sent}</td><td>{r.accepted}</td><td>{r.sent ? Math.round((r.accepted / r.sent) * 100) : 0}%</td></tr>)}</Table>
-        </div>
-      )}
-      <Tabs base={base} param="status" active={status} items={[['all', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'], ['quotation_approved','Quotation Approved'], ['quotation_rejected','Rejected'], ['sent', 'Sent'], ['viewed', 'Viewed'], ['viewed3', 'Viewed 3+, not booked'], ['accepted', 'Accepted'], ['changes_requested', 'Changes asked'], ['expired', 'Expired'], ['declined', 'Declined']]} />
+      <div class="row-between"><h1>{admin ? 'All quotations' : 'Quotations'}</h1><a class={admin ? 'btn' : 'btn btn-sm'} href="/staff/quotes/new">{admin ? '+ Add New Quote' : '+ New quotation'}</a></div>
+      <Tabs base={base} param="status" active={status} items={admin ? adminTabs : [['all', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'], ['quotation_approved','Quotation Approved'], ['quotation_rejected','Rejected'], ['sent', 'Sent'], ['viewed', 'Viewed'], ['viewed3', 'Viewed 3+, not booked'], ['accepted', 'Accepted'], ['changes_requested', 'Changes asked'], ['expired', 'Expired'], ['declined', 'Declined']]} />
       <Table head={['Quote', 'Guest', 'Property', 'Amount', 'Sent', 'Status', ...(admin ? ['Staff', 'Discount'] : []), 'Actions']}>
         {rows.slice(0, 50).map((q) => (
           <tr>
@@ -996,7 +992,6 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
             {admin && <td>{q.max_disc ? `${q.max_disc}%` : '—'}</td>}
             <td class="nowrap">
               <a class="btn btn-sm" href={`/staff/quotes/${q.id}`}>Edit</a>
-              {admin && q.status === 'pending_approval' && <a class="btn btn-sm btn-outline" href={`/staff/quotes/${q.id}`}>Edit</a>}
               {admin && q.status === 'pending_approval' && perms.approve_discounts && (
                 <form method="post" action={`/admin/quotes/${q.id}/approve`} class="inline"><input type="hidden" name="reviewed_at" value={q.updated_at}/><button class="btn btn-sm">Approve</button></form>
               )}

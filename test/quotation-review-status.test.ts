@@ -53,7 +53,7 @@ describe('persisted quotation review status',()=>{
    const actor=(f.db.prepare('SELECT name FROM users WHERE id=1').get() as any).name;
    for(const role of ['sales','admin']){
     const html=await(await f.as(1,role).request(f.url,{},f.env)).text();expect(title(html)).toContain('Quotation Approved');expect(title(html)).not.toContain('draft');expect(html).toContain('Quotation approval history');expect(html).toContain(actor);expect(html).not.toContain('BOOKING CONFIRMED');
-    const list=await(await f.as(1,role).request('http://localhost/'+(role==='admin'?'admin':'staff')+'/quotes?status=all',{},f.env)).text();expect(list).toMatch(/GS-QT-4FTY2J[\s\S]*?Quotation Approved/);
+    const list=await(await f.as(1,role).request('http://localhost/'+(role==='admin'?'admin':'staff')+'/quotes?status='+(role==='admin'?'quotation_approved':'all'),{},f.env)).text();expect(list).toMatch(/GS-QT-4FTY2J[\s\S]*?Quotation Approved/);
    }
    const approved=await(await f.app.request('http://localhost/admin/quotes?status=quotation_approved',{},f.env)).text();expect(approved).toContain('GS-QT-4FTY2J');
    const drafts=await(await f.app.request('http://localhost/admin/quotes?status=draft',{},f.env)).text();expect(drafts).not.toContain('GS-QT-4FTY2J');
@@ -165,6 +165,66 @@ describe('quotation PDF versus official confirmation voucher',()=>{
    const staff=await(await f.as(1,'sales').request('http://localhost/staff/confirmation-requests/'+row.id,{},f.env)).text();expect(staff).toContain('Open approved voucher / Download PDF');
    const print=await(await f.as(1,'sales').request(f.url+'/print?download=1',{},f.env)).text();expect(print).toContain('<h2>BOOKING CONFIRMED</h2>');expect(print).not.toContain('Please note this is not a confirmation voucher');expect(print).not.toContain('<h2>QUOTATION APPROVED</h2>');
    expect(JSON.stringify(f.read())).toBe(original);
+  }finally{f.db.close()}
+ });
+});
+
+describe('simplified Admin quotation list', () => {
+ it('renders only three Admin review tabs and Add New Quote while preserving Staff tabs', async () => {
+  const f=fixture();try{
+   const html=await(await f.app.request('http://localhost/admin/quotes',{},f.env)).text();
+   const tabs=html.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
+   expect(tabs.match(/<a /g)).toHaveLength(3);
+   for(const [key,label] of [['pending_approval','Pending for Approval'],['quotation_approved','Approved Quote'],['quotation_rejected','Rejected Quotations']]){
+    expect(tabs).toContain(`href="/admin/quotes?status=${key}"`);expect(tabs).toContain(label);
+   }
+   expect(tabs).toContain('class="active">Pending for Approval');
+   for(const key of ['all','draft','sent','viewed','viewed3','accepted','changes_requested','expired','declined'])expect(tabs).not.toContain(`status=${key}"`);
+   expect(html).toContain('href="/staff/quotes/new">+ Add New Quote');
+   expect(html).not.toContain('Conversion by staff');
+   const staff=await(await f.as(1,'sales').request('http://localhost/staff/quotes',{},f.env)).text();
+   const staffTabs=staff.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
+   for(const key of ['all','draft','sent','viewed','viewed3','accepted','changes_requested','expired','declined'])expect(staffTabs).toContain(`status=${key}"`);
+   expect(staff).toContain('+ New quotation');expect(staff).not.toContain('+ Add New Quote');
+  }finally{f.db.close()}
+ });
+ it('uses persisted review outcomes, excludes ordinary drafts and keeps details and approval actions',async()=>{
+  const f=fixture();try{
+   const add=(code:string,status:string)=>Number(f.db.prepare("INSERT INTO quotations(code,token,staff_id,guest_name,valid_till,status) VALUES(?,?,1,?,'2030-12-31',?)").run(code,code+'-token',code,status).lastInsertRowid);
+   const pending=add('UI-PENDING','pending_approval'),approved=add('UI-APPROVED','draft'),rejected=add('UI-REJECTED','changes_requested'),sent=add('UI-APPROVED-SENT','sent');
+   for(const [id,action] of [[approved,'quote.discount_approved'],[rejected,'quote.review_rejected'],[sent,'quote.discount_approved']] as const){
+    const q=f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(id) as any;
+    f.db.prepare("INSERT INTO activity_log(user_id,action,entity,entity_id,details) VALUES(1,?,'quotation',?,?)").run(action,String(id),JSON.stringify({quotation_version:q.updated_at,reason:'Test review reason'}));
+   }
+   const tables=['quotations','quotation_options','activity_log','bookings','payments','booking_vouchers','quotation_confirmation_requests'];
+   const snapshot=()=>JSON.stringify(tables.map(t=>f.db.prepare('SELECT * FROM '+t).all()));const before=snapshot();
+   for(const [filter,included,excluded] of [
+    ['pending_approval',['UI-PENDING'],['UI-APPROVED','UI-REJECTED','GS-QT-4FTY2J']],
+    ['quotation_approved',['UI-APPROVED','UI-APPROVED-SENT'],['UI-PENDING','UI-REJECTED','GS-QT-4FTY2J']],
+    ['quotation_rejected',['UI-REJECTED'],['UI-PENDING','UI-APPROVED','GS-QT-4FTY2J']],
+   ] as const){
+    const html=await(await f.app.request('http://localhost/admin/quotes?status='+filter,{},f.env)).text();
+    for(const code of included)expect(html).toContain(code);for(const code of excluded)expect(html).not.toContain(code);
+    expect(html).not.toContain('BOOKING CONFIRMED');
+    if(filter==='pending_approval'){
+     expect(html).toContain(`href="/staff/quotes/${pending}"`);
+     expect(html).toContain(`action="/admin/quotes/${pending}/approve"`);
+     expect(html.match(new RegExp(`href="/staff/quotes/${pending}">Edit`, 'g'))).toHaveLength(1);
+    }
+   }
+   expect(snapshot()).toBe(before);
+  }finally{f.db.close()}
+ });
+ it('defaults obsolete Admin filters to Pending without affecting Staff filtering or permissions',async()=>{
+  const f=fixture();try{
+   await submit(f);
+   for(const filter of ['all','draft','sent','viewed3','accepted','invalid']){
+    const html=await(await f.app.request('http://localhost/admin/quotes?status='+filter,{},f.env)).text();
+    expect(html).toContain('GS-QT-4FTY2J');expect(html).toContain('class="active">Pending for Approval');
+   }
+   const staff=await(await f.as(1,'sales').request('http://localhost/staff/quotes?status=draft',{},f.env)).text();
+   expect(staff).not.toContain('GS-QT-4FTY2J');expect(staff).toContain('class="active">Draft');
+   expect((await f.as(1,'sales').request('http://localhost/admin/quotes',{},f.env)).status).toBe(403);
   }finally{f.db.close()}
  });
 });
