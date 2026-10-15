@@ -346,7 +346,7 @@ admin2Routes.get('/admin/content', requirePerm('manage_content'), async (c) => {
             <form method="post" action={`/admin/content/mood/${m}`} enctype="multipart/form-data" class="mood-card">
               <div class="mood-thumb">{content.mood_photos[m] ? <img src={mediaUrl(content.mood_photos[m]!, 600)} alt="" /> : raw(sceneSvg(m))}</div>
               <strong class="small">{MOODS[m].label}</strong>
-              <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" />
+              <input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/avif,.avif" />
               <div class="row wrap-row">
                 <button class="btn btn-sm">Upload</button>
                 {content.mood_photos[m] && <button class="btn btn-sm btn-outline" name="remove" value="1">Use drawing</button>}
@@ -665,7 +665,7 @@ admin2Routes.post('/admin/content/mood/:mood', requirePerm('manage_content'), as
   const up = body.photo
   if (body.remove) delete photos[mood]
   else if (up instanceof File && up.size > 0) {
-    if (!/^image\/(jpeg|png|webp)$/.test(up.type) || up.size > 15 * 1024 * 1024) return redirectMsg(c, '/admin/content#moods', { err: 'Please upload a JPG, PNG or WebP photo under 15 MB.' })
+    if (!/^image\/(jpeg|png|webp|avif)$/.test(up.type) || up.size > 15 * 1024 * 1024) return redirectMsg(c, '/admin/content#moods', { err: 'Please upload a JPG, PNG, WebP or AVIF photo under 15 MB.' })
     const key = `site/moods/${mood}-${crypto.randomUUID()}.${up.type === 'image/jpeg' ? 'jpg' : up.type.split('/')[1]}`
     await c.env.MEDIA.put(key, up.stream(), { httpMetadata: { contentType: up.type } })
     photos[mood] = key

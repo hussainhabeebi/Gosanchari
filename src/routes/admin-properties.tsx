@@ -132,7 +132,7 @@ const NewRoomBlock = ({ idx, showNet }: { idx: string; showNet: boolean }) => (
   <fieldset class="room-edit stack new-room" data-idx={idx}>
     <legend><strong>Room category</strong></legend>
     <RoomFields pf={`nr${idx}_`} optional showNet={showNet} />
-    <Field label="Photos of this room category" hint="JPG / PNG / WebP, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept="image/jpeg,image/png,image/webp" multiple /></Field>
+    <Field label="Photos of this room category" hint="JPG / PNG / WebP / AVIF, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple /></Field>
   </fieldset>
 )
 
@@ -359,7 +359,7 @@ function propertyForm(
               <div class="upload-box stack">
                 <h3>Common photos</h3>
                 <Field label="Section"><Select name="new_photos_category" options={COMMON_SECTIONS} /></Field>
-                <Field label="Photos" hint="JPG / PNG / WebP, up to 15 MB each."><input type="file" name="new_photos" accept="image/jpeg,image/png,image/webp" multiple /></Field>
+                <Field label="Photos" hint="JPG / PNG / WebP / AVIF, up to 15 MB each."><input type="file" name="new_photos" accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple /></Field>
               </div>
             </section>
           </>
@@ -387,6 +387,9 @@ function propertyForm(
                     <button class="btn btn-sm">Save room</button>
                   </div>
                 </form>
+                <form method="post" action={`/admin/rooms/${r.id}/delete`} data-confirm={`Delete the room category “${r.name}”? Its room photos and room-specific rates are removed too.`}>
+                  <button class="btn btn-sm btn-outline btn-danger">Delete room category</button>
+                </form>
               </details>
             ))}
             <details class="room-edit" open={rooms.length === 0}>
@@ -408,14 +411,14 @@ function propertyForm(
                   ? <Field label="Room category"><Select name="room_id" options={roomOpts} required /></Field>
                   : <p class="muted small">Add a room category first (section above).</p>}
                 <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
-                <Field label="Photos or videos" hint="Photos up to 15 MB each (20 at a time). Videos MP4/WebM up to 90 MB."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <Field label="Photos or videos" hint="Photos up to 15 MB each (20 at a time). Videos MP4/WebM up to 90 MB."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,image/avif,.avif,video/mp4,video/webm,video/quicktime" multiple required /></Field>
                 <button class="btn btn-sm" disabled={!rooms.length}>Upload room photos</button>
               </form>
               <form method="post" action={`/admin/properties/${p.id}/media`} enctype="multipart/form-data" class="upload-box stack">
                 <h3>Common photos</h3>
                 <Field label="Section"><Select name="category" options={COMMON_SECTIONS} /></Field>
                 <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
-                <Field label="Photos or videos" hint="Common areas, exterior, pool, views, restaurant, activities."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <Field label="Photos or videos" hint="Common areas, exterior, pool, views, restaurant, activities."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,image/avif,.avif,video/mp4,video/webm,video/quicktime" multiple required /></Field>
                 <button class="btn btn-sm">Upload common photos</button>
               </form>
             </div>
@@ -722,6 +725,27 @@ propertyEditorRoutes.post('/admin/rooms/:id', requirePerm('manage_properties'), 
   return redirectMsg(c, `/admin/properties/${r.property_id}#rooms`, { ok: `Saved “${v.name}”.` })
 })
 
+// Delete a room category added by mistake (e.g. a duplicate). Categories already used in a quotation or booking
+// are kept so their history stays intact; those can be made inactive instead.
+propertyEditorRoutes.post('/admin/rooms/:id/delete', requirePerm('manage_properties'), async (c) => {
+  const r = await first<RoomRow>(c.env, 'SELECT * FROM rooms WHERE id = ?', int(c.req.param('id')))
+  if (!r) return c.notFound()
+  const back = (await form(c)).back === 'wizard' ? `/admin/properties/${r.property_id}/setup/2` : `/admin/properties/${r.property_id}#rooms`
+  const used = await first<{ n: number }>(c.env, `SELECT
+    (SELECT COUNT(*) FROM quotation_options WHERE room_id = ?1 OR EXISTS (SELECT 1 FROM json_each(extra_rooms) j WHERE json_extract(j.value, '$.room_id') = ?1)) +
+    (SELECT COUNT(*) FROM bookings WHERE room_id = ?1 OR EXISTS (SELECT 1 FROM json_each(extra_rooms) j WHERE json_extract(j.value, '$.room_id') = ?1)) AS n`, r.id)
+  if (used?.n) return redirectMsg(c, back, { err: `“${r.name}” is used in ${used.n} quotation${used.n === 1 ? '' : 's'} / booking${used.n === 1 ? '' : 's'}, so it can’t be deleted. Untick “Active” in Edit property → Room categories to hide it instead.` })
+  // Room photos are detached from the gallery (objects stay in storage, as with other photo removals).
+  await run(c.env, 'UPDATE properties SET thumbnail_photo_id = NULL WHERE id = ? AND thumbnail_photo_id IN (SELECT id FROM property_photos WHERE room_id = ?)', r.property_id, r.id)
+  await run(c.env, 'DELETE FROM property_photos WHERE room_id = ?', r.id)
+  await run(c.env, 'DELETE FROM season_rates WHERE room_id = ?', r.id)
+  await run(c.env, 'DELETE FROM blocked_dates WHERE room_id = ?', r.id)
+  await run(c.env, 'DELETE FROM rooms WHERE id = ?', r.id)
+  await afterPropertySave(c, r.property_id)
+  await logActivity(c.env, c.get('user')!.id, 'room.deleted', 'property', r.property_id, { room: r.id, name: r.name })
+  return redirectMsg(c, back, { ok: `Room category “${r.name}” deleted.` })
+})
+
 /** Rooms and seasons that "Quick fill" found, added on save when staff leave the box ticked. Returns a message part. */
 async function applyExtracted(c: Context<AppEnv>, propertyId: number, f: Form): Promise<string> {
   const withNet = await canSeeNet(c)
@@ -800,7 +824,7 @@ async function uploadNewPropertyPhotos(c: Context<AppEnv>, propertyId: number, r
 }
 
 // ---- Photos & videos ----
-const IMAGE_TYPES = /^image\/(jpeg|png|webp)$/
+const IMAGE_TYPES = /^image\/(jpeg|png|webp|avif)$/
 const VIDEO_TYPES = /^video\/(mp4|webm|quicktime)$/
 
 /** Save uploaded photos/videos to R2 and the gallery. Images get AI tag suggestions in the background. */
