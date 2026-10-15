@@ -955,6 +955,20 @@
   $$('form[data-confirm]').forEach(function (f) {
     f.addEventListener('submit', function (e) { if (!confirm(f.dataset.confirm)) e.preventDefault() })
   })
+  $$('button[data-confirm]').forEach(function (b) {
+    b.addEventListener('click', function (e) { if (!confirm(b.dataset.confirm)) e.preventDefault() })
+  })
+  // Wizard room blocks: unsaved ones are just removed from the page; saved ones are deleted on the server
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-remove-room-block]')
+    if (b) b.closest('[data-room-block]').remove()
+    var d = e.target.closest && e.target.closest('[data-delete-room]')
+    if (d && !e.defaultPrevented) {
+      var f = document.createElement('form'); f.method = 'post'; f.action = d.dataset.deleteRoom
+      var i = document.createElement('input'); i.type = 'hidden'; i.name = 'back'; i.value = 'wizard'; f.appendChild(i)
+      document.body.appendChild(f); f.submit()
+    }
+  })
 
   // Share a link: phone share sheet when available, otherwise copy to clipboard
   $$('[data-share]').forEach(function (b) {

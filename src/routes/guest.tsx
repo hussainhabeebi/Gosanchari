@@ -301,7 +301,7 @@ guestRoutes.get('/my/review/:bookingId', async (c) => {
         {[5, 4, 3, 2, 1].map((n) => <><input type="radio" name="rating" id={`r${n}`} value={n} required /><label for={`r${n}`} title={`${n} stars`}>★</label></>)}
       </div>
       <Field label="Your review"><textarea name="body" rows={5} maxlength={2000} placeholder="What did you like? Anything we should improve?"></textarea></Field>
-      <Field label="Photos (optional, up to 4)"><input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple /></Field>
+      <Field label="Photos (optional, up to 4)"><input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple /></Field>
       <button class="btn btn-lg">Submit review</button>
       <p class="muted small">Reviews are checked by our team before they appear.</p>
     </form>
@@ -317,7 +317,7 @@ guestRoutes.post('/my/review/:bookingId', async (c) => {
   const files = (Array.isArray(body.photos) ? body.photos : [body.photos]).filter((f): f is File => f instanceof File && f.size > 0).slice(0, 4)
   const keys: string[] = []
   for (const f of files) {
-    if (f.size > 8 * 1024 * 1024 || !/^image\/(jpeg|png|webp)$/.test(f.type)) continue
+    if (f.size > 8 * 1024 * 1024 || !/^image\/(jpeg|png|webp|avif)$/.test(f.type)) continue
     const key = `reviews/${b.id}/${crypto.randomUUID()}.${f.type.split('/')[1]}`
     await c.env.MEDIA.put(key, await f.arrayBuffer(), { httpMetadata: { contentType: f.type } })
     keys.push(key)

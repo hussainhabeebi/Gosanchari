@@ -780,7 +780,7 @@ staffRoutes.get('/staff/profile', async (c) => {
         <form method="post" action="/staff/profile" enctype="multipart/form-data" class="card stack">
           <h3>Details</h3>
           {me?.photo_key && <img class="avatar" src={mediaUrl(me.photo_key, 160)} alt="" />}
-          <Field label="Photo"><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" /></Field>
+          <Field label="Photo"><input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/avif,.avif" /></Field>
           <Field label="Name"><input name="name" value={me?.name} required /></Field>
           <Field label="Phone (for alerts & login)"><input value={me?.phone ?? ''} disabled /></Field>
           <Field label="Email"><input value={me?.email ?? ''} disabled /></Field>
@@ -804,7 +804,7 @@ staffRoutes.post('/staff/profile', async (c) => {
   const body = await c.req.parseBody()
   const photo = body.photo
   let key: string | null = null
-  if (photo instanceof File && photo.size > 0 && photo.size < 4 * 1024 * 1024 && /^image\/(jpeg|png|webp)$/.test(photo.type)) {
+  if (photo instanceof File && photo.size > 0 && photo.size < 4 * 1024 * 1024 && /^image\/(jpeg|png|webp|avif)$/.test(photo.type)) {
     key = `staff/${u.id}-${Date.now()}.${photo.type.split('/')[1]}`
     await c.env.MEDIA.put(key, await photo.arrayBuffer(), { httpMetadata: { contentType: photo.type } })
   }
