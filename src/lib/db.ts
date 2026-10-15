@@ -34,6 +34,16 @@ export async function logActivity(env: Env, userId: number | null, action: strin
   await run(env, 'INSERT INTO activity_log (user_id, action, entity, entity_id, details) VALUES (?, ?, ?, ?, ?)', userId, action, entity, entityId == null ? null : String(entityId), JSON.stringify(details))
 }
 
+/** Finish work after the response is sent (e.g. audit logging), so people are not kept waiting for it. */
+export function inBackground(c: { executionCtx: { waitUntil(p: Promise<unknown>): void } }, work: Promise<unknown>) {
+  const p = work.catch((e) => console.error('background task failed', e))
+  try {
+    c.executionCtx.waitUntil(p)
+  } catch {
+    // No execution context (tests / local scripts): the promise still runs.
+  }
+}
+
 export async function enqueue(env: Env, msg: JobMessage): Promise<void> {
   try {
     await env.JOBS.send(msg)

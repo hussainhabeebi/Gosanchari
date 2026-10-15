@@ -59,11 +59,14 @@ export async function sendWhatsApp(
         },
       }
     : { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: text, preview_url: true } }
+  // A slow or stuck WhatsApp API must not leave someone waiting on the login screen.
   const r = await fetch(`https://graph.facebook.com/v21.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  })
+    signal: AbortSignal.timeout(10_000),
+  }).catch((e: unknown) => e as Error)
+  if (r instanceof Error) return { ok: false, error: r.name === 'TimeoutError' ? 'WhatsApp did not respond in time' : r.message }
   const j = (await r.json().catch(() => ({}))) as { messages?: { id: string }[]; error?: { message: string } }
   if (!r.ok) return { ok: false, error: j.error?.message ?? `HTTP ${r.status}` }
   return { ok: true, id: j.messages?.[0]?.id }

@@ -5,7 +5,7 @@ import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { Field, Turnstile } from '../views/components'
 import { createOtp, createSession, destroySession, hashPassword, homeFor, rateLimit, verifyOtp, verifyPassword } from '../lib/auth'
-import { first, insertId, logActivity, run } from '../lib/db'
+import { first, inBackground, insertId, logActivity, run } from '../lib/db'
 import { fillTemplate, sendEmail, sendWhatsApp, verifyTurnstile, whatsappConfigured } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
 import type { Role } from '../lib/permissions'
@@ -112,7 +112,7 @@ authRoutes.post('/login/otp/verify', async (c) => {
   // Link enquiries made before signing up.
   await run(c.env, 'UPDATE enquiries SET user_id = ? WHERE phone = ? AND user_id IS NULL', u.id, phone)
   await createSession(c, u.id, u.role)
-  await logActivity(c.env, u.id, 'login.otp', 'user', u.id)
+  inBackground(c, logActivity(c.env, u.id, 'login.otp', 'user', u.id))
   return c.redirect(next || homeFor(u.role), 303)
 })
 
@@ -126,7 +126,7 @@ authRoutes.post('/login/password', async (c) => {
   const u = await first<UserRow>(c.env, 'SELECT id, role, password_hash, active, blocked, merged_into FROM users WHERE email = ?', email)
   if (!u || !(await verifyPassword(f.password ?? '', u.password_hash)) || !u.active || u.blocked || u.merged_into) return redirectMsg(c, back, { err: 'Email or password is incorrect.' })
   await createSession(c, u.id, u.role)
-  await logActivity(c.env, u.id, 'login.password', 'user', u.id)
+  inBackground(c, logActivity(c.env, u.id, 'login.password', 'user', u.id))
   return c.redirect(next || homeFor(u.role), 303)
 })
 
