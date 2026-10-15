@@ -4,6 +4,7 @@ import type { Context } from 'hono'
 import type { AppEnv, SessionUser } from '../env'
 import { getContent, getSettings, type Settings } from '../lib/settings'
 import { mediaUrl } from '../lib/integrations'
+import { assetUrl, assetVersion } from '../lib/assets'
 import { MOODS, PageHero, type HeroProps } from './moods'
 import { isStaff, resolvePermissions, type Permissions } from '../lib/permissions'
 
@@ -34,6 +35,7 @@ interface LayoutProps extends PageOpts {
   perms: Permissions | null
   flash: { ok?: string; err?: string }
   turnstileSiteKey: string
+  assetVersion?: string
   siteUrl: string
   moodPhoto?: string | null
   bell?: number
@@ -373,10 +375,15 @@ export const Layout: FC<LayoutProps> = (p) => {
           <meta name="theme-color" content="#0f5e57" />
           <link rel="icon" href="/favicon.png" type="image/png" />
           <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-          <link rel="preconnect" href="https://fonts.googleapis.com" />
-          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
-          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Great+Vibes&family=Poppins:wght@400;500;600;700&display=swap" />
-          <link rel="stylesheet" href="/app.css" />
+          {area !== 'public' && area !== 'guest' && (
+            <>
+              <link rel="manifest" href="/staff.webmanifest" />
+              <meta name="mobile-web-app-capable" content="yes" />
+              <meta name="apple-mobile-web-app-capable" content="yes" />
+              <meta name="apple-mobile-web-app-title" content="Go Sanchari" />
+            </>
+          )}
+          <link rel="stylesheet" href={assetUrl(p.assetVersion ?? 'dev', '/app.css')} />
           {p.turnstileSiteKey && <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
           {p.head}
         </head>
@@ -419,7 +426,7 @@ export const Layout: FC<LayoutProps> = (p) => {
               💬 Need Help?
             </a>
           )}
-          <script src="/app.js" defer></script>
+          <script src={assetUrl(p.assetVersion ?? 'dev', '/app.js')} defer></script>
         </body>
       </html>
     </>
@@ -446,7 +453,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
     ? (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM enquiries WHERE status = 'new'").first<{ n: number }>().catch(() => null))?.n ?? 0
     : 0
   return c.html(
-    <Layout {...opts} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
+    <Layout {...opts} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} assetVersion={assetVersion(c.env)} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
       {body}
     </Layout>,
     status as 200,

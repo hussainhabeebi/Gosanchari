@@ -161,3 +161,13 @@ export const AiInsights: FC<{ entries: StayInsight[]; search?: boolean }> = ({ e
     {entries.length > 0 ? <><div class="grid grid-3">{entries.map((entry) => <article class="ai-insight-card"><span class="muted small">{entry.destination} · {entry.rating_count} guest reviews</span><h3><a href={`/stay/${entry.slug}`}>{entry.name}</a></h3><p>{entry.review_summary}</p><a href={`/stay/${entry.slug}#ask`}>Ask about this stay →</a></article>)}</div><p class="muted small ai-insight-source">AI-generated summaries of guest reviews. Check property details and confirm availability with our team.</p></> : <div class="ai-insight-empty"><strong>Tell us what matters to you.</strong><p>Use AI Search to describe your destination, dates, budget and must-haves. Review insights appear here when summaries are available.</p><a href="/search">Explore available stays →</a></div>}
   </section>
 )
+
+/** Phone-only tip for staff: add the portal to the home screen (hidden once installed or dismissed; see app.js). */
+export const InstallTip: FC = () => (
+  <section class="card install-tip" data-install-tip hidden>
+    <div class="row-between"><strong>📲 Open Go Sanchari like an app</strong><button type="button" class="linklike small" data-install-dismiss>Not now</button></div>
+    <p class="small muted">Add it to your home screen for one-tap access — you stay logged in for 7 days.</p>
+    <button type="button" class="btn btn-sm" data-install-app hidden>Add to home screen</button>
+    <p class="small" data-install-steps><strong>Android:</strong> tap ⋮ in Chrome → <em>Add to Home screen</em> (or <em>Install app</em>). <strong>iPhone:</strong> tap the Share button in Safari → <em>Add to Home Screen</em>.</p>
+  </section>
+)

@@ -4,7 +4,7 @@ import { Hono, type MiddlewareHandler } from 'hono'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, ChartHead, Empty, Field, jsonScript, Pager, Pill, Select, Stat, Table } from '../views/components'
-import { hashPassword, permissionsFor, requirePerm, requireStaff } from '../lib/auth'
+import { hashPassword, logOutEverywhere, permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { askAi } from '../lib/assist'
 import { DEFAULT_PERMISSIONS, PERMISSION_LABELS, ROLE_LABELS, STAFF_ROLES, type PermissionKey, type Permissions, type Role } from '../lib/permissions'
@@ -135,6 +135,7 @@ admin2Routes.get('/admin/staff/:id/edit', requirePerm('manage_staff'), staffAdmi
   const assigned = await all<{ destination: string }>(c.env, 'SELECT destination FROM staff_destinations WHERE user_id = ?', u.id)
   const options = [...new Set([...(await destinations(c.env)), ...assigned.map((d) => d.destination)])]
   return page(c, { title: 'Edit staff', area: 'admin', active: 'staff' }, (
+    <div class="stack-lg">
     <form method="post" action={`/admin/staff/${u.id}`} class="card stack">
       <h1>Edit staff — {u.name}</h1>
       <div class="grid grid-2">
@@ -148,7 +149,21 @@ admin2Routes.get('/admin/staff/:id/edit', requirePerm('manage_staff'), staffAdmi
       <label class="check"><input name="active" type="checkbox" value="1" checked={!!u.active} /> Active — allow login</label>
       <div class="row wrap-row"><button class="btn">Save Changes</button><a class="btn btn-outline" href="/admin/staff">Cancel</a></div>
     </form>
+    <form method="post" action={`/admin/staff/${u.id}/logout-everywhere`} class="card stack" data-confirm={`Log ${u.name} out on every phone and computer?`}>
+      <h2>Lost or shared phone?</h2>
+      <p class="muted small">Staff stay logged in for 7 days on each device. This ends all of {u.name}’s sessions straight away; they can log in again with their password or phone code. Resetting the password above does this too.</p>
+      <div><button class="btn btn-outline btn-danger">Log out of all devices</button></div>
+    </form>
+    </div>
   ))
+})
+
+admin2Routes.post('/admin/staff/:id/logout-everywhere', requirePerm('manage_staff'), staffAdminOnly, async (c) => {
+  const u = await staffAccount(c, int(c.req.param('id')))
+  if (!u) return c.notFound()
+  await logOutEverywhere(c.env, u.id)
+  await logActivity(c.env, c.get('user')!.id, 'staff.logged_out_everywhere', 'user', u.id)
+  return redirectMsg(c, u.id === c.get('user')!.id ? '/login' : `/admin/staff/${u.id}/edit`, { ok: `${u.name} has been logged out of all devices.` })
 })
 
 admin2Routes.post('/admin/staff/:id', requirePerm('manage_staff'), staffAdminOnly, async (c) => {
@@ -181,7 +196,7 @@ admin2Routes.post('/admin/staff/:id', requirePerm('manage_staff'), staffAdminOnl
   let results: D1Result[]
   try {
     results = await c.env.DB.batch([
-      c.env.DB.prepare("UPDATE users SET name = ?, phone = ?, email = ?, role = ?, active = ?, password_hash = COALESCE(?, password_hash) WHERE id = ? AND role != 'guest' AND (role != 'admin' OR active != 1 OR (? = 'admin' AND ? = 1) OR (SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND blocked = 0 AND merged_into IS NULL) > 1)").bind(name, phone, email, role, active, passwordHash, id, role, active),
+      c.env.DB.prepare("UPDATE users SET name = ?, phone = ?, email = ?, role = ?, active = ?, password_hash = COALESCE(?, password_hash), session_version = session_version + (? IS NOT NULL) WHERE id = ? AND role != 'guest' AND (role != 'admin' OR active != 1 OR (? = 'admin' AND ? = 1) OR (SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND blocked = 0 AND merged_into IS NULL) > 1)").bind(name, phone, email, role, active, passwordHash, passwordHash, id, role, active),
       c.env.DB.prepare("INSERT INTO activity_log (user_id, action, entity, entity_id, details) SELECT ?, 'staff.updated', 'user', ?, ? WHERE changes() = 1").bind(me.id, String(id), audit),
       c.env.DB.prepare(`DELETE FROM staff_destinations WHERE user_id = ? AND ${auditGate}`).bind(id, me.id, String(id), audit),
       ...assigned.map((d) => c.env.DB.prepare(`INSERT INTO staff_destinations (user_id, destination) SELECT ?, ? WHERE ${auditGate}`).bind(id, d, me.id, String(id), audit)),

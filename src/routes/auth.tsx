@@ -249,7 +249,8 @@ authRoutes.post('/reset/:token', async (c) => {
   const f = await form(c)
   if (!uid) return redirectMsg(c, '/forgot', { err: 'This link has expired.' })
   if ((f.password ?? '').length < 8) return redirectMsg(c, `/reset/${c.req.param('token')}`, { err: 'Use at least 8 characters.' })
-  await run(c.env, 'UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(f.password), Number(uid))
+  // A new password also ends sessions on other devices.
+  await run(c.env, 'UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?', await hashPassword(f.password), Number(uid))
   await c.env.KV.delete(key)
   await logActivity(c.env, Number(uid), 'password.reset', 'user', uid)
   return redirectMsg(c, '/login?tab=email', { ok: 'Password updated. Please log in.' })

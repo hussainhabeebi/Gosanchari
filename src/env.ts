@@ -28,6 +28,8 @@ export interface Env {
   JOBS: Queue<JobMessage>
   CHAT: DurableObjectNamespace
   ASSETS: Fetcher
+  /** Deployment version (wrangler [version_metadata]); used to version long-cached asset URLs. */
+  CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string }
 
   ENVIRONMENT: string
   SITE_URL: string

@@ -16,6 +16,9 @@ SITE_URL = "http://localhost:8787"
 AI_GATEWAY_ID = "gosanchari"
 TURNSTILE_SITE_KEY = ""
 
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "gosanchari"

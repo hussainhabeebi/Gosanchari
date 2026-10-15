@@ -951,6 +951,25 @@
   function autoSubmit(inp) { inp.addEventListener('change', function () { if (inp.files.length) inp.form.submit() }) }
   $$('[data-autosubmit]').forEach(autoSubmit)
 
+  // Staff home-screen tip: phones only, hidden once installed or dismissed.
+  ;(function () {
+    var tip = $('[data-install-tip]')
+    if (!tip) return
+    var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone
+    var dismissed = false
+    try { dismissed = localStorage.getItem('gs-install-tip') === 'no' } catch (e) {}
+    if (standalone || dismissed || !/Android|iPhone|iPad|Mobi/i.test(navigator.userAgent)) return
+    tip.hidden = false
+    var prompt = null, btn = $('[data-install-app]', tip)
+    window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); prompt = e; btn.hidden = false })
+    btn.addEventListener('click', function () { if (prompt) { prompt.prompt(); prompt = null; btn.hidden = true } })
+    window.addEventListener('appinstalled', function () { tip.hidden = true })
+    $('[data-install-dismiss]', tip).addEventListener('click', function () {
+      tip.hidden = true
+      try { localStorage.setItem('gs-install-tip', 'no') } catch (e) {}
+    })
+  })()
+
   // Forms that need a yes before they run (e.g. delete)
   $$('form[data-confirm]').forEach(function (f) {
     f.addEventListener('submit', function (e) { if (!confirm(f.dataset.confirm)) e.preventDefault() })

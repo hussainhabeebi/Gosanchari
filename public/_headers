@@ -1,0 +1,10 @@
+# Cache rules for static files (Cloudflare Workers static assets).
+# Logos, icons and design photos: reuse for a day, then check for a newer copy.
+/brand/*
+  Cache-Control: public, max-age=86400
+/design/*
+  Cache-Control: public, max-age=86400
+/favicon.png
+  Cache-Control: public, max-age=86400
+/apple-touch-icon.png
+  Cache-Control: public, max-age=86400

@@ -4,7 +4,7 @@ import { REVIEW_STATUS_SQL, QuotationStatus } from '../lib/quotation-review'
 import { Hono, type Context } from 'hono'
 import type { AppEnv, SessionUser } from '../env'
 import { page } from '../views/layout'
-import { AiNote, Empty, Field, Pager, Pill, Select, Stat, Table } from '../views/components'
+import { AiNote, Empty, Field, InstallTip, Pager, Pill, Select, Stat, Table } from '../views/components'
 import { hashPassword, permissionsFor, requirePerm, requireStaff, verifyPassword } from '../lib/auth'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, run } from '../lib/db'
 import { enquirySummary, matchProperties, replySuggestion } from '../lib/assist'
@@ -67,6 +67,7 @@ staffRoutes.get('/staff', async (c) => {
     .slice(0, 8)
   return page(c, { title: 'Staff dashboard', area: 'staff', active: 'dashboard' }, (
     <div class="stack-lg">
+      <InstallTip />
       <div class="row-between"><h1>Good {new Date().getUTCHours() + 5.5 < 12 ? 'morning' : 'day'}, {u.name.split(' ')[0]}</h1><a class="btn btn-sm" href="/staff/enquiries/new">+ New enquiry</a></div>
       <div class="stats">
         <Stat label="New enquiries today" value={counts?.new_today ?? 0} href="/staff/enquiries" />

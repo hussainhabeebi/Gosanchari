@@ -1114,3 +1114,7 @@ code { overflow-wrap: anywhere; }
  .home-search-hero .find-stay {grid-column:auto}
  .home-search-hero .trust-strip {gap:8px}
 }
+
+/* Staff home-screen tip (shown by app.js on phones only) */
+.install-tip[hidden], .install-tip [hidden] { display: none !important; }
+.install-tip { border-left: 4px solid var(--green); }

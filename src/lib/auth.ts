@@ -9,7 +9,8 @@ import { randomToken, timingSafeEqual, sha256Hex } from './util'
 
 const COOKIE = 'gs_session'
 const SESSION_TTL = 30 * 86400
-const STAFF_SESSION_TTL = 12 * 3600
+// Staff stay logged in for 7 days on their own phone; admins can end a lost device's session (logOutEverywhere).
+const STAFF_SESSION_TTL = 7 * 86400
 
 // ---- Passwords ----
 
@@ -42,7 +43,8 @@ export async function verifyPassword(password: string, stored: string | null): P
 export async function createSession(c: Context<AppEnv>, userId: number, role: Role): Promise<void> {
   const token = randomToken(32)
   const ttl = isStaff(role) ? STAFF_SESSION_TTL : SESSION_TTL
-  await c.env.KV.put(`sess:${await sha256Hex(token)}`, JSON.stringify({ userId }), { expirationTtl: ttl })
+  const v = (await c.env.DB.prepare('SELECT session_version FROM users WHERE id = ?').bind(userId).first<{ session_version: number }>())?.session_version ?? 0
+  await c.env.KV.put(`sess:${await sha256Hex(token)}`, JSON.stringify({ userId, v }), { expirationTtl: ttl })
   setCookie(c, COOKIE, token, {
     httpOnly: true,
     secure: c.env.ENVIRONMENT === 'production' || new URL(c.req.url).protocol === 'https:',
@@ -58,13 +60,20 @@ export async function destroySession(c: Context<AppEnv>): Promise<void> {
   deleteCookie(c, COOKIE, { path: '/' })
 }
 
-export async function loadUserById(env: Env, id: number): Promise<SessionUser | null> {
+export async function loadUserById(env: Env, id: number, sessionVersion?: number): Promise<SessionUser | null> {
   const u = await env.DB.prepare(
-    'SELECT id, role, name, phone, email, language FROM users WHERE id = ? AND active = 1 AND blocked = 0 AND merged_into IS NULL',
+    'SELECT id, role, name, phone, email, language, session_version FROM users WHERE id = ? AND active = 1 AND blocked = 0 AND merged_into IS NULL',
   )
     .bind(id)
-    .first<SessionUser>()
-  return u ?? null
+    .first<SessionUser & { session_version: number }>()
+  if (!u || (sessionVersion !== undefined && sessionVersion !== u.session_version)) return null
+  const { session_version: _, ...user } = u
+  return user
+}
+
+/** End every login session of an account (e.g. a lost phone). The next request on those devices asks to log in. */
+export async function logOutEverywhere(env: Env, userId: number) {
+  await env.DB.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').bind(userId).run()
 }
 
 /** Loads the signed-in user (if any) on every request. */
@@ -73,9 +82,9 @@ export const sessionMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
   c.set('sessionToken', null)
   const token = getCookie(c, COOKIE)
   if (token) {
-    const s = await c.env.KV.get<{ userId: number }>(`sess:${await sha256Hex(token)}`, 'json')
+    const s = await c.env.KV.get<{ userId: number; v?: number }>(`sess:${await sha256Hex(token)}`, 'json')
     if (s) {
-      const u = await loadUserById(c.env, s.userId)
+      const u = await loadUserById(c.env, s.userId, s.v ?? 0)
       if (u) {
         c.set('user', u)
         c.set('sessionToken', token)

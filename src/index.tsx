@@ -29,6 +29,7 @@ import { webhookRoutes } from './routes/webhooks'
 import { handleQueue } from './jobs/queue'
 import { handleScheduled } from './jobs/cron'
 import { getSettings } from './lib/settings'
+import { assetVersion, VERSIONED_ASSETS } from './lib/assets'
 
 export { ChatRoom } from './do/chat'
 
@@ -38,8 +39,8 @@ const security = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
     scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
-    styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com', 'https://fonts.googleapis.com'],
-    fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+    styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
+    fontSrc: ["'self'"],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
     connectSrc: ["'self'"],
     frameSrc: ['https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
@@ -51,6 +52,18 @@ const security = secureHeaders({
 })
 // WebSocket upgrade responses (101) have immutable headers, so skip them.
 // Lists extended by the team (categories, facilities, amenities…) are merged in before each request.
+// Versioned stylesheet/script (see lib/assets.ts). Registered before the middleware below so these stay instant.
+app.get('/v/:ver/:file', async (c) => {
+  const path = '/' + c.req.param('file')
+  if (!VERSIONED_ASSETS.has(path)) return c.notFound()
+  const res = await c.env.ASSETS.fetch(new URL(path, c.req.url))
+  if (!res.ok) return res
+  const out = new Response(res.body, res)
+  // An old version id only ever maps to that deploy's file, so it can be cached for good.
+  out.headers.set('Cache-Control', c.req.param('ver') === assetVersion(c.env) ? 'public, max-age=31536000, immutable' : 'no-cache')
+  return out
+})
+
 app.use('*', async (c, next) => {
   if (!c.req.path.startsWith('/app.') && !c.req.path.startsWith('/brand/')) await applyTaxonomy(c.env).catch(() => {})
   await next()

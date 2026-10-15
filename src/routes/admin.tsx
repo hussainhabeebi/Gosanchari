@@ -5,7 +5,7 @@ import { stayTypeLabel } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { COVER_PHOTO_SQL } from '../lib/catalog'
 import { page } from '../views/layout'
-import { AiNote, ChartHead, Empty, Field, jsonScript, Pager, Pill, Select, Stat, Table, Tabs } from '../views/components'
+import { AiNote, ChartHead, Empty, Field, InstallTip, jsonScript, Pager, Pill, Select, Stat, Table, Tabs } from '../views/components'
 import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { cancelBooking, processRefund } from '../lib/bookings'
@@ -69,6 +69,7 @@ adminRoutes.get('/admin', async (c) => {
   }
   return page(c, { title: 'Admin dashboard', area: 'admin', active: 'admin', head: <ChartHead /> }, (
     <div class="stack-lg">
+      <InstallTip />
       <div class="row-between">
         <h1>Overview</h1>
         <Tabs base="/admin" param="p" active={period} items={[['today', 'Today'], ['week', '7 days'], ['month', '30 days']]} />
