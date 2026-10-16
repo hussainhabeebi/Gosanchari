@@ -87,19 +87,20 @@ describe('public destination autocomplete', () => {
 
 // @ts-expect-error Local browser event fixture.
 import { runInNewContext } from 'node:vm'
-function combobox() {
+function combobox(mobile=false) {
   const callbacks: Record<string, (event?: any) => void> = {}, requests: any[] = [], timers = new Map<number,()=>void>(); let nextTimer = 0
   const attrs: Record<string,string> = {}, status = {textContent:''}
   const form = {addEventListener: (name:string, fn:any)=>callbacks['form:'+name]=fn}
-  const input:any = {value:'',setAttribute:(k:string,v:string)=>attrs[k]=v,removeAttribute:(k:string)=>delete attrs[k],addEventListener:(k:string,v:any)=>callbacks[k]=v,focus(){document.activeElement=input},dispatchEvent(){}}
-  const list:any = {hidden:true,children:[],replaceChildren(){this.children=[]},appendChild(n:any){this.children.push(n)}}
+  const rect = {left:100,top:200,bottom:244,width:180}; const input:any = {getBoundingClientRect:()=>rect,value:'',setAttribute:(k:string,v:string)=>attrs[k]=v,removeAttribute:(k:string)=>delete attrs[k],addEventListener:(k:string,v:any)=>callbacks[k]=v,focus(){document.activeElement=input},dispatchEvent(){}}
+  const list:any = {style:{},contains(n:any){return this.children.includes(n)},hidden:true,children:[],replaceChildren(){this.children=[]},appendChild(n:any){this.children.push(n)}}
   const root = {querySelector:(q:string)=>q==='input'?input:q.includes('listbox')?list:status,contains:(n:any)=>n===input||list.children.includes(n),closest:()=>form}
-  const document:any = {activeElement:input,querySelector:()=>root,addEventListener:(k:string,v:any)=>callbacks['document:'+k]=v,createElement:()=>({attrs:{} as Record<string,string>,events:{} as Record<string,any>,setAttribute(k:string,v:string){this.attrs[k]=v},addEventListener(k:string,v:any){this.events[k]=v},scrollIntoView(){}})}
+  const document:any = {body:{appendChild:(n:any)=>{n.portalled=true}},activeElement:input,querySelector:()=>root,addEventListener:(k:string,v:any)=>callbacks['document:'+k]=v,createElement:()=>({attrs:{} as Record<string,string>,events:{} as Record<string,any>,setAttribute(k:string,v:string){this.attrs[k]=v},addEventListener(k:string,v:any){this.events[k]=v},scrollIntoView(){}})}
   const script = readFileSync('public/app.js','utf8').split('// Homepage destination combobox:')[1].split('// End homepage destination combobox.')[0].split('\n').slice(1).join('\n')
-  runInNewContext(script,{document,Event:class{},AbortController:class{signal={};abort(){}},setTimeout:(fn:any)=>{timers.set(++nextTimer,fn);return nextTimer},clearTimeout:(n:number)=>{timers.delete(n)},fetch:(url:string)=>new Promise(resolve=>requests.push({url,resolve}))})
+  const viewport:any={width:360,height:640,offsetLeft:0,offsetTop:0,addEventListener:(k:string,v:any)=>callbacks['viewport:'+k]=v}; const window:any={innerWidth:1440,innerHeight:900,visualViewport:mobile?viewport:null,addEventListener:(k:string,v:any)=>callbacks['window:'+k]=v}
+  runInNewContext(script,{document,window,Event:class{},AbortController:class{signal={};abort(){}},setTimeout:(fn:any)=>{timers.set(++nextTimer,fn);return nextTimer},clearTimeout:(n:number)=>{timers.delete(n)},fetch:(url:string)=>new Promise(resolve=>requests.push({url,resolve}))})
   const flush=()=>{for(const [id,fn] of timers){timers.delete(id);fn()}}
   const respond=async(index:number,values:string[],ok=true)=>{requests[index].resolve({ok,json:async()=>values});await new Promise(resolve=>setTimeout(resolve,0))}
-  return {input,list,status,attrs,callbacks,requests,flush,respond}
+  return {input,list,status,attrs,callbacks,requests,flush,respond,rect,window,viewport}
 }
 
 it('supports keyboard selection, Escape, touch/click selection and unmodified form submission',async()=>{
@@ -128,4 +129,29 @@ it('ignores out-of-order responses, handles no matches and permits typed search 
   expect(b.status.textContent).toBe('No matching destinations.')
   b.callbacks.focus();b.flush();await b.respond(3,[],false)
   expect(b.status.textContent).toContain('You can still type');expect(b.input.value).toBe('unknown')
+})
+
+it('keeps long lists in a capped, scrollable panel directly below the input, outside hero clipping',async()=>{
+  const b=combobox();b.callbacks.focus();b.flush();await b.respond(0,['One','Two','Three','Four','Five','Six','Seven','Eight'])
+  expect(b.list.portalled).toBe(true);expect(b.list.children).toHaveLength(8)
+  expect(b.list.style).toMatchObject({top:'248px',left:'100px',maxHeight:'240px',width:'260px',bottom:'auto'})
+  b.callbacks['document:pointerdown']({target:b.list.children[0]});expect(b.list.hidden).toBe(false)
+  b.callbacks['document:pointerdown']({target:{}});expect(b.list.hidden).toBe(true)
+  const css=readFileSync('public/app.css','utf8')
+  expect(css).toContain('.destination-options{position:fixed;z-index:1000;box-sizing:border-box;')
+  expect(css).toContain('max-height:240px;overflow-y:auto;overscroll-behavior:contain;')
+  expect(css).toContain('min-height:44px;cursor:pointer')
+})
+
+it('fits mobile and keyboard-reduced viewports, opens upwards near the bottom and follows scrolling',async()=>{
+  const b=combobox(true);b.window.innerHeight=640
+  b.rect.left=230;b.rect.top=520;b.rect.bottom=564
+  b.callbacks.focus();b.flush();await b.respond(0,['Vagamon, Kerala','Munnar, Kerala'])
+  expect(b.list.style).toMatchObject({top:'auto',bottom:'124px',left:'88px',width:'260px',maxHeight:'240px'})
+  b.viewport.width=280;b.viewport.height=320;b.rect.left=12;b.rect.top=180;b.rect.bottom=224
+  b.callbacks['viewport:resize']()
+  expect(b.list.style.width).toBe('256px');expect(b.list.style.left).toBe('12px');expect(b.list.style.maxHeight).toBe('164px')
+  b.rect.top=30;b.rect.bottom=74;b.callbacks['window:scroll']()
+  expect(b.list.style.top).toBe('78px');expect(b.list.style.maxHeight).toBe('230px')
+  b.rect.top=-60;b.rect.bottom=-16;b.callbacks['window:scroll']();expect(b.list.hidden).toBe(true)
 })

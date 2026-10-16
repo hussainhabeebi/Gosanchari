@@ -1051,6 +1051,27 @@
   var input = root.querySelector('input'), list = root.querySelector('[role="listbox"]');
   var status = root.querySelector('[data-destination-status]');
   var active = -1, labels = [], generation = 0, timer, controller;
+  // Escape hero stacking/clipping while keeping the combobox association by ID.
+  document.body.appendChild(list);
+  function position() {
+    if (list.hidden) return;
+    var rect = input.getBoundingClientRect(), viewport = window.visualViewport;
+    var left = viewport ? viewport.offsetLeft : 0, top = viewport ? viewport.offsetTop : 0;
+    var width = viewport ? viewport.width : window.innerWidth;
+    var height = viewport ? viewport.height : window.innerHeight;
+    var bottom = top + height, margin = 12, gap = 4;
+    if (rect.bottom <= top || rect.top >= bottom) { close(); return; }
+    var below = Math.max(0, bottom - margin - rect.bottom - gap);
+    var above = Math.max(0, rect.top - top - margin - gap);
+    var upwards = below < 160 && above > below;
+    var panelHeight = Math.min(240, upwards ? above : below);
+    var panelWidth = Math.min(Math.max(rect.width, 260), width - margin * 2);
+    list.style.width = panelWidth + 'px';
+    list.style.left = Math.max(left + margin, Math.min(rect.left, left + width - margin - panelWidth)) + 'px';
+    list.style.maxHeight = panelHeight + 'px';
+    list.style.top = upwards ? 'auto' : rect.bottom + gap + 'px';
+    list.style.bottom = upwards ? window.innerHeight - rect.top + gap + 'px' : 'auto';
+  }
   function close() {
     generation++; clearTimeout(timer);
     if (controller) controller.abort();
@@ -1095,7 +1116,7 @@
         empty.className = 'destination-empty'; empty.textContent = 'No matching destinations. Try another location.';
         list.appendChild(empty);
       }
-      list.hidden = false; input.setAttribute('aria-expanded', 'true');
+      list.hidden = false; position(); input.setAttribute('aria-expanded', String(!list.hidden));
       status.textContent = labels.length ? labels.length + ' destinations suggested.' : 'No matching destinations.';
     } catch (error) {
       if (version !== generation || error.name === 'AbortError') return;
@@ -1121,7 +1142,13 @@
     }
   });
   input.addEventListener('blur', close);
-  document.addEventListener('pointerdown', function (event) { if (!root.contains(event.target)) close(); });
+  document.addEventListener('pointerdown', function (event) { if (!root.contains(event.target) && !list.contains(event.target)) close(); });
+  window.addEventListener('resize', position);
+  window.addEventListener('scroll', position, true);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', position);
+    window.visualViewport.addEventListener('scroll', position);
+  }
   root.closest('form').addEventListener('submit', close);
 })();
 // End homepage destination combobox.
