@@ -1044,6 +1044,88 @@
 
 })();
 
+// Homepage destination combobox: suggestions are a read-only public catalogue.
+(function () {
+  var root = document.querySelector('[data-destination-autocomplete]');
+  if (!root) return;
+  var input = root.querySelector('input'), list = root.querySelector('[role="listbox"]');
+  var status = root.querySelector('[data-destination-status]');
+  var active = -1, labels = [], generation = 0, timer, controller;
+  function close() {
+    generation++; clearTimeout(timer);
+    if (controller) controller.abort();
+    list.hidden = true; input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant'); active = -1;
+  }
+  function select(index) {
+    if (!labels[index]) return;
+    input.value = labels[index]; close(); input.focus();
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function highlight(index) {
+    active = index;
+    Array.from(list.children).forEach(function (option, i) {
+      option.setAttribute('aria-selected', String(i === active));
+    });
+    if (active >= 0) {
+      input.setAttribute('aria-activedescendant', 'destination-option-' + active);
+      list.children[active].scrollIntoView({ block: 'nearest' });
+    } else input.removeAttribute('aria-activedescendant');
+  }
+  async function suggest(version) {
+    controller = new AbortController();
+    try {
+      var response = await fetch('/api/public/destinations?q=' + encodeURIComponent(input.value), { signal: controller.signal });
+      if (!response.ok) throw new Error('Suggestions unavailable');
+      var values = await response.json();
+      if (version !== generation || document.activeElement !== input) return;
+      labels = values; active = -1; list.replaceChildren();
+      input.removeAttribute('aria-activedescendant');
+      labels.forEach(function (label, index) {
+        var option = document.createElement('div');
+        option.id = 'destination-option-' + index;
+        option.setAttribute('role', 'option'); option.setAttribute('aria-selected', 'false');
+        option.textContent = label;
+        option.addEventListener('pointerdown', function (event) { event.preventDefault(); });
+        option.addEventListener('click', function () { select(index); });
+        list.appendChild(option);
+      });
+      if (!labels.length) {
+        var empty = document.createElement('div');
+        empty.className = 'destination-empty'; empty.textContent = 'No matching destinations. Try another location.';
+        list.appendChild(empty);
+      }
+      list.hidden = false; input.setAttribute('aria-expanded', 'true');
+      status.textContent = labels.length ? labels.length + ' destinations suggested.' : 'No matching destinations.';
+    } catch (error) {
+      if (version !== generation || error.name === 'AbortError') return;
+      close(); status.textContent = 'Suggestions unavailable. You can still type a destination and search.';
+    }
+  }
+  function schedule(delay) {
+    close(); labels = [];
+    var version = generation;
+    timer = setTimeout(function () { suggest(version); }, delay);
+  }
+  input.addEventListener('focus', function () { schedule(0); });
+  input.addEventListener('input', function () { schedule(160); });
+  input.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { close(); return; }
+    if (event.key === 'Tab') { close(); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (list.hidden) { schedule(0); return; }
+      if (labels.length) highlight(active < 0 ? (event.key === 'ArrowDown' ? 0 : labels.length - 1) : (active + (event.key === 'ArrowDown' ? 1 : -1) + labels.length) % labels.length);
+    } else if (event.key === 'Enter' && !list.hidden && active >= 0) {
+      event.preventDefault(); select(active);
+    }
+  });
+  input.addEventListener('blur', close);
+  document.addEventListener('pointerdown', function (event) { if (!root.contains(event.target)) close(); });
+  root.closest('form').addEventListener('submit', close);
+})();
+// End homepage destination combobox.
+
 // Reference navigation, stay preview and quote review. Existing URLs remain usable without JS.
 (function () {
   document.querySelectorAll('.nav-dropdown').forEach(function (item) {

@@ -70,10 +70,13 @@ export async function smartSearch(env: Env, text: string): Promise<{ filters: Se
 
 // ---- Database search ----
 
-export async function searchProperties(env: Env, f: SearchFilters, limit = 60, staffRates = false): Promise<PropertyCard[]> {
+export async function searchProperties(env: Env, f: SearchFilters, limit = 60, staffRates = false, destinationAliases?: string[]): Promise<PropertyCard[]> {
   const where: string[] = ["p.status = 'live'"]
   const binds: (string | number)[] = []
-  if (f.destination) { where.push('p.destination = ?'); binds.push(f.destination) }
+  if (f.destination) {
+    if (destinationAliases?.length) { where.push(`p.destination IN (${placeholders(destinationAliases.length)})`); binds.push(...destinationAliases) }
+    else { where.push('p.destination = ?'); binds.push(f.destination) }
+  }
   if (f.types?.length) { where.push(`COALESCE(p.stay_type, p.type) IN (${placeholders(f.types.length)})`); binds.push(...f.types) }
   if (f.rating) { where.push('p.rating_avg >= ?'); binds.push(f.rating) }
   if (f.pet) where.push("(p.pet_friendly = 1 OR EXISTS (SELECT 1 FROM json_each(p.themes) j WHERE j.value = 'pet'))")

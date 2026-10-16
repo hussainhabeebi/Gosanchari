@@ -1,3 +1,4 @@
+import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
 // Public pages (1–9) and the public quotation link (14).
@@ -50,7 +51,6 @@ publicRoutes.get('/', async (c) => {
   const reviews = reviewIds.length
     ? await all<ReviewRow & { property_name: string; slug: string }>(c.env, `SELECT r.*, p.name AS property_name, p.slug FROM reviews r JOIN properties p ON p.id = r.property_id WHERE r.status = 'approved' AND r.id IN (${reviewIds.map(() => '?').join(',')})`, ...reviewIds)
     : await all<ReviewRow & { property_name: string; slug: string }>(c.env, "SELECT r.*, p.name AS property_name, p.slug FROM reviews r JOIN properties p ON p.id = r.property_id WHERE r.status = 'approved' AND r.rating >= 4 AND length(r.body) > 40 ORDER BY r.id DESC LIMIT 4")
-  const destNames = await destinations(c.env)
   const today = todayIST()
 
   return page(c, { title: settings.business.name, description: content.hero.subtitle, canonical: c.env.SITE_URL + '/' }, (
@@ -59,7 +59,12 @@ publicRoutes.get('/', async (c) => {
         <div class="wrap">
           <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
           <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
-            <Field label="⌖ Destination"><Select name="destination" value={destNames.includes('Munnar') ? 'Munnar' : ''} options={[['', 'Anywhere in Kerala'], ...destNames.map((d) => [d, d] as [string, string])]} /></Field>
+            <div class="field destination-autocomplete" data-destination-autocomplete>
+              <label class="field-label" for="home-destination">⌖ Destination</label>
+              <input id="home-destination" name="destination" type="text" maxlength={100} placeholder="Where would you like to stay?" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="destination-options" aria-expanded="false" />
+              <div id="destination-options" class="destination-options" role="listbox" aria-label="Destinations" hidden></div>
+              <span class="sr-only" role="status" data-destination-status></span>
+            </div>
             <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
             <Field label="▣ Check-out"><input type="date" name="checkOut" min={today} /></Field>
             <details class="guest-picker"><summary><span class="field-label">♙ Guests</span><strong data-guest-summary>2 Adults, 0 Kids</strong></summary><div class="guest-panel"><Field label="Adults"><input name="guests" type="number" min="1" max="40" value="2" /></Field><Field label="Children"><input name="children" type="number" min="0" max="20" value="0" /></Field></div></details>
@@ -118,6 +123,12 @@ publicRoutes.get('/', async (c) => {
   ))
 })
 
+// Only public labels are returned, never property records or private pricing.
+publicRoutes.get('/api/public/destinations', async (c) => {
+  const catalog = await publicDestinations(c.env)
+  return c.json(matchingDestinations(catalog, (c.req.query('q') || '').slice(0, 100)).slice(0, 8).map(d => d.label))
+})
+
 // ---------- 2. Search results ----------
 publicRoutes.get('/search', async (c) => {
   const aiText = c.req.query('ai')?.trim().slice(0, 200)
@@ -134,7 +145,13 @@ publicRoutes.get('/search', async (c) => {
   for (const [k, v] of Object.entries(q)) flat[k] = v.length > 1 ? v : v[0]
   const f: SearchFilters = filtersFromQuery(flat)
   f.sort ??= 'recommended'
-  const [results, dests, saved] = await Promise.all([searchProperties(c.env, f), destinations(c.env), savedIds(c)])
+  const catalog = await publicDestinations(c.env)
+  const matches = f.destination ? matchingDestinations(catalog, f.destination) : []
+  if (matches.length === 1) f.destination = matches[0].label
+  const aliases = matches.flatMap(d => d.aliases)
+  const [results, saved] = await Promise.all([searchProperties(c.env, f, 60, false, aliases), savedIds(c)])
+  const dests = catalog.map(d => d.label)
+  if (f.destination && !dests.includes(f.destination)) dests.unshift(f.destination)
   const fewer = results.length < 3 ? await closeMatches(c.env, f, results.map((r) => r.id), 4) : []
   const insightIds = results.slice(0, 12).map((p) => p.id)
   const insights = insightIds.length ? await all<StayInsight>(c.env, `SELECT name, slug, destination, review_summary, rating_count FROM properties WHERE status = 'live' AND rating_count > 0 AND length(trim(review_summary)) > 0 AND id IN (${insightIds.map(() => '?').join(',')}) ORDER BY rating_count DESC LIMIT 3`, ...insightIds) : []
