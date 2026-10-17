@@ -1,3 +1,4 @@
+import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
 import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
@@ -53,7 +54,7 @@ publicRoutes.get('/', async (c) => {
     : await all<ReviewRow & { property_name: string; slug: string }>(c.env, "SELECT r.*, p.name AS property_name, p.slug FROM reviews r JOIN properties p ON p.id = r.property_id WHERE r.status = 'approved' AND r.rating >= 4 AND length(r.body) > 40 ORDER BY r.id DESC LIMIT 4")
   const today = todayIST()
 
-  return page(c, { title: settings.business.name, description: content.hero.subtitle, canonical: c.env.SITE_URL + '/' }, (
+  return page(c, { title: 'Kerala Stays, Resorts & Holiday Enquiries', description: 'Find stays in Munnar, Vagamon and across Kerala with Go Sanchari. Compare properties, explore rooms and send an enquiry for a personalised offer.', canonical: c.env.SITE_URL + '/', head: jsonScript('business-schema', travelAgencySchema(c.env.SITE_URL, settings.business), 'application/ld+json') }, (
     <>
       <section class="hero reference-hero home-search-hero">
         <div class="wrap">
@@ -203,7 +204,9 @@ publicRoutes.get('/search', async (c) => {
     ].slice(0, 4)
   }
 
-  return page(c, { title: f.destination ? `Stays in ${f.destination}` : 'Find a stay', description: `Homestays, villas, resorts and houseboats${f.destination ? ' in ' + f.destination : ' in Kerala'}.`, head: view === 'map' ? <LeafletHead /> : undefined }, (
+  const canonicalSearch = new URL('/search', c.env.SITE_URL)
+  if (f.destination) canonicalSearch.searchParams.set('destination', f.destination)
+  return page(c, { title: f.destination ? `Stays in ${f.destination}` : 'Find a stay', description: `Homestays, villas, resorts and houseboats${f.destination ? ' in ' + f.destination : ' in Kerala'}.`, canonical: canonicalSearch.href, head: view === 'map' ? <LeafletHead /> : undefined }, (
     <><section class="destination-hero"><div class="wrap"><span class="eyebrow">DESTINATION</span><h1>{f.destination || 'Kerala'}</h1><p>MISTY MOUNTAINS, ENDLESS MEMORIES</p></div></section><div class="wrap search-page">
       <input type="checkbox" id="filters-toggle" class="nav-toggle" />
       <aside class="filters">
@@ -317,7 +320,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const preview = c.req.query('preview') === '1'
   const user = c.get('user')
   const isStaffUser = !!user && user.role !== 'guest'
-  if (!p || (p.status !== 'live' && !isStaffUser)) return page(c, { title: 'Not found' }, <div class="wrap section"><Empty><h2>This stay is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
+  if (!p || (p.status !== 'live' && !isStaffUser)) return page(c, { title: 'Not found', noindex: true }, <div class="wrap section"><Empty><h2>This stay is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
   const settings = await getSettings(c.env)
   const [media, rooms, reviews, similar, saved] = await Promise.all([
     all<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE property_id = ? ORDER BY sort, id', p.id),
@@ -347,17 +350,18 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const guests = int(c.req.query('guests'), 2)
   const gallery = photos.length ? photos : [{ id: 0, r2_key: '', caption: p.name } as PhotoRow]
   const ld = {
-    '@context': 'https://schema.org', '@type': 'LodgingBusiness', name: p.name, description: p.seo_description ?? p.description.slice(0, 200),
-    address: { '@type': 'PostalAddress', addressLocality: p.destination, addressRegion: 'Kerala', addressCountry: 'IN' },
-    ...(p.rating_count ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: p.rating_avg.toFixed(1), reviewCount: p.rating_count } } : {}),
-    image: photos.slice(0, 3).map((ph) => c.env.SITE_URL + mediaUrl(ph.r2_key, 1200)),
+    '@context': 'https://schema.org', '@type': 'LodgingBusiness', name: p.name, url: new URL(`/stay/${p.slug}`, c.env.SITE_URL).href, description: propertyMetaDescription(p),
+    address: { '@type': 'PostalAddress', addressLocality: p.destination },
+    ...(p.rating_count > 0 && p.rating_avg > 0 && p.rating_avg <= 5 ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: p.rating_avg.toFixed(1), reviewCount: p.rating_count } } : {}),
+    image: photos.slice(0, 3).map((ph) => new URL(mediaUrl(ph.r2_key, 1200), c.env.SITE_URL).href),
   }
 
   return page(c, {
     title: p.seo_title || `${p.name}, ${p.destination}`,
-    description: p.seo_description || p.description.slice(0, 155),
+    description: propertyMetaDescription(p),
+    noindex: p.status !== 'live' || preview,
     image: photos[0] ? (photos[0].r2_key.startsWith('http') ? photos[0].r2_key : c.env.SITE_URL + mediaUrl(photos[0].r2_key, 1200)) : undefined,
-    canonical: `${c.env.SITE_URL}/stay/${p.slug}`,
+    canonical: p.status === 'live' ? `${c.env.SITE_URL}/stay/${p.slug}` : undefined,
     head: <LeafletHead />,
     hideJourneyBanner: true,
   }, (
@@ -613,7 +617,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         <div class="muted small">For a personalised offer, fill in your details below and enquire.</div>
         <a class="btn" href="#book">Enquire</a>
       </div>
-      {jsonScript('ld', ld)}
+      {jsonScript('ld', ld, 'application/ld+json')}
     </div>
   ))
 })
@@ -786,7 +790,7 @@ publicRoutes.get('/offers', async (c) => {
 // ---------- 9. About / Contact / Policies ----------
 publicRoutes.get('/about', async (c) => {
   const [content, s] = await Promise.all([getContent(c.env), getSettings(c.env)])
-  return page(c, { title: 'About us', description: `About ${s.business.name}` }, (
+  return page(c, { title: 'About Our Kerala Travel Team', description: `Learn about ${s.business.name}, our Kerala-based travel team, and how to contact us for help choosing a stay and requesting a personalised offer.` }, (
     <div class="wrap narrow section prose">
       <img src="/brand/logo-wide.webp" alt={s.business.name} width="302" height="80" style="display:block;margin:0 auto 16px;height:auto;max-width:100%" />
       <h1>About {s.business.name}</h1>
@@ -799,7 +803,7 @@ publicRoutes.get('/about', async (c) => {
 publicRoutes.get('/contact', async (c) => {
   const s = await getSettings(c.env)
   const content = await getContent(c.env)
-  return page(c, { title: 'Contact', description: `Contact ${s.business.name}` }, (
+  return page(c, { title: 'Contact Us for Kerala Stay Enquiries', description: `Contact ${s.business.name} by phone, WhatsApp or email for help with Kerala stays. Send your travel dates and requirements to request a personalised offer.` }, (
     <div class="wrap narrow section">
       <h1>Contact us</h1>
       <div class="grid grid-2">
