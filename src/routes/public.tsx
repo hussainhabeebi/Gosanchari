@@ -53,7 +53,11 @@ publicRoutes.get('/', async (c) => {
   const destNames = await destinations(c.env)
   const today = todayIST()
 
-  return page(c, { title: settings.business.name, description: content.hero.subtitle, canonical: c.env.SITE_URL + '/' }, (
+ return page(c, {
+  title: 'Go Sanchari – Travel, Tours & Holiday Packages',
+  description: 'Discover travel experiences, holiday packages and handpicked stays with Go Sanchari. Explore destinations and enquire for personalised travel offers.',
+  canonical: c.env.SITE_URL + '/',
+},  (
     <>
       <section class="hero reference-hero home-search-hero">
         <div class="wrap">
