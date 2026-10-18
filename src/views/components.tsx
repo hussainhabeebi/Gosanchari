@@ -122,9 +122,9 @@ export const AiNote: FC<{ children?: Child; label?: string }> = ({ children, lab
 )
 
 /** Safe JSON for inline <script type="application/json">. */
-export function jsonScript(id: string, data: unknown) {
+export function jsonScript(id: string, data: unknown, type: 'application/json' | 'application/ld+json' = 'application/json') {
   const s = JSON.stringify(data).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
-  return raw(`<script type="application/json" id="${id}">${s}</script>`)
+  return raw(`<script type="${type}" id="${id}">${s}</script>`)
 }
 
 export const LeafletHead = () => (

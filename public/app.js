@@ -1044,6 +1044,115 @@
 
 })();
 
+// Homepage destination combobox: suggestions are a read-only public catalogue.
+(function () {
+  var root = document.querySelector('[data-destination-autocomplete]');
+  if (!root) return;
+  var input = root.querySelector('input'), list = root.querySelector('[role="listbox"]');
+  var status = root.querySelector('[data-destination-status]');
+  var active = -1, labels = [], generation = 0, timer, controller;
+  // Escape hero stacking/clipping while keeping the combobox association by ID.
+  document.body.appendChild(list);
+  function position() {
+    if (list.hidden) return;
+    var rect = input.getBoundingClientRect(), viewport = window.visualViewport;
+    var left = viewport ? viewport.offsetLeft : 0, top = viewport ? viewport.offsetTop : 0;
+    var width = viewport ? viewport.width : window.innerWidth;
+    var height = viewport ? viewport.height : window.innerHeight;
+    var bottom = top + height, margin = 12, gap = 4;
+    if (rect.bottom <= top || rect.top >= bottom) { close(); return; }
+    var below = Math.max(0, bottom - margin - rect.bottom - gap);
+    var above = Math.max(0, rect.top - top - margin - gap);
+    var upwards = below < 160 && above > below;
+    var panelHeight = Math.min(240, upwards ? above : below);
+    var panelWidth = Math.min(Math.max(rect.width, 260), width - margin * 2);
+    list.style.width = panelWidth + 'px';
+    list.style.left = Math.max(left + margin, Math.min(rect.left, left + width - margin - panelWidth)) + 'px';
+    list.style.maxHeight = panelHeight + 'px';
+    list.style.top = upwards ? 'auto' : rect.bottom + gap + 'px';
+    list.style.bottom = upwards ? window.innerHeight - rect.top + gap + 'px' : 'auto';
+  }
+  function close() {
+    generation++; clearTimeout(timer);
+    if (controller) controller.abort();
+    list.hidden = true; input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant'); active = -1;
+  }
+  function select(index) {
+    if (!labels[index]) return;
+    input.value = labels[index]; close(); input.focus();
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function highlight(index) {
+    active = index;
+    Array.from(list.children).forEach(function (option, i) {
+      option.setAttribute('aria-selected', String(i === active));
+    });
+    if (active >= 0) {
+      input.setAttribute('aria-activedescendant', 'destination-option-' + active);
+      list.children[active].scrollIntoView({ block: 'nearest' });
+    } else input.removeAttribute('aria-activedescendant');
+  }
+  async function suggest(version) {
+    controller = new AbortController();
+    try {
+      var response = await fetch('/api/public/destinations?q=' + encodeURIComponent(input.value), { signal: controller.signal });
+      if (!response.ok) throw new Error('Suggestions unavailable');
+      var values = await response.json();
+      if (version !== generation || document.activeElement !== input) return;
+      labels = values; active = -1; list.replaceChildren();
+      input.removeAttribute('aria-activedescendant');
+      labels.forEach(function (label, index) {
+        var option = document.createElement('div');
+        option.id = 'destination-option-' + index;
+        option.setAttribute('role', 'option'); option.setAttribute('aria-selected', 'false');
+        option.textContent = label;
+        option.addEventListener('pointerdown', function (event) { event.preventDefault(); });
+        option.addEventListener('click', function () { select(index); });
+        list.appendChild(option);
+      });
+      if (!labels.length) {
+        var empty = document.createElement('div');
+        empty.className = 'destination-empty'; empty.textContent = 'No matching destinations. Try another location.';
+        list.appendChild(empty);
+      }
+      list.hidden = false; position(); input.setAttribute('aria-expanded', String(!list.hidden));
+      status.textContent = labels.length ? labels.length + ' destinations suggested.' : 'No matching destinations.';
+    } catch (error) {
+      if (version !== generation || error.name === 'AbortError') return;
+      close(); status.textContent = 'Suggestions unavailable. You can still type a destination and search.';
+    }
+  }
+  function schedule(delay) {
+    close(); labels = [];
+    var version = generation;
+    timer = setTimeout(function () { suggest(version); }, delay);
+  }
+  input.addEventListener('focus', function () { schedule(0); });
+  input.addEventListener('input', function () { schedule(160); });
+  input.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { close(); return; }
+    if (event.key === 'Tab') { close(); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (list.hidden) { schedule(0); return; }
+      if (labels.length) highlight(active < 0 ? (event.key === 'ArrowDown' ? 0 : labels.length - 1) : (active + (event.key === 'ArrowDown' ? 1 : -1) + labels.length) % labels.length);
+    } else if (event.key === 'Enter' && !list.hidden && active >= 0) {
+      event.preventDefault(); select(active);
+    }
+  });
+  input.addEventListener('blur', close);
+  document.addEventListener('pointerdown', function (event) { if (!root.contains(event.target) && !list.contains(event.target)) close(); });
+  window.addEventListener('resize', position);
+  window.addEventListener('scroll', position, true);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', position);
+    window.visualViewport.addEventListener('scroll', position);
+  }
+  root.closest('form').addEventListener('submit', close);
+})();
+// End homepage destination combobox.
+
 // Reference navigation, stay preview and quote review. Existing URLs remain usable without JS.
 (function () {
   document.querySelectorAll('.nav-dropdown').forEach(function (item) {

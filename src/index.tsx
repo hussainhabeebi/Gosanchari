@@ -1,3 +1,4 @@
+import { publicSitemap, robotsText } from './lib/seo'
 // Go Sanchari web portal — one Cloudflare Worker serving pages, API, queue consumer and cron jobs.
 
 import { Hono } from 'hono'
@@ -84,16 +85,8 @@ app.get('/chat/ws', async (c) => {
   return stub.fetch(new Request(c.req.raw, { headers }))
 })
 
-app.get('/robots.txt', (c) => c.text(`User-agent: *\nDisallow: /staff\nDisallow: /admin\nDisallow: /my\nDisallow: /q/\nSitemap: ${c.env.SITE_URL}/sitemap.xml\n`))
-app.get('/sitemap.xml', async (c) => {
-  const props = await c.env.DB.prepare("SELECT slug, updated_at FROM properties WHERE status = 'live'").all<{ slug: string; updated_at: string }>()
-  const urls = ['/', '/search', '/offers', '/about', '/contact', ...props.results.map((p) => `/stay/${p.slug}`)]
-  return c.body(
-    `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map((u) => `<url><loc>${c.env.SITE_URL}${u}</loc></url>`).join('')}</urlset>`,
-    200,
-    { 'content-type': 'application/xml' },
-  )
-})
+app.get('/robots.txt', (c) => c.text(robotsText(c.env.SITE_URL)))
+app.get('/sitemap.xml', publicSitemap)
 app.get('/healthz', (c) => c.json({ ok: true }))
 
 app.route('/', webhookRoutes)

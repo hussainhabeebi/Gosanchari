@@ -1,3 +1,4 @@
+import { publicCanonical } from '../lib/seo'
 import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
 import type { Context } from 'hono'
@@ -453,7 +454,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
     ? (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM enquiries WHERE status = 'new'").first<{ n: number }>().catch(() => null))?.n ?? 0
     : 0
   return c.html(
-    <Layout {...opts} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} assetVersion={assetVersion(c.env)} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
+    <Layout {...opts} canonical={opts.canonical ?? (area === 'public' && !opts.noindex ? publicCanonical(c.env.SITE_URL, c.req.path) : undefined)} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} assetVersion={assetVersion(c.env)} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
       {body}
     </Layout>,
     status as 200,
