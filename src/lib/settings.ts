@@ -84,7 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
     legal_name: 'Go Sanchari',
     invoice_prefix: 'GSINV',
     logo_key: null,
-    social: { instagram: 'https://instagram.com/gosanchari' },
+    social: { instagram: 'https://www.instagram.com/gosanchari.official' },
   },
   tax_slabs: DEFAULT_TAX_SLABS,
   booking: { hold_minutes: 1440, quote_validity_days: 3 },

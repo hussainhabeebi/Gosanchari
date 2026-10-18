@@ -86,10 +86,13 @@ authRoutes.post('/login/otp/send', async (c) => {
   const text = fillTemplate(s.whatsapp_templates.otp, { code: r.code })
   // OTPs must arrive fast, so they are sent directly (not via the queue). Authentication templates
   // are the WhatsApp-approved way to send codes; configure one named "otp" in Meta.
-  const sent = await sendWhatsApp(c.env, phone, text, whatsappConfigured(c.env) ? { name: 'otp', params: [r.code] } : undefined)
+  const sent = await sendWhatsApp(c.env, phone, text, whatsappConfigured(c.env) ? { name: 'otp', params: [r.code], copyCode: r.code } : undefined)
   const params = new URLSearchParams({ step: 'code', phone, next })
   if (!whatsappConfigured(c.env) && c.env.ENVIRONMENT !== 'production') params.set('dev', r.code)
-  if (!sent.ok) return redirectMsg(c, `/login?next=${encodeURIComponent(next)}`, { err: 'Could not send the code. Please try email login or contact us.' })
+  if (!sent.ok) {
+    console.error(`[otp] WhatsApp send failed: ${sent.error}`)
+    return redirectMsg(c, `/login?next=${encodeURIComponent(next)}`, { err: 'Could not send the code. Please try email login or contact us.' })
+  }
   return c.redirect('/login?' + params.toString(), 303)
 })
 

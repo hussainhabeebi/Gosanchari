@@ -40,7 +40,7 @@ export async function sendWhatsApp(
   env: Env,
   to: string,
   text: string,
-  template?: { name: string; params: string[]; lang?: string },
+  template?: { name: string; params: string[]; lang?: string; copyCode?: string },
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
   const phone = to.replace(/[^\d]/g, '')
   if (!whatsappConfigured(env)) {
@@ -55,7 +55,11 @@ export async function sendWhatsApp(
         template: {
           name: template.name,
           language: { code: template.lang ?? 'en' },
-          components: [{ type: 'body', parameters: template.params.map((p) => ({ type: 'text', text: p })) }],
+          components: [
+            { type: 'body', parameters: template.params.map((p) => ({ type: 'text', text: p })) },
+            // Authentication templates have a required "Copy code" button; Meta rejects the send without it.
+            ...(template.copyCode ? [{ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: template.copyCode }] }] : []),
+          ],
         },
       }
     : { messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: text, preview_url: true } }
