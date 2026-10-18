@@ -44,10 +44,11 @@ const security = secureHeaders({
     fontSrc: ["'self'"],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
     connectSrc: ["'self'"],
-    frameSrc: ['https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
+    frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
     mediaSrc: ["'self'"],
     formAction: ["'self'"],
-    frameAncestors: ["'none'"],
+    // 'self' so the home page's property-details popup can show the stay page in an iframe; other sites still can't frame us.
+    frameAncestors: ["'self'"],
   },
   crossOriginEmbedderPolicy: false,
 })
