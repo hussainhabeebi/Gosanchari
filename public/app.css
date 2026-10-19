@@ -1128,3 +1128,7 @@ code { overflow-wrap: anywhere; }
 .destination-options [role=option]{box-sizing:border-box;padding:10px 12px;min-height:44px;cursor:pointer;border-radius:7px;line-height:1.4;overflow-wrap:anywhere}
 .destination-options [role=option]:hover,.destination-options [aria-selected=true]{background:#edf5f1;color:#143a2d;outline:2px solid #557d68;outline-offset:-2px}
 .destination-options .destination-empty{padding:12px;font-size:13px;line-height:1.5}
+
+/* Optional public analytics: no overlay until the visitor makes a consent choice. */
+.analytics-consent{position:fixed;bottom:1rem;left:1rem;z-index:1000;width:min(420px,calc(100vw - 2rem));padding:1rem;background:white;color:#243138;border:1px solid #d5dedb;border-radius:12px;box-shadow:0 6px 28px #0002;font-size:14px}
+.analytics-consent[hidden]{display:none}.analytics-consent p{margin:0 0 .6rem}.analytics-consent .btn{min-height:44px;margin-top:.6rem}.analytics-preferences{display:block;margin:.5rem auto;padding:.6rem;border:1px solid #d5dedb;border-radius:6px;background:white;color:#243138;min-height:44px}.analytics-preferences:focus-visible,.analytics-consent button:focus-visible{outline:3px solid #0f5e57;outline-offset:3px}
