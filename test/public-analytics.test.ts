@@ -10,7 +10,11 @@ import { DEFAULT_SETTINGS } from '../src/lib/settings'
 
 const ready = { readiness: GA4_READINESS, policy: 'Approved Google Analytics disclosure with consent choices.', origin: 'https://gosanchari.com', path: '/', area: 'public', authenticated: false, status: 200 }
 const source = readFileSync('public/analytics.js', 'utf8')
-function browser(options: { stored?: any; unavailable?: boolean; path?: string; eligible?: boolean; origin?: string; state?: any; legacy?: boolean } = {}) {
+function consentBus() {
+  const pending: (() => void)[] = [], peers: any[] = [], channels: any[] = []
+  return { pending, peers, channels, flush() { let count=0; while(pending.length) { if(++count>100) throw Error('Consent message loop'); pending.shift()!() } } }
+}
+function browser(options: { stored?: any; unavailable?: boolean; path?: string; eligible?: boolean; origin?: string; state?: any; legacy?: boolean; bus?: ReturnType<typeof consentBus>; broadcast?: boolean; writeBlocked?: boolean; channelFails?: boolean } = {}) {
   const nodes: any = {}
   for (const name of ['panel','settings','accept','reject']) nodes[name] = { hidden: true, children: [], appendChild(node:any) { this.children.push(node) }, focus() {}, addEventListener(_event: string, fn: any) { this.click = fn } }
   const state = options.state || { raw: options.stored ? JSON.stringify({...options.stored,check:'initial'}) : null, failRead: !!options.unavailable, failWrite: !!options.unavailable, silentWrite: false, failCookie: false, cookies: new Map([['_ga','existing'],['unrelated','keep']]) }
@@ -23,16 +27,108 @@ function browser(options: { stored?: any; unavailable?: boolean; path?: string; 
     getElementById: () => options.eligible === false ? null : root,
     createElement: () => ({textContent:'',setAttribute(){},removed:false,remove(){this.removed=true}}), head: { appendChild: (node: any) => scripts.push(node) }
   }
-  const window: any = {}
+  const listeners: any = {}
+  const window: any = { addEventListener(event:string, fn:any) { listeners[event]=fn } }
+  if(options.bus && options.broadcast !== false) window.BroadcastChannel = class {
+    listener: any
+    constructor(readonly name:string) { if(options.channelFails) throw Error('Unavailable'); options.bus!.channels.push(this) }
+    addEventListener(_event:string,fn:any) { this.listener=fn }
+    postMessage(data:any) { for(const peer of options.bus!.channels) if(peer !== this && peer.name === this.name) options.bus!.pending.push(()=>peer.listener?.({data})) }
+  }
   const context = { window, document, Date, location: { origin: options.origin || 'https://gosanchari.com', href: 'https://gosanchari.com/?email=private@example.com#phone', reload() { reloads++ } }, localStorage: {
     getItem() { if (state.failRead) throw Error('blocked'); return state.raw },
-    setItem(k: string, v: string) { if (state.failWrite) throw Error('blocked'); writes.push([k,JSON.parse(v)]); if(!state.silentWrite) state.raw=v }
+    setItem(k: string, v: string) {
+      if (state.failWrite || options.writeBlocked) throw Error('blocked'); writes.push([k,JSON.parse(v)])
+      if(!state.silentWrite) {
+        const changed=state.raw !== v; state.raw=v
+        if(changed && options.bus) for(const peer of options.bus.peers) if(peer.window !== window) options.bus.pending.push(()=>peer.listeners.storage?.({key:k,newValue:v,storageArea:peer.storage}))
+      }
+    }
   } }
+  options.bus?.peers.push({window,listeners,storage:context.localStorage})
   runInNewContext(source,context)
-  return { nodes, scripts, window, writes, document, context, state, reloads: () => reloads, commands: () => (window.dataLayer || []).map((args: any) => Array.from(args)) }
+  return { nodes, scripts, window, writes, document, context, state, listeners,
+    storageEvent(record:any,key:any='gs-analytics-consent-v1',area:any=context.localStorage) { listeners.storage?.({key,newValue:typeof record==='string'?record:JSON.stringify(record),storageArea:area}) },
+    broadcast(data:any) { options.bus?.channels.find(c=>c.listener)?.listener({data}) },
+    reloads: () => reloads, commands: () => (window.dataLayer || []).map((args: any) => Array.from(args)) }
 }
 
 describe('consent-first public GA4', () => {
+  it('withdraws in both directions across two accepted tabs using native storage events alone', () => {
+    for(const withdrawing of [0,1]) {
+      const bus=consentBus(), a=browser({stored:{value:'accepted',at:Date.now()-1000},bus,broadcast:false})
+      const b=browser({state:a.state,bus,broadcast:false});bus.flush()
+      const tabs=[a,b];expect(tabs.map(t=>t.scripts.length)).toEqual([1,1])
+      tabs[withdrawing].nodes.reject.click();bus.flush()
+      for(const tab of tabs) {
+        expect(tab.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+        expect(tab.commands()).toHaveLength(0);expect(tab.scripts[0].removed).toBe(true)
+        expect(tab.reloads()).toBe(0)
+      }
+      expect(browser({state:a.state}).scripts).toHaveLength(0)
+    }
+  })
+  it('broadcasts withdrawal even if the sending tab cannot write storage, and receiving tabs persist rejection', () => {
+    const bus=consentBus(), options={stored:{value:'accepted',at:Date.now()-1000},bus,writeBlocked:false}, a=browser(options)
+    const b=browser({state:a.state,bus});bus.flush();expect(b.scripts).toHaveLength(1)
+    options.writeBlocked=true
+    a.nodes.reject.click();bus.flush()
+    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.commands()).toHaveLength(0)
+    expect(JSON.parse(a.state.raw).value).toBe('rejected')
+    expect(browser({state:a.state}).scripts).toHaveLength(0)
+  })
+  it('stops both already-accepted tabs when every preference write fails', () => {
+    const bus=consentBus(), a=browser({stored:{value:'accepted',at:Date.now()-1000},bus}), b=browser({state:a.state,bus});bus.flush()
+    a.state.failWrite=true;a.state.failCookie=true;a.nodes.reject.click();bus.flush()
+    for(const tab of [a,b]) {
+      expect(tab.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(tab.commands()).toHaveLength(0)
+      expect(tab.nodes.panel.children[0].textContent).toContain('could not be saved')
+    }
+    expect(browser({state:a.state}).scripts).toHaveLength(0)
+  })
+  it('never grants consent from storage acceptance or BroadcastChannel acceptance', () => {
+    const bus=consentBus(), a=browser({bus}), b=browser({state:a.state,bus});a.nodes.accept.click();bus.flush()
+    expect(a.scripts).toHaveLength(1);expect(b.scripts).toHaveLength(0)
+    b.broadcast({version:1,type:'accepted',at:Date.now()});bus.flush()
+    expect(b.scripts).toHaveLength(0)
+    expect(browser({state:a.state}).scripts).toHaveLength(1)
+  })
+  it('ignores stale, future, malformed and unrelated messages without creating page views', () => {
+    const bus=consentBus(), at=Date.now()-1000, b=browser({stored:{value:'accepted',at},bus})
+    for(const record of ['{',null,{value:'rejected',at:at-1,check:'ok'},{value:'rejected',at:Date.now()+86400000,check:'ok'},{value:'rejected',at:String(at),check:'ok'},{value:'rejected',at,check:''}]) b.storageEvent(record)
+    b.storageEvent({value:'rejected',at,check:'ok'},'unrelated')
+    b.storageEvent({value:'rejected',at,check:'ok'},undefined,{})
+    for(const message of [null,'withdraw',{version:2,type:'withdraw',at},{version:1,type:'withdraw',at:at-1},{version:1,type:'withdraw',at:Date.now()+86400000},{version:1,type:'withdraw',at,extra:true},{version:1,type:'accepted',at}]) b.broadcast(message)
+    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(false)
+    expect(b.commands().filter((c:any[])=>c[0]==='event')).toHaveLength(1)
+    b.broadcast({version:1,type:'withdraw',at:Date.now()})
+    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+  })
+  it('fails closed on consent removal and storage clear events', () => {
+    for(const key of ['gs-analytics-consent-v1',null]) {
+      const b=browser({stored:{value:'accepted',at:Date.now()-1000}})
+      b.listeners.storage({key,newValue:null,storageArea:b.context.localStorage})
+      expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.commands()).toHaveLength(0)
+    }
+  })
+  it('falls back to storage events when BroadcastChannel construction fails', () => {
+    const bus=consentBus(), a=browser({stored:{value:'accepted',at:Date.now()-1000},bus,channelFails:true})
+    const b=browser({state:a.state,bus,channelFails:true});bus.flush();a.nodes.reject.click();bus.flush()
+    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+  })
+  it('does not re-enable a withdrawn tab on peer acceptance, duplicate messages or controller execution', () => {
+    const bus=consentBus(), a=browser({stored:{value:'accepted',at:Date.now()-1000},bus}), b=browser({state:a.state,bus});bus.flush()
+    a.nodes.reject.click();bus.flush();a.nodes.accept.click();bus.flush();runInNewContext(source,b.context)
+    b.broadcast({version:1,type:'withdraw',at:Date.now()});bus.flush()
+    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.commands()).toHaveLength(0)
+    expect(b.scripts).toHaveLength(1);expect(b.reloads()).toBe(0)
+  })
+  it('never installs cross-tab listeners or channels on excluded/private pages', () => {
+    for(const options of [{eligible:false},{path:'/staff'},{origin:'http://localhost'}]) {
+      const bus=consentBus(), b=browser({...options,bus,stored:{value:'accepted',at:Date.now()}})
+      expect(b.scripts).toHaveLength(0);expect(b.listeners.storage).toBeUndefined();expect(bus.channels).toHaveLength(0)
+    }
+  })
   it('is disabled unless privacy and account readiness are explicitly approved and the policy is not a placeholder', () => {
     expect(analyticsPage(ready)).toBe('/')
     for (const change of [{readiness:undefined},{readiness:'true'},{policy:''},{policy:'This policy is being updated. Google Analytics consent'},{policy:'A privacy policy without analytics disclosure'},{origin:'http://localhost'}]) expect(analyticsPage({...ready,...change})).toBeUndefined()

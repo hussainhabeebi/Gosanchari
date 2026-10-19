@@ -17,6 +17,8 @@
   let tag;
   const queued = [];
   let choice;
+  let consentAt = 0;
+  let channel;
   const notice = document.createElement('p');
   notice.setAttribute('role', 'status');
   panel.appendChild(notice);
@@ -48,7 +50,7 @@
         ['accepted', 'rejected'].includes(stored.value)) {
       // Reusing consent requires matching, writable stores. Never trust stale read-only acceptance.
       const matched = typeof stored.check === 'string' && cookieValue() === stored.value + '.' + stored.at + '.' + stored.check;
-      if (matched && persist(stored)) choice = stored.value;
+      if (matched && persist(stored)) { choice = stored.value; consentAt = stored.at; }
     }
   } catch (_) { /* Storage unavailable: default to no tracking. */ }
   function start() {
@@ -90,11 +92,49 @@
       }
     } catch (_) { /* Collection remains disabled even when cookie access fails. */ }
   }
+  function validWithdrawal(at) {
+    return Number.isSafeInteger(at) && at >= consentAt && at <= Date.now() && Date.now() - at < 180 * 86400000;
+  }
+  function receiveWithdrawal(at, save) {
+    if (!validWithdrawal(at)) return;
+    stop();
+    consentAt = at;
+    // BroadcastChannel also works when the sending tab cannot write localStorage.
+    // Attempt a durable rejection here, but never depend on successful storage to stop.
+    const saved = !save || persist({ value: 'rejected', at });
+    panel.hidden = false;
+    notice.textContent = saved ? 'Analytics is off. Consent was withdrawn in another tab.' : 'Analytics is off. Your preference could not be saved; tracking will remain off while consent storage is unavailable.';
+  }
+  window.addEventListener('storage', event => {
+    try {
+      if (event.storageArea !== localStorage || (event.key !== key && event.key !== null)) return;
+      if (event.newValue === null) { receiveWithdrawal(Date.now(), false); return; }
+      const record = JSON.parse(event.newValue);
+      if (record?.value === 'rejected' && typeof record.check === 'string' && /^[a-z0-9]+$/.test(record.check)) receiveWithdrawal(record.at, false);
+      // Cross-tab acceptance never starts this document's analytics.
+    } catch (_) { /* Malformed messages cannot grant consent. */ }
+  });
+  try {
+    if (typeof window.BroadcastChannel === 'function') {
+      channel = new window.BroadcastChannel('gs-analytics-consent-v1');
+      channel.addEventListener('message', event => {
+        const message = event.data;
+        // This channel carries withdrawal only, never acceptance, identifiers or page data.
+        if (message && Object.keys(message).length === 3 && message.version === 1 && message.type === 'withdraw') receiveWithdrawal(message.at, true);
+      });
+    }
+  } catch (_) { /* Native storage events remain available without BroadcastChannel. */ }
+  function announceWithdrawal(at) {
+    try { channel?.postMessage({ version: 1, type: 'withdraw', at }); } catch (_) {}
+  }
   function choose(value) {
-    if (value === 'rejected') stop();
-    const saved = persist({ value, at: Date.now() });
+    const at = Date.now();
+    consentAt = at;
+    if (value === 'rejected') { stop(); announceWithdrawal(at); }
+    const saved = persist({ value, at });
     if (!saved) {
       stop();
+      if (value !== 'rejected') announceWithdrawal(at);
       panel.hidden = false;
       notice.textContent = 'Analytics is off. Your preference could not be saved; tracking will remain off while consent storage is unavailable.';
       return;
