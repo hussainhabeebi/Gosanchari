@@ -1,4 +1,5 @@
 import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
+import { PolicyContent } from '../views/policy-content'
 import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
@@ -838,9 +839,9 @@ publicRoutes.get('/policies/:kind', async (c) => {
   const content = await getContent(c.env)
   const text = content.policies[kind] || 'This policy is being updated. Please contact us for details.'
   return page(c, { title: titles[kind] }, (
-    <div class="wrap narrow section prose">
+    <div class="wrap narrow section prose policy-page">
       <h1>{titles[kind]}</h1>
-      {text.split(/\n{2,}/).map((p) => (p.startsWith('## ') ? <h2>{p.slice(3)}</h2> : <p>{p}</p>))}
+      <PolicyContent text={text} />
     </div>
   ))
 })
