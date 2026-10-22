@@ -1,3 +1,4 @@
+import { quotationArchiveRoutes } from './routes/quotation-archive'
 import { publicSitemap, robotsText } from './lib/seo'
 // Go Sanchari web portal — one Cloudflare Worker serving pages, API, queue consumer and cron jobs.
 
@@ -96,6 +97,7 @@ app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', quotationArchiveRoutes)
 app.route('/', calculatorRoutes)
 app.route('/', staffRoomRoutes)
 app.route('/', rateSheetRoutes)

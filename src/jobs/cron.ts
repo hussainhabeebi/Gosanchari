@@ -21,7 +21,7 @@ export async function daily(env: Env): Promise<void> {
 
   // 1. Housekeeping (rules only).
   await expireHolds(env)
-  await run(env, "UPDATE quotations SET status = 'expired', updated_at = ? WHERE status IN ('sent','viewed','changes_requested') AND valid_till < ?", nowIso(), today)
+  await run(env, "UPDATE quotations SET status = 'expired', updated_at = ? WHERE archived_at IS NULL AND status IN ('sent','viewed','changes_requested') AND valid_till < ?", nowIso(), today)
   await run(env, "DELETE FROM blocked_dates WHERE quotation_id IN (SELECT id FROM quotations WHERE status IN ('expired','declined'))")
   await run(env, "UPDATE bookings SET status = 'completed', updated_at = ? WHERE status IN ('confirmed','checked_in') AND check_out < ?", nowIso(), today)
 
@@ -58,7 +58,7 @@ export async function daily(env: Env): Promise<void> {
   const pending = await all<{ id: number; staff_id: number | null; enquiry_id: number | null; guest_name: string; phone: string | null; code: string; view_count: number }>(
     env,
     `SELECT q.id, q.staff_id, q.enquiry_id, q.guest_name, q.phone, q.code, q.view_count FROM quotations q
-     WHERE q.status IN ('sent','viewed') AND q.sent_at < ? AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.quotation_id = q.id AND t.status = 'open')`,
+     WHERE q.archived_at IS NULL AND q.status IN ('sent','viewed') AND q.sent_at < ? AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.quotation_id = q.id AND t.status = 'open')`,
     new Date(Date.now() - 20 * 3600_000).toISOString(),
   )
   const dueAt = new Date(Date.parse(today + 'T10:00:00+05:30')).toISOString()
@@ -66,7 +66,7 @@ export async function daily(env: Env): Promise<void> {
     const id = await insertId(env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `Follow up on quote ${q.code}${q.view_count ? ` (viewed ${q.view_count}×)` : ' (not opened yet)'}`, dueAt)
     await enqueue(env, { type: 'followup_draft', taskId: id })
   }
-  const undrafted = await all<{ id: number }>(env, "SELECT id FROM tasks WHERE status = 'open' AND draft_message IS NULL AND due_at <= ? LIMIT 200", new Date(Date.parse(today + 'T23:59:59+05:30')).toISOString())
+  const undrafted = await all<{ id: number }>(env, "SELECT id FROM tasks WHERE NOT EXISTS(SELECT 1 FROM quotations q WHERE q.id=tasks.quotation_id AND q.archived_at IS NOT NULL) AND status = 'open' AND draft_message IS NULL AND due_at <= ? LIMIT 200", new Date(Date.parse(today + 'T23:59:59+05:30')).toISOString())
   for (const t of undrafted) await enqueue(env, { type: 'followup_draft', taskId: t.id })
 
   // 6. Season / off-season rates ending in 30 days, 7 days or today with no newer rates entered.

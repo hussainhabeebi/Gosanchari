@@ -256,7 +256,7 @@ export async function quoteMessageDraft(env: Env, q: Pick<QuotationRow, 'guest_n
 
 /** Written once when a quote is created/sent and stored; never regenerated per view. */
 export async function buildQuoteExplainer(env: Env, quotationId: number): Promise<void> {
-  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE id = ?', quotationId)
+  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE id = ? AND archived_at IS NULL', quotationId)
   if (!q) return
   const opts = await all<QuoteOptionRow & { property_name: string; room_name: string }>(
     env,
@@ -279,7 +279,7 @@ export async function buildQuoteExplainer(env: Env, quotationId: number): Promis
   // If AI is off, store the plain facts – still useful, and exact.
   const amounts = opts.map((o) => money(o.total))
   const safe = out && amounts.every((a) => out.includes(a.replace('₹', '')) || out.includes(a)) ? out : facts.join(' ')
-  await run(env, 'UPDATE quotations SET explainer = ? WHERE id = ?', safe, quotationId)
+  await run(env, 'UPDATE quotations SET explainer = ? WHERE id = ? AND archived_at IS NULL', safe, quotationId)
 }
 
 // ---- Guest preference notes (page 28) ----
@@ -312,7 +312,8 @@ export async function extractGuestPrefs(env: Env, enquiryId: number): Promise<vo
 export async function followupDraft(env: Env, taskId: number): Promise<void> {
   const t = await first<{ id: number; reason: string; guest_name: string | null; quotation_id: number | null; enquiry_id: number | null }>(env, 'SELECT * FROM tasks WHERE id = ?', taskId)
   if (!t) return
-  const q = t.quotation_id ? await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE id = ?', t.quotation_id) : null
+  if(t.quotation_id && await first(env,'SELECT id FROM quotations WHERE id=? AND archived_at IS NOT NULL',t.quotation_id)) return
+  const q = t.quotation_id ? await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE id = ? AND archived_at IS NULL', t.quotation_id) : null
   const e = t.enquiry_id ? await first<EnquiryRow>(env, 'SELECT * FROM enquiries WHERE id = ?', t.enquiry_id) : null
   const prop = q ? await first<{ name: string }>(env, 'SELECT p.name FROM quotation_options o JOIN properties p ON p.id = o.property_id WHERE o.quotation_id = ? LIMIT 1', q.id) : null
   const lang = e?.language ?? 'en'
