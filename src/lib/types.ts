@@ -198,6 +198,8 @@ export interface QuotationRow {
 export interface QuoteOptionRow {
   /** Staff-reported funds only; never a verified payment receipt. */
   reported_advance: number
+  /** Optional reported date/method/reference; never payment verification. */
+  advance_details?: string
   id: number
   quotation_id: number
   property_id: number
