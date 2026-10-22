@@ -893,6 +893,7 @@ publicRoutes.get('/q/:token', async (c) => {
     <div class="wrap narrow section">
       <p class="muted small">Quote {q.code} for {q.guest_name}</p>
       <h1>Your stay quote</h1>
+      <p>This quotation is an offer, not a confirmed booking.</p>
       {q.explainer && <AiNote label="In short">{q.explainer}</AiNote>}
       {q.valid_till && <p class={expired ? 'error' : 'muted'}>{expired ? 'This quote has expired' : `Valid till ${fmtDate(q.valid_till)}`}</p>}
       {q.status === 'accepted' && <div class="flash flash-ok">Thank you — you accepted this quote. Our team will confirm your booking and share payment details on WhatsApp.</div>}
@@ -963,8 +964,8 @@ publicRoutes.post('/q/:token/accept', async (c) => {
     await run(c.env, "UPDATE enquiries SET waiting_on = 'us', urgent = 1, last_guest_msg_at = ?, updated_at = ? WHERE id = ?", nowIso(), nowIso(), q.enquiry_id)
   }
   await run(c.env, "UPDATE tasks SET status = 'done' WHERE quotation_id = ? AND status = 'open'", q.id)
-  await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — confirm the booking and share payment details`, nowIso())
-  await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Convert it to a booking.`)
+  await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — record the advance and request final Admin booking confirmation`, nowIso())
+  await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Record the advance and request final Admin booking confirmation.`)
   await logActivity(c.env, null, 'quote.accepted', 'quotation', q.id, { option: o.id, total: o.total })
   return redirectMsg(c, `/q/${token}`, { ok: 'Thank you! Our team will confirm your booking shortly.' })
 })
