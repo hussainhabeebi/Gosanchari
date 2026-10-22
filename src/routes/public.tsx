@@ -862,8 +862,11 @@ publicRoutes.post('/saved/:id', async (c) => {
 })
 
 // ---------- 14. Quotation view (public link from WhatsApp) ----------
+// Customer quote links carry private guest/payment information and must be rechecked.
+publicRoutes.use('/q/*', async (c,next)=>{ c.header('Cache-Control','private, no-store'); await next() })
+
 async function loadQuote(env: AppEnv['Bindings'], token: string) {
-  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE token = ?', token)
+  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE token = ? AND archived_at IS NULL', token)
   if (!q) return null
   const options = await all<QuoteOptionRow & { property_name: string; slug: string; destination: string; room_name: string; photo: string | null; description: string }>(
     env,
@@ -972,7 +975,7 @@ publicRoutes.post('/q/:token/accept', async (c) => {
 
 async function quoteFeedback(c: Context<AppEnv>, status: 'changes_requested' | 'declined') {
   const token = c.req.param('token')!
-  const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE token = ?', token)
+  const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE token = ? AND archived_at IS NULL', token)
   if (!q) return c.notFound()
   const f = await form(c)
   const msg = str(f.message, 1000)

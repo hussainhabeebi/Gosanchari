@@ -1145,3 +1145,9 @@ code { overflow-wrap: anywhere; }
 /* Optional public analytics: no overlay until the visitor makes a consent choice. */
 .analytics-consent{position:fixed;bottom:1rem;left:1rem;z-index:1000;width:min(420px,calc(100vw - 2rem));padding:1rem;background:white;color:#243138;border:1px solid #d5dedb;border-radius:12px;box-shadow:0 6px 28px #0002;font-size:14px}
 .analytics-consent[hidden]{display:none}.analytics-consent p{margin:0 0 .6rem}.analytics-consent .btn{min-height:44px;margin-top:.6rem}.analytics-preferences{display:block;margin:.5rem auto;padding:.6rem;border:1px solid #d5dedb;border-radius:6px;background:white;color:#243138;min-height:44px}.analytics-preferences:focus-visible,.analytics-consent button:focus-visible{outline:3px solid #0f5e57;outline-offset:3px}
+
+/* Staff/Admin quotation archive confirmation; scoped away from public dialogs. */
+.quotation-archive-dialog { width:min(480px,calc(100vw - 32px));max-height:90dvh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:22px;box-shadow:0 16px 55px #0003; }
+.quotation-archive-dialog::backdrop { background:#102b3280; }
+.quotation-archive-dialog h2 { font-size:19px;overflow-wrap:anywhere; }
+.quotation-archive-dialog .btn { min-height:44px; }

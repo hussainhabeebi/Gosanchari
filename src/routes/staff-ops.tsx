@@ -1,3 +1,4 @@
+import { QuotationArchiveDialog } from '../lib/quotation-archive'
 import { REVIEW_STATUS_SQL, QuotationStatus, quotationReviewHistory, ReviewHistory } from '../lib/quotation-review'
 import { advanceDetails, validateAdvanceDetails, QuotationPayment, reportedAdvance, quotationPaymentHtml } from '../lib/quotation-payment'
 // Staff pages 22–27: property finder, quotation builder, quotations list, bookings, booking detail, availability calendar.
@@ -162,7 +163,7 @@ opsRoutes.get('/staff/finder/compare', requirePerm('manage_quotes'), async (c) =
 export async function loadQuoteFor(c: Context<AppEnv>, id: number) {
   const u = c.get('user')!
   const perms = await permissionsFor(c.env, u.role)
-  const q = await first<QuotationRow>(c.env, `SELECT q.*, ${REVIEW_STATUS_SQL} AS review_status FROM quotations q WHERE q.id = ?`, id)
+  const q = await first<QuotationRow>(c.env, `SELECT q.*, ${REVIEW_STATUS_SQL} AS review_status FROM quotations q WHERE q.id = ? AND q.archived_at IS NULL`, id)
   if (!q) return null
   if (!perms.view_all_enquiries && q.staff_id !== u.id && q.staff_id != null) return null
   return q
@@ -1008,14 +1009,15 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
   const quotationTabs: [string,string][] = [['all','All quotations'],['draft','Draft'],['sent','Issued'],['viewed','Viewed'],['accepted','Accepted'],['expired','Expired'],['declined','Declined']]
   const status = quotationTabs.some(([key])=>key===requestedStatus) ? requestedStatus! : 'all'
   const pg = pageNum(c)
-  const where: string[] = []
+  const archived = u.role==='admin' && c.req.query('archive')==='archived'
+  const where: string[] = [archived ? 'q.archived_at IS NOT NULL' : 'q.archived_at IS NULL']
   const binds: (string | number)[] = []
-  if (status==='draft') { where.push("q.status IN ('draft','pending_approval','changes_requested')") }
-  else if (status !== 'all') { where.push('q.status = ?'); binds.push(status) }
+  if (!archived && status==='draft') { where.push("q.status IN ('draft','pending_approval','changes_requested')") }
+  else if (!archived && status !== 'all') { where.push('q.status = ?'); binds.push(status) }
   if (!perms.view_all_enquiries) { where.push('q.staff_id = ?'); binds.push(u.id) }
-  const rows = await all<QuotationRow & { total: number; property_name: string | null; staff_name: string | null; max_disc: number }>(
+  const rows = await all<QuotationRow & { total: number; property_name: string | null; staff_name: string | null; max_disc: number; archive_blocker:string|null; archived_name:string|null }>(
     c.env,
-    `SELECT q.*, ${REVIEW_STATUS_SQL} AS review_status, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total,
+    `SELECT (SELECT reason FROM quotation_archive_eligibility a WHERE a.id=q.id) AS archive_blocker,(SELECT name FROM users WHERE id=q.archived_by) AS archived_name,q.*, ${REVIEW_STATUS_SQL} AS review_status, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total,
        (SELECT MAX(discount_pct) FROM quotation_options o WHERE o.quotation_id = q.id) AS max_disc,
        (SELECT p.name FROM quotation_options o JOIN properties p ON p.id = o.property_id WHERE o.quotation_id = q.id LIMIT 1) AS property_name, s.name AS staff_name
      FROM quotations q LEFT JOIN users s ON s.id = q.staff_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY q.updated_at DESC LIMIT 51 OFFSET ?`,
@@ -1025,12 +1027,13 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
   return page(c, { title: admin ? 'All quotations' : adminMyQuotes ? 'My Quotations' : 'Quotations', area: admin ? 'admin' : 'staff', active: admin ? 'all-quotes' : 'quotes' }, (
     <div class="stack-lg">
       <div class="row-between"><h1>{admin ? 'All quotations' : adminMyQuotes ? 'My Quotations' : 'Quotations'}</h1><a class={admin || adminMyQuotes ? 'btn' : 'btn btn-sm'} href="/staff/quotes/new">{admin ? '+ Add New Quote' : adminMyQuotes ? '+ Create New Quote' : '+ New quotation'}</a></div>
-      <Tabs base={base} param="status" active={status} items={quotationTabs} />
+      {u.role==='admin'&&<div class="row wrap-row"><a class={archived?'btn btn-outline':'btn'} href={base}>Active</a><a class={archived?'btn':'btn btn-outline'} href={`${base}?archive=archived`}>Archived</a></div>}
+      {!archived&&<Tabs base={base} param="status" active={status} items={quotationTabs} />}
       {admin && <p class="small muted">Quotations can be issued directly. <a href="/admin/booking-approvals">Booking Approvals</a> is the final payment and availability verification stage.</p>}
       <Table head={['Quote', 'Guest', 'Property', 'Amount', 'Sent', 'Status', ...(admin ? ['Staff', 'Discount'] : []), 'Actions']}>
         {rows.slice(0, 50).map((q) => (
           <tr>
-            <td><a href={`/staff/quotes/${q.id}`}>{q.code}</a></td>
+            <td><a href={archived?`/admin/quotes/${q.id}/archive`:`/staff/quotes/${q.id}`}>{q.code}</a>{archived&&<p class="small muted">Archived {fmtDateTime(q.archived_at)} · {q.archived_name}</p>}</td>
             <td>{q.guest_name}</td>
             <td>{q.property_name ?? '—'}</td>
             <td>{money(q.total)}</td>
@@ -1038,15 +1041,17 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
             <td><QuotationStatus q={q} />{q.view_count >= 3 && !['accepted', 'declined'].includes(q.status) && <span class="pill pill-urgent" title="Viewed 3+ times, not booked">👁 {q.view_count}</span>}</td>
             {admin && <td>{q.staff_name}</td>}
             {admin && <td>{q.max_disc ? `${q.max_disc}%` : '—'}</td>}
-            <td class="nowrap">
-              <a class="btn btn-sm" href={`/staff/quotes/${q.id}`}>Edit</a>
-              {['sent', 'viewed'].includes(q.status) && q.phone && <a class="btn btn-sm btn-outline" target="_blank" href={`https://wa.me/${q.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`${c.env.SITE_URL}/q/${q.token}`)}`}>Resend</a>}
+            <td>
+              {archived?<a class="btn btn-sm btn-outline" href={`/admin/quotes/${q.id}/archive`}>View archive / Restore</a>:<details><summary class="btn btn-sm btn-outline">Actions</summary><div class="stack small">
+                <a href={`/staff/quotes/${q.id}`}>View / Edit</a><a href={`/staff/quotes/${q.id}/print?download=1`} target="_blank">Download</a><a href={`/staff/quotes/${q.id}#quotation-share`}>Share</a>
+                {q.archive_blocker?<span class="muted">Cannot delete: {q.archive_blocker}</span>:<a class="btn btn-sm btn-danger" href={`/staff/quotes/${q.id}/archive`} data-quotation-archive-url={`/staff/quotes/${q.id}/archive`} data-archive-code={q.code} data-archive-version={q.updated_at} data-archive-revision={q.archive_revision??0}>Delete</a>}
+              </div></details>}
             </td>
           </tr>
         ))}
       </Table>
       {rows.length === 0 && <Empty>No quotations here.</Empty>}
-      <Pager page={pg} hasMore={rows.length > 50} base={`${base}?status=${status}`} />
+      <Pager page={pg} hasMore={rows.length > 50} base={`${base}?${archived?'archive=archived':`status=${status}`}`} /><QuotationArchiveDialog />
     </div>
   ))
 }
@@ -1447,7 +1452,7 @@ opsRoutes.get('/staff/calendar/day', requirePerm('manage_bookings'), async (c) =
   if (!p) return c.notFound()
   const rooms = await all<RoomRow>(c.env, 'SELECT * FROM rooms WHERE property_id = ? AND active = 1', pid)
   const occ = await monthOccupancy(c.env, pid, date, addDays(date, 1))
-  const quotes = await all<{ id: number; code: string; guest_name: string }>(c.env, "SELECT id, code, guest_name FROM quotations WHERE status IN ('draft','sent','viewed','changes_requested') AND (staff_id = ? OR ?) ORDER BY id DESC LIMIT 30", u.id, perms.view_all_enquiries ? 1 : 0)
+  const quotes = await all<{ id: number; code: string; guest_name: string }>(c.env, "SELECT id, code, guest_name FROM quotations WHERE archived_at IS NULL AND status IN ('draft','sent','viewed','changes_requested') AND (staff_id = ? OR ?) ORDER BY id DESC LIMIT 30", u.id, perms.view_all_enquiries ? 1 : 0)
   return page(c, { title: `${p.name} · ${fmtDate(date)}`, area: 'staff', active: 'calendar' }, (
     <div class="stack-lg">
       <a href={`/staff/calendar?month=${date.slice(0, 7)}`} class="small">← Calendar</a>
@@ -1504,6 +1509,7 @@ opsRoutes.post('/staff/calendar/hold', requirePerm('manage_bookings'), async (c)
   const roomId = int(f.room_id) || null
   if (!await first(c.env, "SELECT 1 FROM properties WHERE id = ? AND status = 'live'", pid)) return c.notFound()
   const quoteId = int(f.quotation_id) || null
+  if (quoteId && !await loadQuoteFor(c,quoteId)) return c.notFound()
   const until = block ? null : new Date(Date.now() + Math.max(1, Math.min(336, int(f.hours, 48))) * 3600_000).toISOString()
   const reason = block ? str(f.reason, 100) || 'Blocked' : `Hold${quoteId ? ` for quote #${quoteId}` : ''} by ${u.name}`
   if (roomId && !block) {

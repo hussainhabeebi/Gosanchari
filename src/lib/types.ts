@@ -167,6 +167,12 @@ export interface MessageRow {
 }
 
 export interface QuotationRow {
+  archived_at?: string | null
+  archived_by?: number | null
+  archive_reason?: string
+  archive_revision?: number
+  restored_at?: string | null
+  restored_by?: number | null
   /** Derived from persisted quotation-review audit events; not a booking status. */
   review_status?: 'none' | 'pending' | 'approved' | 'rejected'
   apply_gst: number
