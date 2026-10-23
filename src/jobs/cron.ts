@@ -6,6 +6,7 @@ import { all, enqueue, first, insertId, notifyStaff, run } from '../lib/db'
 import { expireHolds } from '../lib/bookings'
 import { fillTemplate } from '../lib/integrations'
 import { rateExpiryReminder } from '../lib/rate-expiry'
+import { autoSyncConnections } from '../lib/property-share'
 import { getSettings } from '../lib/settings'
 import { fmtDate, moneyShort, nowIso, todayIST } from '../lib/util'
 
@@ -75,6 +76,9 @@ export async function daily(env: Env): Promise<void> {
 
   // 7. Daily summary for the owner.
   await dailySummary(env)
+
+  // 8. Property details to connected services (e.g. LeadVyne) with daily sync on.
+  await autoSyncConnections(env)
 }
 
 export async function dailySummary(env: Env): Promise<string> {

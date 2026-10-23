@@ -107,6 +107,7 @@ const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permiss
   { key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' },
   { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
   { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
+  { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
   { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
 ]
 
@@ -175,6 +176,7 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'Website Settings', icon: 'gear', items: [
     { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
     { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
+    { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
     { key: 'staff', href: '/admin/staff', label: 'Staff & roles', perm: 'manage_staff' },
     { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
   ] },

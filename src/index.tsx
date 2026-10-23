@@ -27,6 +27,8 @@ import { propertyEditorRoutes } from './routes/admin-properties'
 import { wizardRoutes } from './routes/admin-wizard'
 import { admin2Routes } from './routes/admin2'
 import { webhookRoutes } from './routes/webhooks'
+import { apiRoutes } from './routes/api'
+import { integrationRoutes } from './routes/admin-integrations'
 import { handleQueue } from './jobs/queue'
 import { handleScheduled } from './jobs/cron'
 import { getSettings } from './lib/settings'
@@ -91,6 +93,7 @@ app.get('/sitemap.xml', publicSitemap)
 app.get('/healthz', (c) => c.json({ ok: true }))
 
 app.route('/', webhookRoutes)
+app.route('/', apiRoutes)
 app.route('/', authRoutes)
 app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
@@ -107,6 +110,7 @@ app.route('/', contactRoutes)
 app.route('/', confirmationRoutes)
 app.route('/', voucherRoutes)
 app.route('/', admin2Routes)
+app.route('/', integrationRoutes)
 app.route('/', publicRoutes)
 
 app.notFound((c) =>

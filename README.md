@@ -54,6 +54,12 @@ Guests log in with any phone number (OTP). Demo quote link: `/q/demo-quote-token
 
 **Combining room categories in one quote option:** under *Rooms*, click *+ Add another room category* (e.g. 4 Standard Non-AC + 2 Standard AC = 6 rooms). Each category is priced by its own rates and GST slab and the option shows the combined total. Guests are shared across the rooms, and the discount is checked against the combined Staff Rate floor. Converting such a quote makes one booking for the combined price and also reserves the extra categories' rooms (released if the booking is cancelled). To change a combined booking's dates, cancel it and send a new quote.
 
+**Sharing properties with external services (e.g. LeadVyne):** *Admin → API & integrations* (needs *Manage settings*). Two ways to connect:
+- **Push:** enter the service's endpoint URL and API token. We POST `{ "source": "gosanchari", "event": "properties.sync", "properties": [...] }` (batches of 20) with `Authorization: Bearer <token>` or `X-API-Key: <token>`. Send all or one property on demand, and optionally every day at 07:00 IST.
+- **Pull:** create an API key and give the service `GET /api/v1/properties` (`?page`, `?limit` ≤ 50, `?destination`, `?updated_since`) and `GET /api/v1/properties/<id or slug>`, called with `Authorization: Bearer <key>`. Keys are stored hashed and can be revoked.
+
+Each property includes prices (from-price, per-room base/weekend/extra-guest rates, upcoming season rates), absolute photo URLs (cover, gallery, per room), videos, location (address, lat/lng, map link), rooms, facilities, meal plans, dining, policies, add-ons and the stay page link. Only live properties are shared, and never owner contacts, B2B net/staff rates, commission or internal notes.
+
 **Booking flow:** enquiry → staff quote (WhatsApp link) → guest clicks *Accept* → staff get an alert and a task →
 *Convert to booking* (confirms it, blocks the rooms and sends the guest a WhatsApp confirmation) → staff *Record payment* on the booking.
 
