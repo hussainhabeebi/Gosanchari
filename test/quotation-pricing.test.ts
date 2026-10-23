@@ -95,6 +95,9 @@ describe('quotation persistence and outputs',()=>{
       await f.app.request(f.url+'/reopen',{method:'POST'},f.env);expect(f.quote().status).toBe('draft');expect(f.quote().apply_gst).toBe(gst?1:0);expect(f.read().discount).toBe(749)
       f.db.prepare("UPDATE quotations SET status='sent' WHERE id=?").run(f.qid)
       await buildQuoteExplainer(f.env,f.qid);expect(f.quote().explainer).toContain(gst?'GST:':'GST not applied: ₹0');if(!gst)expect(f.quote().explainer).not.toContain('including taxes')
+      // Conversion is available only after the independent final Admin verification.
+      f.db.prepare(`INSERT INTO quotation_confirmation_requests(code,quotation_id,option_id,requested_by,submission_key,details,status,payment_verified,availability_verified,decided_by,decided_at)
+        VALUES('VC-GST',?,?,1,'historical-gst-final-approval','{}','approved',1,1,1,'2030-10-01')`).run(f.qid,f.oid)
       const converted=await f.app.request(f.url+'/convert',{method:'POST'},f.env);expect(converted.headers.get('location')).toMatch(/\/staff\/bookings\/\d+/)
       const booking=f.db.prepare('SELECT * FROM bookings WHERE quotation_id=?').get(f.qid) as any
       expect(booking.apply_gst).toBe(gst?1:0);for(const k of ['subtotal','discount','taxes','total','extra_charges'])expect(booking[k]).toBe(saved[k])

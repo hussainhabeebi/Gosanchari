@@ -1,3 +1,4 @@
+import { quotationArchiveRoutes } from './routes/quotation-archive'
 import { publicSitemap, robotsText } from './lib/seo'
 // Go Sanchari web portal — one Cloudflare Worker serving pages, API, queue consumer and cron jobs.
 
@@ -41,11 +42,11 @@ const app = new Hono<AppEnv>()
 const security = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
+    scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net', 'https://www.googletagmanager.com'],
     styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
     fontSrc: ["'self'"],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-    connectSrc: ["'self'"],
+    connectSrc: ["'self'", 'https://www.google-analytics.com', 'https://region1.google-analytics.com'],
     frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
     mediaSrc: ["'self'"],
     formAction: ["'self'"],
@@ -99,6 +100,7 @@ app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', quotationArchiveRoutes)
 app.route('/', calculatorRoutes)
 app.route('/', staffRoomRoutes)
 app.route('/', rateSheetRoutes)

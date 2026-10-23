@@ -1395,3 +1395,26 @@
   if (!edit || !approve) return;
   edit.addEventListener('input', function () { approve.disabled = true; approve.textContent = 'Save Admin edits before approving'; });
 })();
+
+// Recoverable quotation deletion: native dialog handles focus trapping and Escape.
+(function () {
+  var dialog = document.querySelector('[data-quotation-archive-dialog]');
+  if (!dialog || typeof dialog.showModal !== 'function') return;
+  var form = dialog.querySelector('[data-quotation-archive-form]'), trigger;
+  document.querySelectorAll('[data-quotation-archive-url]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); trigger = link; form.reset();
+      form.action = link.dataset.quotationArchiveUrl;
+      form.elements.reviewed_at.value = link.dataset.archiveVersion;
+      form.elements.archive_revision.value = link.dataset.archiveRevision;
+      dialog.querySelector('[data-quotation-archive-code]').textContent = link.dataset.archiveCode;
+      form.querySelector('[data-archive-submit]').disabled = false;
+      dialog.showModal(); dialog.querySelector('[data-archive-cancel]').focus();
+    });
+  });
+  dialog.querySelector('[data-archive-cancel]').addEventListener('click', function () { dialog.close(); });
+  dialog.addEventListener('close', function () { if (trigger) trigger.focus(); });
+  dialog.addEventListener('click', function (event) { if (event.target === dialog) { var r=dialog.getBoundingClientRect(); if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close(); } });
+  form.addEventListener('submit', function () { form.querySelector('[data-archive-submit]').disabled = true; });
+})();

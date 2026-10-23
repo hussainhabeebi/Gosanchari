@@ -33,6 +33,7 @@ function fixture() {
   const location = async (r: Response) => decodeURIComponent((r.headers.get('location') ?? '').replace(/\+/g, ' '))
   const qid=Number(db.prepare("INSERT INTO quotations(code,token,staff_id,guest_name,phone,valid_till) VALUES('GS-QT-TEST','test-quote',?,'Anu','1234567890','2030-12-31')").run(sales.id).lastInsertRowid)
   const oid=Number(db.prepare("INSERT INTO quotation_options(quotation_id,property_id,room_id,check_in,check_out,adults,children,rooms_count,subtotal,discount,extra_charges,taxes,total,meal_plan) VALUES(?,?,?,'2030-12-24','2030-12-27',4,2,2,21000,1000,3000,1800,24800,'CP')").run(qid,pid,rid).lastInsertRowid)
+  db.prepare('UPDATE quotation_options SET reported_advance=?,advance_details=? WHERE id=?').run(10000,JSON.stringify({date:'2020-01-01',method:'upi',reference:'UTR-TEST'}),oid)
   const request=(overrides:Record<string,string>={})=>({option_id:String(oid),submission_key:'test-unique-submission-123',guest_name:'Anu',guest_phone:'1234567890',resort_name:'Ice Hills Resort',resort_phone:'9876543210',location:'Vagamon',kids_ages:'4, 9',advance:'10000',room_rent:'19000',remarks:'Staff guest-facing remark',...overrides})
   const rows=()=>db.prepare('SELECT * FROM quotation_confirmation_requests ORDER BY id').all() as any[]
   return { qid,oid,rid,request,rows, db, env, sent, pid, bid, sales: as(sales.id, 'sales'), other: as(other.id, 'sales'), admin: as(admin.id, 'admin'), salesId: sales.id, pay, post, location }
@@ -70,7 +71,7 @@ describe('quotation confirmation approval workflow',()=>{
    }
    expect(html).not.toContain('not a confirmation voucher');expect(html).not.toContain('Staff Rate');expect(html).not.toContain('net_rate')
    f.db.prepare("UPDATE quotations SET guest_name='Changed' WHERE id=?").run(f.qid)
-   f.db.prepare('UPDATE quotation_options SET total=1 WHERE id=?').run(f.oid)
+   f.db.prepare('UPDATE quotation_options SET total=10001 WHERE id=?').run(f.oid)
    expect(await(await f.sales.request(url,{},f.env)).text()).toBe(html)
    await f.post(f.admin,path,{decision:'rejected',remarks:'Later'});expect(f.rows()[0].status).toBe('approved')
    expect(()=>f.db.prepare("UPDATE quotation_confirmation_requests SET details='{}' WHERE id=1").run()).toThrow(/immutable/i)
