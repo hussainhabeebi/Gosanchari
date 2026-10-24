@@ -128,4 +128,19 @@ describe('public property detail UI', () => {
     }finally{db.close()}
   })
 
+  it('lets guests share the stay and a room page on WhatsApp or by link', async () => {
+    const { db, property, env, app } = fixture(['common'])
+    try {
+      const html = await (await app.request('http://localhost/stay/' + property.slug, {}, env)).text()
+      const url = 'http://localhost/stay/' + property.slug
+      expect(html).toContain('data-share="' + url + '"')
+      expect(html).toContain('href="https://wa.me/?text=')
+      expect(html).toContain(encodeURIComponent(url))
+      const room = db.prepare('SELECT id FROM rooms WHERE property_id=? AND active=1 ORDER BY id LIMIT 1').get(property.id) as { id: number }
+      const roomHtml = await (await app.request(url + '/room/' + room.id, {}, env)).text()
+      expect(roomHtml).toContain('data-share="' + url + '/room/' + room.id + '"')
+      expect(roomHtml).toContain('Share on WhatsApp')
+    } finally { db.close() }
+  })
+
 })

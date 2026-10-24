@@ -228,6 +228,8 @@ legend { font-weight: 600; font-size: .9rem; margin-bottom: 4px; }
 .lightbox img { max-height: 88vh; max-width: 94vw; object-fit: contain; }
 .lightbox button { position: absolute; background: rgba(255, 255, 255, .15); color: #fff; border: 0; font-size: 2rem; width: 52px; height: 52px; border-radius: 50%; cursor: pointer; }
 .lb-close { top: 16px; right: 16px; } .lb-prev { left: 12px; } .lb-next { right: 12px; }
+.lightbox .lb-share { bottom: 18px; left: 50%; transform: translateX(-50%); width: auto; height: 44px; padding: 0 18px; border-radius: 22px; font-size: 1rem; }
+.share-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 
 /* Chat */
 .qa-log, .chat-log { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
