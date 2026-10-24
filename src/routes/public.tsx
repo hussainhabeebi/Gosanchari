@@ -349,6 +349,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const checkOut = isDate(c.req.query('checkOut')) ? c.req.query('checkOut')! : ''
   const guests = int(c.req.query('guests'), 2)
   const gallery = photos.length ? photos : [{ id: 0, r2_key: '', caption: p.name } as PhotoRow]
+  const shareUrl = new URL(`/stay/${p.slug}`, c.env.SITE_URL).href
   const ld = {
     '@context': 'https://schema.org', '@type': 'LodgingBusiness', name: p.name, url: new URL(`/stay/${p.slug}`, c.env.SITE_URL).href, description: propertyMetaDescription(p),
     address: { '@type': 'PostalAddress', addressLocality: p.destination },
@@ -396,6 +397,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
           <div class="property-summary">
             <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
             {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
+            <ShareButtons url={shareUrl} title={`${p.name}, ${p.destination}`} />
           </div>
 
           <section class="section-sm">
@@ -1015,6 +1017,16 @@ publicRoutes.get('/media/*', async (c) => {
 })
 
 
+/** Guests share a stay with family: WhatsApp (they pick the chat) and the phone's share sheet / copy link. */
+function ShareButtons({ url, title }: { url: string; title: string }) {
+  return (
+    <div class="share-row">
+      <a class="btn btn-sm btn-wa" href={`https://wa.me/?text=${encodeURIComponent(`${title}\n${url}`)}`} target="_blank" rel="noopener">Share on WhatsApp</a>
+      <button type="button" class="btn btn-sm btn-outline" data-share={url} data-share-title={title}>Share / copy link</button>
+    </div>
+  )
+}
+
 // ---------- Room category page (shareable link: staff send it to guests on WhatsApp) ----------
 publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
@@ -1037,6 +1049,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         <div>
           <h1>{r.name}</h1>
           <div class="muted">{p.name} · 📍 {p.destination}</div>
+          <ShareButtons url={new URL(`/stay/${p.slug}/room/${r.id}`, c.env.SITE_URL).href} title={`${r.name} · ${p.name}, ${p.destination}`} />
         </div>
         <div class="room-price">
           {isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
