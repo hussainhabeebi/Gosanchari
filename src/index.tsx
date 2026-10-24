@@ -1,3 +1,4 @@
+import { quotationArchiveRoutes } from './routes/quotation-archive'
 import { publicSitemap, robotsText } from './lib/seo'
 // Go Sanchari web portal — one Cloudflare Worker serving pages, API, queue consumer and cron jobs.
 
@@ -27,6 +28,8 @@ import { propertyEditorRoutes } from './routes/admin-properties'
 import { wizardRoutes } from './routes/admin-wizard'
 import { admin2Routes } from './routes/admin2'
 import { webhookRoutes } from './routes/webhooks'
+import { apiRoutes } from './routes/api'
+import { integrationRoutes } from './routes/admin-integrations'
 import { handleQueue } from './jobs/queue'
 import { handleScheduled } from './jobs/cron'
 import { getSettings } from './lib/settings'
@@ -39,11 +42,11 @@ const app = new Hono<AppEnv>()
 const security = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
+    scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net', 'https://www.googletagmanager.com'],
     styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
     fontSrc: ["'self'"],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-    connectSrc: ["'self'"],
+    connectSrc: ["'self'", 'https://www.google-analytics.com', 'https://region1.google-analytics.com'],
     frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
     mediaSrc: ["'self'"],
     formAction: ["'self'"],
@@ -91,11 +94,13 @@ app.get('/sitemap.xml', publicSitemap)
 app.get('/healthz', (c) => c.json({ ok: true }))
 
 app.route('/', webhookRoutes)
+app.route('/', apiRoutes)
 app.route('/', authRoutes)
 app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', quotationArchiveRoutes)
 app.route('/', calculatorRoutes)
 app.route('/', staffRoomRoutes)
 app.route('/', rateSheetRoutes)
@@ -107,6 +112,7 @@ app.route('/', contactRoutes)
 app.route('/', confirmationRoutes)
 app.route('/', voucherRoutes)
 app.route('/', admin2Routes)
+app.route('/', integrationRoutes)
 app.route('/', publicRoutes)
 
 app.notFound((c) =>
