@@ -83,8 +83,11 @@ function fixture() {
     for (const [id, n, rate] of extra) { b.append(`xroom_${oid}`, String(id)); b.append(`xrooms_${oid}`, String(n)); b.append(`xgrate_${oid}`, rate ?? '') }
     return b
   }
+  // Historical final confirmation fixture; conversion must never replace final Admin verification.
+  const approve = () => db.prepare(`INSERT INTO quotation_confirmation_requests(code,quotation_id,option_id,requested_by,submission_key,details,status,payment_verified,availability_verified,decided_by,decided_at)
+    VALUES('VC-FINAL',?,?,1,'historical-final-approval','{}','approved',1,1,1,'2030-10-01')`).run(qid,oid)
   const read = () => db.prepare('SELECT * FROM quotation_options WHERE id=?').get(oid) as any
-  return { db, env, app, publicApp, url, pid, nonAcId, acId, qid, oid, form, read }
+  return { db, env, app, publicApp, url, pid, nonAcId, acId, qid, oid, form, read, approve }
 }
 
 describe('combined room categories: quotation builder', () => {
@@ -138,6 +141,7 @@ describe('combined room categories: quotation builder', () => {
     const f = fixture()
     await f.app.request(f.url, { method: 'POST', body: f.form() }, f.env)
     f.db.prepare("UPDATE quotations SET status='accepted' WHERE id=?").run(f.qid)
+    f.approve()
     const res = await f.app.request(f.url + '/convert', { method: 'POST', body: new URLSearchParams() }, f.env)
     expect(res.headers.get('location')).toMatch(/\/staff\/bookings\/\d+/)
     const b = f.db.prepare('SELECT * FROM bookings WHERE quotation_id=?').get(f.qid) as any
@@ -160,6 +164,7 @@ describe('combined room categories: quotation builder', () => {
     const f = fixture()
     await f.app.request(f.url, { method: 'POST', body: f.form() }, f.env)
     for (let k = 0; k < 3; k++) f.db.prepare("INSERT INTO blocked_dates(property_id,room_id,date,reason) VALUES(?,?,'2030-11-05','Owner use')").run(f.pid, f.acId)
+    f.approve()
     const res = await f.app.request(f.url + '/convert', { method: 'POST', body: new URLSearchParams() }, f.env)
     expect(decodeURIComponent((res.headers.get('location') ?? '').replace(/\+/g, ' '))).toContain('Standard AC is no longer available for 2 rooms')
     expect(f.db.prepare('SELECT COUNT(*) AS n FROM bookings WHERE quotation_id=?').get(f.qid)).toMatchObject({ n: 0 })
@@ -206,23 +211,19 @@ describe('unique automatically priced room categories', () => {
 
 
 describe('quotation submission is not booking confirmation',()=>{
- it('shows three primary actions and preserves standalone edit controls',async()=>{
+ it('shows direct quotation actions and preserves standalone edit controls',async()=>{
   const f=fixture(),html=await(await f.app.request(f.url,{},f.env)).text()
   const actions=html.split('sticky-actions')[1].split('</div>')[0]
-  for(const label of ['Save to Draft','Download','Send to Approval'])expect(actions).toContain(label)
+  for(const label of ['Save Draft','Generate / Download Quotation','Share Quotation','Record Advance Payment','Request Booking Confirmation'])expect(actions).toContain(label)
   expect(actions).not.toContain('Save & send');expect(actions).not.toContain('Save & email')
  })
- it('submits and approves a quotation once without creating any confirmation or payment',async()=>{
+ it('issues a quotation directly without creating any confirmation or payment',async()=>{
   const f=fixture();const tables=['bookings','payments','booking_vouchers','quotation_confirmation_requests']
   const counts=()=>tables.map(t=>f.db.prepare('SELECT COUNT(*) AS n FROM '+t).get().n)
-  const before=counts();await f.app.request(f.url+'/request-approval',{method:'POST',body:f.form()},f.env)
-  expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('pending_approval')
-  await f.app.request(f.url+'/request-approval',{method:'POST',body:f.form()},f.env)
-  expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.approval_requested'").get().n).toBe(1)
-  await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at})},f.env)
-  expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('draft')
-  await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at})},f.env)
-  expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.discount_approved'").get().n).toBe(1)
+  const before=counts();await f.app.request(f.url+'/share',{method:'POST',body:f.form()},f.env)
+  expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('sent')
+  expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.approval_requested'").get().n).toBe(0)
+  expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.issued'").get().n).toBe(1)
   expect(counts()).toEqual(before)
  })
  it('Download saves edited amounts as draft and opens the existing quotation PDF, never a voucher',async()=>{
@@ -256,15 +257,12 @@ it('permits the same categories in separate alternatives without leaking B2B rat
  expect(data.options[0].rateLines).toEqual(data.options[1].rateLines)
 })
 
-it('records Admin quotation edits and rejects approval from an older reviewed version',async()=>{
- const f=fixture();await f.app.request(f.url+'/request-approval',{method:'POST',body:f.form()},f.env)
- const old=f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at
+it('retired preliminary approval cannot alter a directly editable legacy quotation',async()=>{
+ const f=fixture();f.db.prepare("UPDATE quotations SET status='pending_approval' WHERE id=?").run(f.qid)
  const edit=f.form();edit.set(`kids_${f.oid}`,'500');await f.app.request(f.url,{method:'POST',body:edit},f.env)
- expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('pending_approval')
- expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.admin_edited'").get().n).toBe(1)
- await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:old})},f.env)
- expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('pending_approval')
- const current=f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(f.qid).updated_at
- await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams({reviewed_at:current})},f.env)
+ const before=JSON.stringify(f.read())
+ await f.app.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',body:new URLSearchParams()},f.env)
  expect(f.db.prepare('SELECT status FROM quotations WHERE id=?').get(f.qid).status).toBe('draft')
+ expect(JSON.stringify(f.read())).toBe(before)
+ expect(f.db.prepare("SELECT COUNT(*) AS n FROM activity_log WHERE action='quote.discount_approved'").get().n).toBe(0)
 })

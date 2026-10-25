@@ -1,3 +1,4 @@
+import { analyticsPage } from '../lib/analytics'
 import { publicCanonical } from '../lib/seo'
 import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
@@ -39,6 +40,7 @@ interface LayoutProps extends PageOpts {
   assetVersion?: string
   siteUrl: string
   moodPhoto?: string | null
+  analyticsPath?: string
   bell?: number
   children?: Child
 }
@@ -107,6 +109,7 @@ const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permiss
   { key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' },
   { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
   { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
+  { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
   { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
 ]
 
@@ -176,6 +179,7 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'Website Settings', icon: 'gear', items: [
     { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
     { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
+    { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
     { key: 'staff', href: '/admin/staff', label: 'Staff & roles', perm: 'manage_staff' },
     { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
   ] },
@@ -259,7 +263,6 @@ const TopBar: FC<{ user: SessionUser | null; settings: Settings; nav?: PageOpts[
         <a href="/#ai-search" data-public-nav="ai-search" aria-current={nav === 'ai-search' ? 'page' : undefined}>AI Search</a>
         <a href="/#ai-insights" data-public-nav="ai-insights" aria-current={nav === 'ai-insights' ? 'page' : undefined}>AI Insights</a>
         <details class="nav-dropdown destinations-dropdown"><summary data-public-nav="stays" aria-current={nav === 'stays' ? 'page' : undefined}>Destinations</summary><div class="nav-panel">{['Munnar', 'Vagamon', 'Ooty', 'Kodaikanal', 'Wayanad'].map((d) => <a href={`/search?destination=${encodeURIComponent(d)}`}>{d}</a>)}<a href="/search">See More →</a></div></details>
-        <a href="/offers" data-public-nav="offers" aria-current={nav === 'offers' ? 'page' : undefined}>Packages</a>
         <a href="/about" data-public-nav="about" aria-current={nav === 'about' ? 'page' : undefined}>About Us</a>
         <details class="nav-dropdown"><summary data-public-nav="contact" aria-current={nav === 'contact' ? 'page' : undefined}>Contact</summary><div class="nav-panel contact-panel"><a href={`tel:${settings.business.phone}`}>{settings.business.phone}</a><a href={`mailto:${settings.business.email}`}>{settings.business.email}</a></div></details>
         </div>
@@ -367,6 +370,7 @@ export const Layout: FC<LayoutProps> = (p) => {
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
+          {p.analyticsPath && <meta name="referrer" content="no-referrer" />}
           <title>{fullTitle}</title>
           {p.description && <meta name="description" content={p.description} />}
           {(p.noindex || area !== 'public') && <meta name="robots" content="noindex" />}
@@ -430,6 +434,15 @@ export const Layout: FC<LayoutProps> = (p) => {
               💬 Need Help?
             </a>
           )}
+          {p.analyticsPath && <aside id="public-analytics" data-page={p.analyticsPath} aria-label="Analytics preferences">
+            <div class="analytics-consent" data-consent-panel role="region" aria-label="Optional analytics cookies" hidden>
+              <p>Allow Google Analytics cookies to help us understand public page visits? Optional analytics stays off unless you accept. You can change your choice below.</p>
+              <a href="/policies/privacy">Privacy Policy</a>
+              <div><button type="button" class="btn btn-outline" data-consent-reject>Reject analytics</button> <button type="button" class="btn btn-outline" data-consent-accept>Accept analytics</button></div>
+            </div>
+            <button type="button" class="analytics-preferences" data-consent-settings>Analytics preferences</button>
+            <script src={`/analytics.js?v=${p.assetVersion ?? 'dev'}`} defer></script>
+          </aside>}
           <script src={assetUrl(p.assetVersion ?? 'dev', '/app.js')} defer></script>
         </body>
       </html>
@@ -456,8 +469,14 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
   const bell = perms?.manage_enquiries && (area === 'staff' || area === 'admin')
     ? (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM enquiries WHERE status = 'new'").first<{ n: number }>().catch(() => null))?.n ?? 0
     : 0
+  const analyticsPath = analyticsPage({
+    readiness: c.env.GA4_READINESS,
+    policy: c.env.GA4_READINESS ? (await getContent(c.env)).policies.privacy : '',
+    origin: c.env.SITE_URL, path: c.req.path, area, authenticated: !!user,
+    noindex: opts.noindex, embedded: opts.embedded || c.req.query('preview') === '1', status,
+  })
   return c.html(
-    <Layout {...opts} canonical={opts.canonical ?? (area === 'public' && !opts.noindex ? publicCanonical(c.env.SITE_URL, c.req.path) : undefined)} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} assetVersion={assetVersion(c.env)} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
+    <Layout analyticsPath={analyticsPath} {...opts} canonical={opts.canonical ?? (area === 'public' && !opts.noindex ? publicCanonical(c.env.SITE_URL, c.req.path) : undefined)} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} assetVersion={assetVersion(c.env)} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
       {body}
     </Layout>,
     status as 200,

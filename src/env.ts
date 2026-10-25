@@ -31,6 +31,8 @@ export interface Env {
   /** Deployment version (wrangler [version_metadata]); used to version long-cached asset URLs. */
   CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string }
 
+  /** Set only after approved privacy disclosure and GA4 Enhanced Measurement review. */
+  GA4_READINESS?: string
   ENVIRONMENT: string
   SITE_URL: string
   AI_GATEWAY_ID: string

@@ -163,15 +163,35 @@
     if (!box) {
       box = document.createElement('div')
       box.className = 'lightbox'
-      box.innerHTML = '<img alt=""><button class="lb-close" aria-label="Close">×</button><button class="lb-prev" aria-label="Previous">‹</button><button class="lb-next" aria-label="Next">›</button>'
+      box.innerHTML = '<img alt=""><button class="lb-close" aria-label="Close">×</button><button class="lb-prev" aria-label="Previous">‹</button><button class="lb-next" aria-label="Next">›</button><button class="lb-share" type="button">Share photo</button>'
       document.body.appendChild(box)
       box.addEventListener('click', function (e) {
-        if (e.target.classList.contains('lb-prev')) show(set, idx - 1)
+        if (e.target.classList.contains('lb-share')) sharePhoto(e.target)
+        else if (e.target.classList.contains('lb-prev')) show(set, idx - 1)
         else if (e.target.classList.contains('lb-next')) show(set, idx + 1)
         else if (e.target.tagName !== 'IMG') { box.remove(); box = null }
       })
     }
     $('img', box).src = set[idx].href
+    preparePhoto(set[idx].href)
+  }
+  // Share the photo itself (WhatsApp etc. on phones) when the browser can share files; otherwise share its link.
+  var photoFile = null
+  function preparePhoto(href) {
+    photoFile = null
+    if (!navigator.canShare || !window.fetch || !/Mobi|Android|iPhone/i.test(navigator.userAgent)) return
+    fetch(href).then(function (r) { return r.ok ? r.blob() : null }).then(function (b) {
+      if (!b || !box || $('img', box).src !== new URL(href, location.href).href) return
+      var ext = (b.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+      var f = new File([b], 'photo-' + (idx + 1) + '.' + ext, { type: b.type || 'image/jpeg' })
+      if (navigator.canShare({ files: [f] })) photoFile = f
+    }).catch(function () {})
+  }
+  function sharePhoto(btn) {
+    var title = (document.querySelector('h1') || {}).textContent || document.title
+    var canonical = document.querySelector('link[rel="canonical"]'), page = canonical ? canonical.href : location.href.split('#')[0]
+    if (photoFile) return navigator.share({ files: [photoFile], title: title, text: title + ' · ' + page }).catch(function () {})
+    shareOrCopy(btn, { url: new URL(set[idx].href, location.href).href, title: title })
   }
   document.addEventListener('keydown', function (e) {
     if (!box) return
@@ -990,15 +1010,16 @@
   })
 
   // Share a link: phone share sheet when available, otherwise copy to clipboard
+  function shareOrCopy(b, d) {
+    var url = d.url, old = b.textContent
+    var done = function (msg) { b.textContent = msg; setTimeout(function () { b.textContent = old }, 1800) }
+    if (navigator.share && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+      navigator.share({ title: d.title || document.title, text: d.text || '', url: d.text ? undefined : url }).catch(function () {})
+    } else if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { done('Link copied ✓') }, function () { prompt('Copy this link', url) })
+    else prompt('Copy this link', url)
+  }
   $$('[data-share]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var url = b.dataset.share, old = b.textContent
-      var done = function (msg) { b.textContent = msg; setTimeout(function () { b.textContent = old }, 1800) }
-      if (navigator.share && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
-        navigator.share({ title: b.dataset.shareTitle || document.title, text: b.dataset.shareText || '', url: b.dataset.shareText ? undefined : url }).catch(function () {})
-      } else if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { done('Link copied ✓') }, function () { prompt('Copy this link', url) })
-      else prompt('Copy this link', url)
-    })
+    b.addEventListener('click', function () { shareOrCopy(b, { url: b.dataset.share, title: b.dataset.shareTitle, text: b.dataset.shareText }) })
   })
   // New property: add more room category blocks
   var roomTpl = document.getElementById('new-room-tpl')
@@ -1180,7 +1201,7 @@
       var title = document.createElement('strong'); title.textContent = 'Property details';
       var close = document.createElement('button'); close.type = 'button'; close.className = 'dialog-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close property details');
       var loading = document.createElement('div'); loading.className = 'stay-preview-loading'; loading.setAttribute('role', 'status'); loading.textContent = 'Loading property details…';
-      var frame = document.createElement('iframe'); var url = new URL(link.href); url.searchParams.set('preview', '1'); frame.src = url.href; frame.title = 'Property details and enquiry';
+      var frame = document.createElement('iframe'); var url = new URL(link.href); url.searchParams.set('preview', '1'); frame.src = url.href; frame.title = 'Property details and enquiry'; frame.allow = 'web-share; clipboard-write';
       head.append(title, close); dialog.append(head, loading, frame); document.body.append(dialog);
       var previousBodyOverflow = document.body.style.overflow, previousRootOverflow = document.documentElement.style.overflow;
       document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden';
@@ -1394,4 +1415,27 @@
   var approve = document.querySelector('[data-confirmation-approve]') || document.querySelector('[data-quotation-approve]');
   if (!edit || !approve) return;
   edit.addEventListener('input', function () { approve.disabled = true; approve.textContent = 'Save Admin edits before approving'; });
+})();
+
+// Recoverable quotation deletion: native dialog handles focus trapping and Escape.
+(function () {
+  var dialog = document.querySelector('[data-quotation-archive-dialog]');
+  if (!dialog || typeof dialog.showModal !== 'function') return;
+  var form = dialog.querySelector('[data-quotation-archive-form]'), trigger;
+  document.querySelectorAll('[data-quotation-archive-url]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); trigger = link; form.reset();
+      form.action = link.dataset.quotationArchiveUrl;
+      form.elements.reviewed_at.value = link.dataset.archiveVersion;
+      form.elements.archive_revision.value = link.dataset.archiveRevision;
+      dialog.querySelector('[data-quotation-archive-code]').textContent = link.dataset.archiveCode;
+      form.querySelector('[data-archive-submit]').disabled = false;
+      dialog.showModal(); dialog.querySelector('[data-archive-cancel]').focus();
+    });
+  });
+  dialog.querySelector('[data-archive-cancel]').addEventListener('click', function () { dialog.close(); });
+  dialog.addEventListener('close', function () { if (trigger) trigger.focus(); });
+  dialog.addEventListener('click', function (event) { if (event.target === dialog) { var r=dialog.getBoundingClientRect(); if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close(); } });
+  form.addEventListener('submit', function () { form.querySelector('[data-archive-submit]').disabled = true; });
 })();

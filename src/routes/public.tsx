@@ -1,4 +1,5 @@
 import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
+import { PolicyContent } from '../views/policy-content'
 import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
@@ -349,6 +350,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const checkOut = isDate(c.req.query('checkOut')) ? c.req.query('checkOut')! : ''
   const guests = int(c.req.query('guests'), 2)
   const gallery = photos.length ? photos : [{ id: 0, r2_key: '', caption: p.name } as PhotoRow]
+  const shareUrl = new URL(`/stay/${p.slug}`, c.env.SITE_URL).href
   const ld = {
     '@context': 'https://schema.org', '@type': 'LodgingBusiness', name: p.name, url: new URL(`/stay/${p.slug}`, c.env.SITE_URL).href, description: propertyMetaDescription(p),
     address: { '@type': 'PostalAddress', addressLocality: p.destination },
@@ -396,6 +398,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
           <div class="property-summary">
             <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
             {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
+            <ShareButtons url={shareUrl} title={`${p.name}, ${p.destination}`} />
           </div>
 
           <section class="section-sm">
@@ -838,9 +841,9 @@ publicRoutes.get('/policies/:kind', async (c) => {
   const content = await getContent(c.env)
   const text = content.policies[kind] || 'This policy is being updated. Please contact us for details.'
   return page(c, { title: titles[kind] }, (
-    <div class="wrap narrow section prose">
+    <div class="wrap narrow section prose policy-page">
       <h1>{titles[kind]}</h1>
-      {text.split(/\n{2,}/).map((p) => (p.startsWith('## ') ? <h2>{p.slice(3)}</h2> : <p>{p}</p>))}
+      <PolicyContent text={text} />
     </div>
   ))
 })
@@ -861,8 +864,11 @@ publicRoutes.post('/saved/:id', async (c) => {
 })
 
 // ---------- 14. Quotation view (public link from WhatsApp) ----------
+// Customer quote links carry private guest/payment information and must be rechecked.
+publicRoutes.use('/q/*', async (c,next)=>{ c.header('Cache-Control','private, no-store'); await next() })
+
 async function loadQuote(env: AppEnv['Bindings'], token: string) {
-  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE token = ?', token)
+  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE token = ? AND archived_at IS NULL', token)
   if (!q) return null
   const options = await all<QuoteOptionRow & { property_name: string; slug: string; destination: string; room_name: string; photo: string | null; description: string }>(
     env,
@@ -892,6 +898,7 @@ publicRoutes.get('/q/:token', async (c) => {
     <div class="wrap narrow section">
       <p class="muted small">Quote {q.code} for {q.guest_name}</p>
       <h1>Your stay quote</h1>
+      <p>This quotation is an offer, not a confirmed booking.</p>
       {q.explainer && <AiNote label="In short">{q.explainer}</AiNote>}
       {q.valid_till && <p class={expired ? 'error' : 'muted'}>{expired ? 'This quote has expired' : `Valid till ${fmtDate(q.valid_till)}`}</p>}
       {q.status === 'accepted' && <div class="flash flash-ok">Thank you — you accepted this quote. Our team will confirm your booking and share payment details on WhatsApp.</div>}
@@ -962,15 +969,15 @@ publicRoutes.post('/q/:token/accept', async (c) => {
     await run(c.env, "UPDATE enquiries SET waiting_on = 'us', urgent = 1, last_guest_msg_at = ?, updated_at = ? WHERE id = ?", nowIso(), nowIso(), q.enquiry_id)
   }
   await run(c.env, "UPDATE tasks SET status = 'done' WHERE quotation_id = ? AND status = 'open'", q.id)
-  await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — confirm the booking and share payment details`, nowIso())
-  await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Convert it to a booking.`)
+  await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — record the advance and request final Admin booking confirmation`, nowIso())
+  await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Record the advance and request final Admin booking confirmation.`)
   await logActivity(c.env, null, 'quote.accepted', 'quotation', q.id, { option: o.id, total: o.total })
   return redirectMsg(c, `/q/${token}`, { ok: 'Thank you! Our team will confirm your booking shortly.' })
 })
 
 async function quoteFeedback(c: Context<AppEnv>, status: 'changes_requested' | 'declined') {
   const token = c.req.param('token')!
-  const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE token = ?', token)
+  const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE token = ? AND archived_at IS NULL', token)
   if (!q) return c.notFound()
   const f = await form(c)
   const msg = str(f.message, 1000)
@@ -1015,6 +1022,16 @@ publicRoutes.get('/media/*', async (c) => {
 })
 
 
+/** Guests share a stay with family: WhatsApp (they pick the chat) and the phone's share sheet / copy link. */
+function ShareButtons({ url, title }: { url: string; title: string }) {
+  return (
+    <div class="share-row">
+      <a class="btn btn-sm btn-wa" href={`https://wa.me/?text=${encodeURIComponent(`${title}\n${url}`)}`} target="_blank" rel="noopener">Share on WhatsApp</a>
+      <button type="button" class="btn btn-sm btn-outline" data-share={url} data-share-title={title}>Share / copy link</button>
+    </div>
+  )
+}
+
 // ---------- Room category page (shareable link: staff send it to guests on WhatsApp) ----------
 publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
@@ -1037,6 +1054,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         <div>
           <h1>{r.name}</h1>
           <div class="muted">{p.name} · 📍 {p.destination}</div>
+          <ShareButtons url={new URL(`/stay/${p.slug}/room/${r.id}`, c.env.SITE_URL).href} title={`${r.name} · ${p.name}, ${p.destination}`} />
         </div>
         <div class="room-price">
           {isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
