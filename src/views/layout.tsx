@@ -205,7 +205,7 @@ const AppSide: FC<{ active?: string; perms: Permissions | null; settings: Settin
         )
       })}
       {/* Staff also work leads in Leadvyne; it has its own login, so open it in a new tab. */}
-      <a href="https://app.leadvyne.com" target="_blank" rel="noopener" class="side-link">{ico('ext')}<span>Leadvyne CRM</span></a>
+      <a href="https://app.leadvyne.com/m.html" target="_blank" rel="noopener" class="side-link">{ico('ext')}<span>Leadvyne CRM</span></a>
     </nav>
   </aside>
 )
