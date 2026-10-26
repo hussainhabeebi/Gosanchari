@@ -33,7 +33,11 @@ describe('homepage uploaded hero banners', () => {
     const css = readFileSync('public/app.css', 'utf8') as string
     expect(route).not.toContain('data-hero-counter')
     expect(route).toContain('class="home-hero-pause"')
-    expect(css).toContain('height:clamp(220px,36vw,620px)')
+    expect(css).not.toContain('height:clamp(220px,36vw,620px)')
+    expect(css).toContain('.home-hero-slides { position:relative;aspect-ratio:2/1;')
+    expect(css).toContain('@media(min-width:1100px)')
+    expect(css).toContain('.home-search-hero:has(.home-hero-slider) > .wrap { position:absolute;z-index:2;')
+    expect(css).toContain('left:50%;bottom:24px;transform:translateX(-50%)')
     expect(css).toContain('.home-hero-controls { position:absolute;inset:0;')
     expect(css).toContain('pointer-events:auto')
     expect(css).toContain('.home-hero-pause:focus-visible')
