@@ -1,3 +1,4 @@
+import { setCookie } from 'hono/cookie'
 import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
 import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
@@ -737,6 +738,7 @@ publicRoutes.post('/enquiry', async (c) => {
   // AI tags + summary happen in the background so the guest never waits.
   await enqueue(c.env, { type: 'enquiry_ai', enquiryId: id })
   await notifyStaff(c.env, 'new_enquiry', `New enquiry ${code} from ${name}${destination ? ` for ${destination}` : ''}.`)
+  setCookie(c, 'meta_conversion', 'Lead', { path: `/enquiry/thanks/${code}`, httpOnly: true, sameSite: 'Lax', secure: new URL(c.req.url).protocol === 'https:', maxAge: 120 })
   if (c.req.header('accept')?.includes('application/json')) return c.json({ ok: true, code })
   return c.redirect(`/enquiry/thanks/${code}`, 303)
 })
@@ -965,6 +967,7 @@ publicRoutes.post('/q/:token/accept', async (c) => {
   await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — confirm the booking and share payment details`, nowIso())
   await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Convert it to a booking.`)
   await logActivity(c.env, null, 'quote.accepted', 'quotation', q.id, { option: o.id, total: o.total })
+  setCookie(c, 'meta_conversion', 'BookNow', { path: `/q/${token}`, httpOnly: true, sameSite: 'Lax', secure: new URL(c.req.url).protocol === 'https:', maxAge: 120 })
   return redirectMsg(c, `/q/${token}`, { ok: 'Thank you! Our team will confirm your booking shortly.' })
 })
 
