@@ -70,10 +70,9 @@ publicRoutes.get('/', async (c) => {
           </div>
           <div class="home-hero-controls">
             <button type="button" data-hero-prev aria-label="Previous banner">←</button>
-            <span class="home-hero-counter" data-hero-counter>1 / 3</span>
             <button type="button" data-hero-next aria-label="Next banner">→</button>
-            <button type="button" data-hero-pause aria-pressed="false">Pause slideshow</button>
           </div>
+          <button type="button" class="home-hero-pause" data-hero-pause aria-pressed="false">Pause slideshow</button>
         </div>
         <div class="wrap">
           <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
