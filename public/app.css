@@ -1154,16 +1154,16 @@ code { overflow-wrap: anywhere; }
 .quotation-archive-dialog h2 { font-size:19px;overflow-wrap:anywhere; }
 .quotation-archive-dialog .btn { min-height:44px; }
 
-/* Compact homepage banners, with navigation over the image instead of a control row. */
+/* Full-height homepage banners with image navigation and desktop search overlay. */
 .area-public:has(.home-hero-slider) .topbar { position:relative;background:#fff; }
 .area-public .home-search-hero:has(.home-hero-slider) { padding:0 0 24px;background:#fff;color:var(--ink); }
 .area-public .home-search-hero:has(.home-hero-slider):before,
 .area-public .home-search-hero:has(.home-hero-slider):after { display:none; }
 .home-hero-slider { width:100%;position:relative;background:#fff; }
-.home-hero-slides { position:relative;height:clamp(220px,36vw,620px);overflow:hidden;background:#f8edda; }
+.home-hero-slides { position:relative;aspect-ratio:2/1;overflow:hidden;background:#f8edda; }
 .home-hero-slide { position:absolute;inset:0;opacity:0;transition:opacity .7s ease;pointer-events:none; }
 .home-hero-slide.is-active { opacity:1; }
-.home-hero-slide img { display:block;width:100%;height:100%;object-fit:cover;object-position:center top; }
+.home-hero-slide img { display:block;width:100%;height:100%;object-fit:contain;object-position:center top; }
 .home-hero-controls { position:absolute;inset:0;display:flex;justify-content:space-between;align-items:center;padding:0 18px;pointer-events:none; }
 .home-hero-controls button { width:46px;height:46px;min-height:44px;border:1px solid #d5dedb;border-radius:50%;background:#fffffff0;color:#142c24;font:600 22px/1 var(--font);cursor:pointer;padding:0;pointer-events:auto;box-shadow:0 3px 12px #0003; }
 .home-hero-controls button:hover { background:var(--green-soft); }
@@ -1175,5 +1175,12 @@ code { overflow-wrap: anywhere; }
 .home-search-hero:has(.home-hero-slider) .hero-copy p { display:none; }
 .area-public .home-search-hero:has(.home-hero-slider) h1 { font-size:clamp(24px,3vw,38px);margin:8px 0 14px; }
 .home-search-hero:has(.home-hero-slider) h1 em { display:inline;font-size:inherit; }
+@media(min-width:1100px) {
+ .area-public .home-search-hero:has(.home-hero-slider) { padding-bottom:0; }
+ .home-search-hero:has(.home-hero-slider) > .wrap { position:absolute;z-index:2;left:50%;bottom:24px;transform:translateX(-50%);width:calc(100% - 72px);max-width:1200px;padding:0; }
+ .area-public .home-search-hero:has(.home-hero-slider) h1 { color:#fff;text-shadow:0 2px 8px #0009; }
+ .home-search-hero:has(.home-hero-slider) .reference-search { margin-top:12px; }
+ .home-search-hero:has(.home-hero-slider) .trust-strip { margin-top:14px; }
+}
 @media(max-width:650px) { .home-hero-slides { height:auto;aspect-ratio:2/1; }.home-hero-slide img { object-fit:contain; }.home-hero-controls { padding:0 8px; }.home-hero-controls button { width:44px;height:44px;font-size:20px; }.home-search-hero:has(.home-hero-slider) .reference-search { margin-top:14px; } }
 @media(prefers-reduced-motion:reduce) { .home-hero-slide { transition:none; } }
