@@ -1153,3 +1153,26 @@ code { overflow-wrap: anywhere; }
 .quotation-archive-dialog::backdrop { background:#102b3280; }
 .quotation-archive-dialog h2 { font-size:19px;overflow-wrap:anywhere; }
 .quotation-archive-dialog .btn { min-height:44px; }
+
+/* Uploaded homepage banners contain their own lettering: show the complete artwork. */
+.area-public:has(.home-hero-slider) .topbar { position:relative;background:#fff; }
+.area-public .home-search-hero:has(.home-hero-slider) { padding:0 0 24px;background:#fff;color:var(--ink); }
+.area-public .home-search-hero:has(.home-hero-slider):before,
+.area-public .home-search-hero:has(.home-hero-slider):after { display:none; }
+.home-hero-slider { width:100%;position:relative;background:#fff; }
+.home-hero-slides { position:relative;aspect-ratio:2/1;overflow:hidden;background:#f8edda; }
+.home-hero-slide { position:absolute;inset:0;opacity:0;transition:opacity .7s ease;pointer-events:none; }
+.home-hero-slide.is-active { opacity:1; }
+.home-hero-slide img { display:block;width:100%;height:100%;object-fit:contain; }
+.home-hero-controls { display:flex;justify-content:center;align-items:center;gap:10px;padding:8px 12px; }
+.home-hero-controls button { min-width:44px;min-height:44px;border:1px solid var(--line);border-radius:24px;background:#fff;color:var(--ink);font:inherit;cursor:pointer;padding:8px 14px; }
+.home-hero-controls button:hover { background:var(--green-soft); }
+.home-hero-controls button:focus-visible { outline:3px solid var(--cta-orange);outline-offset:2px; }
+.home-hero-counter { min-width:42px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums; }
+.area-public .home-search-hero:has(.home-hero-slider) .hero-copy { width:100%;margin:8px auto 0;min-height:0;padding-top:0; }
+.home-search-hero:has(.home-hero-slider) .hero-copy .eyebrow,
+.home-search-hero:has(.home-hero-slider) .hero-copy p { display:none; }
+.area-public .home-search-hero:has(.home-hero-slider) h1 { font-size:clamp(24px,3vw,38px);margin:8px 0 14px; }
+.home-search-hero:has(.home-hero-slider) h1 em { display:inline;font-size:inherit; }
+@media(max-width:650px) { .home-hero-controls { gap:6px;padding:6px; }.home-hero-controls button { font-size:12px;padding:8px 12px; }.home-search-hero:has(.home-hero-slider) .reference-search { margin-top:14px; } }
+@media(prefers-reduced-motion:reduce) { .home-hero-slide { transition:none; } }
