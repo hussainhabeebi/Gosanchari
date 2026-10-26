@@ -58,6 +58,23 @@ publicRoutes.get('/', async (c) => {
   return page(c, { title: 'Kerala Stays, Resorts & Holiday Enquiries', description: 'Find stays in Munnar, Vagamon and across Kerala with Go Sanchari. Compare properties, explore rooms and send an enquiry for a personalised offer.', canonical: c.env.SITE_URL + '/', head: jsonScript('business-schema', travelAgencySchema(c.env.SITE_URL, settings.business), 'application/ld+json') }, (
     <>
       <section class="hero reference-hero home-search-hero">
+        <div class="home-hero-slider" data-home-hero-slider role="region" aria-roledescription="carousel" aria-label="Go Sanchari highlights">
+          <div class="home-hero-slides">
+            {[
+              { image: 'home-hero-romance.webp', text: 'Go Sanchari — We Create Destinations for Romance' },
+              { image: 'home-hero-direct-offer.webp', text: 'Book Now and Get 5% Direct Off in All Bookings' },
+              { image: 'home-hero-tea-valley.webp', text: 'Book Your Rooms Before Diwali Rush' },
+            ].map((slide, index) => <div class={`home-hero-slide${index === 0 ? ' is-active' : ''}`} data-hero-slide aria-hidden={index !== 0} role="group" aria-roledescription="slide" aria-label={`${index + 1} of 3`}>
+              <img src={`/design/${slide.image}`} alt={slide.text} width="1774" height="887" loading={index === 0 ? 'eager' : 'lazy'} fetchpriority={index === 0 ? 'high' : 'low'} decoding="async" />
+            </div>)}
+          </div>
+          <div class="home-hero-controls">
+            <button type="button" data-hero-prev aria-label="Previous banner">←</button>
+            <span class="home-hero-counter" data-hero-counter>1 / 3</span>
+            <button type="button" data-hero-next aria-label="Next banner">→</button>
+            <button type="button" data-hero-pause aria-pressed="false">Pause slideshow</button>
+          </div>
+        </div>
         <div class="wrap">
           <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
           <form class="searchbox reference-search" method="get" action="/search" data-stay-search>

@@ -1174,6 +1174,57 @@
 })();
 // End homepage destination combobox.
 
+// Homepage banner carousel: no navigation or pricing side effects.
+(function () {
+  'use strict';
+  var carousel = document.querySelector('[data-home-hero-slider]');
+  if (!carousel) return;
+  var slides = Array.from(carousel.querySelectorAll('[data-hero-slide]'));
+  var pause = carousel.querySelector('[data-hero-pause]');
+  var counter = carousel.querySelector('[data-hero-counter]');
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var index = 0, timer = null, paused = reduced.matches, hovering = false, focused = false;
+  function schedule() {
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+    if (!paused && !reduced.matches && !hovering && !focused && !document.hidden && slides.length > 1) {
+      timer = window.setTimeout(function () { show(index + 1); }, 4000);
+    }
+  }
+  function show(next) {
+    next = (next + slides.length) % slides.length;
+    var image = slides[next].querySelector('img');
+    // Never fade to a blank banner while a slow connection is still loading it.
+    if (image.complete && image.naturalWidth > 0) {
+      index = next;
+      slides.forEach(function (slide, i) {
+        slide.classList.toggle('is-active', i === index);
+        slide.setAttribute('aria-hidden', String(i !== index));
+      });
+      counter.textContent = (index + 1) + ' / ' + slides.length;
+    } else if (!image.complete) { image.loading = 'eager'; }
+    schedule();
+  }
+  function updatePause() {
+    pause.textContent = paused ? 'Play slideshow' : 'Pause slideshow';
+    pause.setAttribute('aria-pressed', String(paused));
+    schedule();
+  }
+  carousel.querySelector('[data-hero-prev]').addEventListener('click', function () { show(index - 1); });
+  carousel.querySelector('[data-hero-next]').addEventListener('click', function () { show(index + 1); });
+  pause.addEventListener('click', function () { paused = !paused; updatePause(); });
+  carousel.addEventListener('mouseenter', function () { hovering = true; schedule(); });
+  carousel.addEventListener('mouseleave', function () { hovering = false; schedule(); });
+  carousel.addEventListener('focusin', function () { focused = true; schedule(); });
+  carousel.addEventListener('focusout', function (event) { focused = carousel.contains(event.relatedTarget); schedule(); });
+  document.addEventListener('visibilitychange', schedule);
+  reduced.addEventListener('change', function () { if (reduced.matches) paused = true; updatePause(); });
+  window.addEventListener('pagehide', function () { if (timer !== null) window.clearTimeout(timer); timer = null; });
+  window.addEventListener('pageshow', schedule);
+  updatePause();
+})();
+// End homepage banner carousel.
+
 // Reference navigation, stay preview and quote review. Existing URLs remain usable without JS.
 (function () {
   document.querySelectorAll('.nav-dropdown').forEach(function (item) {
@@ -1408,6 +1459,8 @@
   form.addEventListener('input', changed);
   form.addEventListener('change', changed);
 })();
+
+
 
 // Approval uses the saved revision, never unsaved edits from the adjacent form.
 (function () {
