@@ -298,6 +298,7 @@ const Footer: FC<{ settings: Settings }> = ({ settings }) => (
       <div>
         <h4>Contact</h4>
         <p>
+          <strong>Manish C Vijayan</strong><br />
           {settings.business.phone}<br />
           <a href={`mailto:${settings.business.email}`}>{settings.business.email}</a><br />
           {settings.business.address}
