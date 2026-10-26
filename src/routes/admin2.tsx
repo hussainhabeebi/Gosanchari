@@ -553,6 +553,14 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
   return page(c, { title: 'Settings', area: 'admin', active: 'settings' }, (
     <form method="post" action="/admin/settings" class="stack-lg">
       <h1>Settings</h1>
+      <section class="card stack" id="meta-pixel">
+        <h2>Meta Pixel</h2>
+        <label><input type="checkbox" name="meta_enabled" value="1" checked={s.meta_pixel.enabled} /> Enable Meta Pixel on public pages</label>
+        <Field label="Pixel ID"><input name="meta_pixel_id" inputmode="numeric" pattern="[0-9]{5,25}" maxlength={25} value={s.meta_pixel.pixel_id} placeholder="Paste your Meta Pixel ID" /></Field>
+        <label><input type="checkbox" name="meta_lead" value="1" checked={s.meta_pixel.lead} /> Lead — successful enquiry submission</label>
+        <label><input type="checkbox" name="meta_book_now" value="1" checked={s.meta_pixel.book_now} /> BookNow — guest accepts a quote</label>
+        <p class="muted small">PageView is automatic when enabled. BookNow is a custom event for booking intent; staff still confirm the booking. After saving, verify events in Meta Events Manager → Test Events.</p>
+      </section>
       <section class="card stack">
         <h2>Business</h2>
         <div class="row">
@@ -646,6 +654,9 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
 admin2Routes.post('/admin/settings', requirePerm('manage_settings'), async (c) => {
   const f = await form(c)
   const s = await getSettings(c.env)
+  const pixelId = str(f.meta_pixel_id, 100).trim()
+  if ((pixelId && !/^\d{5,25}$/.test(pixelId)) || (f.meta_enabled === '1' && !pixelId)) return redirectMsg(c, '/admin/settings#meta-pixel', { err: 'Enter a valid numeric Meta Pixel ID before enabling tracking.' })
+  await saveSetting(c.env, 'meta_pixel', { enabled: f.meta_enabled === '1', pixel_id: pixelId, lead: f.meta_lead === '1', book_now: f.meta_book_now === '1' })
   const business: Settings['business'] = {
     ...s.business,
     name: str(f.b_name, 80) || s.business.name, legal_name: str(f.b_legal_name, 120), tagline: str(f.b_tagline, 160), phone: str(f.b_phone, 30),

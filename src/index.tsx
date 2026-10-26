@@ -3,7 +3,7 @@ import { publicSitemap, robotsText } from './lib/seo'
 
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
-import { secureHeaders } from 'hono/secure-headers'
+import { NONCE, secureHeaders } from 'hono/secure-headers'
 import { csrf } from 'hono/csrf'
 import type { AppEnv, Env, JobMessage } from './env'
 import { sessionMiddleware } from './lib/auth'
@@ -39,11 +39,11 @@ const app = new Hono<AppEnv>()
 const security = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
+    scriptSrc: [NONCE, 'https://connect.facebook.net', "'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
     styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
     fontSrc: ["'self'"],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-    connectSrc: ["'self'"],
+    connectSrc: ["'self'", 'https://www.facebook.com', 'https://www.facebook.net', 'https://connect.facebook.net'],
     frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
     mediaSrc: ["'self'"],
     formAction: ["'self'"],
