@@ -829,6 +829,8 @@ publicRoutes.get('/contact', async (c) => {
       <div class="grid grid-2">
         <div class="card">
           <h3>Talk to us</h3>
+          <p><strong>Manish C Vijayan</strong></p>
+          <p>📞 <a href="tel:+918714082100">+91 87140 82100</a></p>
           <p>📞 <a href={`tel:${s.business.phone.replace(/\s/g, '')}`}>{s.business.phone}</a></p>
           <p>💬 <a href={`https://wa.me/${s.business.whatsapp.replace(/\D/g, '')}`}>WhatsApp us</a></p>
           <p>✉️ <a href={`mailto:${s.business.email}`}>{s.business.email}</a></p>
