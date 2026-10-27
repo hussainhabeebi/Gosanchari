@@ -388,6 +388,30 @@ export async function writeDescription(env: Env, name: string, type: string, des
   return { en, ml: ml ?? '' }
 }
 
+export const EMAIL_TONES = { friendly: 'Warm and friendly', formal: 'Formal and professional', short: 'Short and to the point' } as const
+export type EmailTone = keyof typeof EMAIL_TONES
+
+/** Drafts an email to resort partners from a short brief. Keeps the {person} / {resort} / {location} placeholders so each resort gets its own copy. */
+export async function draftResortEmail(env: Env, brief: string, tone: EmailTone, business: { name: string; phone: string; email: string }, resorts: number): Promise<{ subject: string; message: string } | null> {
+  const r = await aiJson<{ subject?: string; message?: string }>(env, 'resort_email', {
+    size: 'large',
+    maxTokens: 900,
+    temperature: 0.5,
+    system: [
+      `You write emails from ${business.name}, a Kerala travel company, to the resorts and homestays it works with.`,
+      `Tone: ${EMAIL_TONES[tone]}. Plain text only (no markdown, no HTML), 80-200 words unless the brief asks otherwise.`,
+      'Personalise with these exact placeholders, which are filled in for each resort: {person} = contact person, {resort} = resort name, {location} = its location.',
+      'Start with "Dear {person}," and mention {resort} at least once. Use only facts from the brief; do not invent prices, dates, offers or promises.',
+      `End with a sign-off from "${business.name} Team"${business.phone ? `, phone ${business.phone}` : ''}${business.email ? `, ${business.email}` : ''}.`,
+      'Return ONLY JSON {"subject": "...", "message": "..."}. The subject is under 80 characters and may use {resort}.',
+    ].join('\n'),
+    prompt: `Brief: ${brief}\nThis email goes to ${resorts === 1 ? 'one resort' : `${resorts} resorts, each receiving their own copy`}.`,
+  })
+  const subject = (r?.subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
+  const message = (r?.message ?? '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 20000)
+  return subject && message ? { subject, message } : null
+}
+
 export async function seoSuggest(env: Env, p: Pick<PropertyRow, 'name' | 'type' | 'destination' | 'description'>): Promise<{ title: string; description: string } | null> {
   const r = await aiJson<{ title: string; description: string }>(env, 'seo_suggest', {
     size: 'small',
