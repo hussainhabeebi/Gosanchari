@@ -11,6 +11,8 @@ import { all, logActivity } from '../lib/db'
 import { contact as readContact, stayTypeLabel, type Contact } from '../lib/catalog'
 import { EMAIL_RE, fillTemplate, resendKey, sendEmails, type OutgoingEmail, type SendReport } from '../lib/integrations'
 import { getSettings } from '../lib/settings'
+import { aiEnabled, geminiActive } from '../lib/ai'
+import { draftResortEmail, EMAIL_TONES, type EmailTone } from '../lib/assist'
 import { int, str, toCsv, todayIST } from '../lib/util'
 import { form } from './helpers'
 
@@ -184,9 +186,13 @@ contactRoutes.get('/admin/contacts/export.csv', requirePerm('view_property_conta
 
 const DEFAULT_MESSAGE = 'Dear {person},\n\n\n\nRegards,\n'
 
-async function composePage(c: Context<AppEnv>, items: Item[], picked: Set<number>, draft: { subject: string; message: string }, note?: { ok?: string; err?: string }) {
+type Draft = { subject: string; message: string; brief?: string; tone?: string }
+
+async function composePage(c: Context<AppEnv>, items: Item[], picked: Set<number>, draft: Draft, note?: { ok?: string; err?: string }) {
   const s = await getSettings(c.env)
   const connected = !!(await resendKey(c.env))
+  const aiOn = await aiEnabled(c.env, 'resort_email', s)
+  const usesGemini = aiOn && (await geminiActive(c.env))
   const reachable = items.filter((i) => emailsOf(i.con).length)
   const noEmail = items.filter((i) => !emailsOf(i.con).length)
   return page(c, { title: 'Email resorts', area: 'admin', active: 'contacts' }, (
@@ -198,6 +204,19 @@ async function composePage(c: Context<AppEnv>, items: Item[], picked: Set<number
       {note?.ok && <div class="flash flash-ok" role="status">{note.ok}</div>}
       {note?.err && <div class="flash flash-err" role="alert">{note.err}</div>}
       {!connected && <p class="flash flash-err">Resend is not connected — emails will only be logged, not delivered. Add the API key in <a href="/admin/settings#email">Settings → Email</a>.</p>}
+      <section class="card stack" id="ai-draft">
+        <h2>Write with AI</h2>
+        {aiOn ? (
+          <>
+            <p class="small muted">Describe what the email is about; AI writes the subject and message below{usesGemini ? ' using Gemini' : ''}. Review and edit it before sending.{!usesGemini && <> Add a Gemini key in <a href="/admin/settings#gemini">Settings → AI</a> for better drafts.</>}</p>
+            <Field label="What is this email about?" hint="e.g. Ask for updated 2027 B2B rates and peak-season dates by 15 November; mention we send many families and honeymoon couples."><textarea name="ai_brief" rows={3} maxlength={2000}>{draft.brief ?? ''}</textarea></Field>
+            <div class="row wrap-row">
+              <Field label="Tone"><Select name="ai_tone" value={draft.tone ?? 'friendly'} options={Object.entries(EMAIL_TONES)} /></Field>
+              <button class="btn btn-outline" name="action" value="draft" formnovalidate>✨ {draft.message ? 'Rewrite with AI' : 'Draft with AI'}</button>
+            </div>
+          </>
+        ) : <p class="small muted">AI drafting is off. Turn on “Resort email writer” and add a Gemini key in <a href="/admin/settings#gemini">Settings → AI</a>.</p>}
+      </section>
       <section class="card stack">
         <p class="small muted">From <strong>{s.email.from}</strong>{s.email.reply_to && <> · replies go to <strong>{s.email.reply_to}</strong></>}. Each resort gets its own email; resorts never see each other's addresses.</p>
         <Field label="Subject" hint="Placeholders work here too: {resort} {person} {location}"><input name="subject" required maxlength={200} value={draft.subject} /></Field>
@@ -240,7 +259,19 @@ contactRoutes.post('/admin/contacts/email', requirePerm('view_property_contacts'
   const ids = new Set((f.__all.ids ?? []).map((v) => int(v)).filter(Boolean))
   const items = await loadContacts(c)
   const picked = items.filter((i) => ids.has(i.p.id) && emailsOf(i.con).length)
-  const again = (note: { ok?: string; err?: string }) => composePage(c, items.filter((i) => ids.has(i.p.id)), ids, { subject, message }, note)
+  const brief = str(f.ai_brief, 2000).trim()
+  const tone = (Object.keys(EMAIL_TONES).includes(f.ai_tone) ? f.ai_tone : 'friendly') as EmailTone
+  const again = (note: { ok?: string; err?: string }, draft: Draft = { subject, message }) => composePage(c, items.filter((i) => ids.has(i.p.id)), ids, { brief, tone, ...draft }, note)
+
+  if (f.action === 'draft') {
+    if (!brief) return again({ err: 'Write a line or two about what the email is about, then click Draft with AI.' })
+    const s = await getSettings(c.env)
+    if (!(await aiEnabled(c.env, 'resort_email', s))) return again({ err: 'AI drafting is turned off in Settings → AI.' })
+    const d = await draftResortEmail(c.env, brief, tone, s.business, Math.max(1, picked.length))
+    if (!d) return again({ err: 'AI could not write a draft right now. Try again, or write the email yourself.' })
+    return again({ ok: 'AI draft ready — read it through and edit anything before sending.' }, d)
+  }
+
   if (!subject || !message) return again({ err: 'Add a subject and a message.' })
   if (!picked.length) return again({ err: 'Select at least one resort with an email address.' })
   const done = (r: SendReport, what: string) => (r.dryRun ? ' (Resend is not connected, so it was only logged.)' : r.failed ? ` ${r.failed} ${what} failed: ${r.errors.join('; ').slice(0, 200)}` : '')

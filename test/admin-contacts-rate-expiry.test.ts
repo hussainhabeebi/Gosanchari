@@ -123,6 +123,30 @@ describe('Resort contacts export and email', () => {
     expect(green.html).toContain('Dear Abdul Salam,<br>&lt;b&gt;Hello&lt;/b&gt; Wayanad')
   })
 
+  it('drafts the subject and message with Gemini, keeping the per-resort placeholders', async () => {
+    const f = fixture()
+    withContacts(f)
+    f.env.KV.get = async (k: string) => (k === 'secret:gemini_api_key' ? 'AIza-test' : null)
+    const calls: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      calls.push({ url, body: JSON.parse(init.body) })
+      const draft = { subject: 'Updated 2027 rates for {resort}', message: 'Dear {person},\n\nPlease share the 2027 B2B rates for {resort}.\n\nGo Sanchari Team' }
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(draft) }] } }] }), { status: 200 })
+    }))
+    const compose = await (await f.app.request('http://localhost/admin/contacts/email?ids=3', {}, f.env)).text()
+    expect(compose).toContain('Draft with AI')
+    const body = new URLSearchParams([['ids', '3'], ['ai_brief', 'ask for 2027 B2B rates'], ['ai_tone', 'formal'], ['subject', ''], ['message', ''], ['action', 'draft']])
+    const res = await f.app.request('http://localhost/admin/contacts/email', { method: 'POST', body, headers: { 'content-type': 'application/x-www-form-urlencoded' } }, f.env)
+    const html = await res.text()
+    expect(res.status).toBe(200)
+    expect(calls[0].url).toContain('generativelanguage.googleapis.com')
+    expect(JSON.stringify(calls[0].body)).toContain('ask for 2027 B2B rates')
+    expect(JSON.stringify(calls[0].body)).toContain('Formal and professional')
+    expect(html).toContain('value="Updated 2027 rates for {resort}"')
+    expect(html).toContain('Please share the 2027 B2B rates for {resort}.')
+    expect(html).toContain('AI draft ready')
+  })
+
   it('is closed to sales staff', async () => {
     const f = fixture('sales')
     expect((await f.app.request('http://localhost/admin/contacts/export.csv', {}, f.env)).status).toBe(403)

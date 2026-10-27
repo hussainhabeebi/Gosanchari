@@ -27,6 +27,7 @@ export const AI_FEATURES = {
   ask_ai: 'Ask AI (business questions)',
   review_insights: 'Review problem alerts and reply drafts',
   description_writer: 'Property description writer',
+  resort_email: 'Resort email writer (drafts emails to resorts in Resort contacts)',
   property_extract: 'Property quick fill (paste details, AI fills the form)',
   rate_sheet: 'Read B2B rate sheets (PDF / Word) into room and season rates',
   staff_assistant: 'Staff AI assistant (find properties and exact prices for a client)',
