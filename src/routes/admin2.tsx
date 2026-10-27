@@ -9,7 +9,7 @@ import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { askAi } from '../lib/assist'
 import { DEFAULT_PERMISSIONS, PERMISSION_LABELS, ROLE_LABELS, STAFF_ROLES, type PermissionKey, type Permissions, type Role } from '../lib/permissions'
 import { AI_FEATURES, DEFAULT_SETTINGS, getContent, getSettings, saveContent, saveSetting, type AiFeature, type Settings } from '../lib/settings'
-import { mediaUrl } from '../lib/integrations'
+import { mediaUrl, resendKey, setResendKey, testResendKey } from '../lib/integrations'
 import type { TaxSlab } from '../lib/pricing'
 import type { ReviewRow } from '../lib/types'
 import { addDays, fmtDate, fmtDateTime, int, isDate, money, normalizePhone, parseJson, randomToken, slugify, str, toCsv, todayIST } from '../lib/util'
@@ -548,6 +548,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
   const usage = await all<{ feature: string; n: number; failed: number; avg_ms: number }>(c.env, 'SELECT feature, COUNT(*) AS n, SUM(ok = 0) AS failed, AVG(ms) AS avg_ms FROM ai_usage WHERE created_at >= ? GROUP BY feature ORDER BY n DESC', since)
   const today = parseInt((await c.env.KV.get(`ai:count:${todayIST()}`)) ?? '0', 10)
   const gkey = await geminiKey(c.env)
+  const rkey = await resendKey(c.env)
   const events = Object.keys(s.notifications) as (keyof Settings['notifications'])[]
   const eventLabel: Record<string, string> = { new_enquiry: 'New enquiry', booking: 'New booking', quote_accepted: 'Quote accepted by guest', refund_request: 'Refund request', low_review: 'Low-rated review', daily_summary: 'Daily summary', rate_expiry: 'Season rates ending (renew rates)', voucher_request: 'Booking voucher waiting for approval' }
   return page(c, { title: 'Settings', area: 'admin', active: 'settings' }, (
@@ -591,13 +592,18 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
         ))}
       </section>
 
-      <section class="card stack">
-        <h2>Email</h2>
+      <section class="card stack" id="email">
+        <h2>Email (Resend)</h2>
         <div class="row">
-          <Field label="From"><input name="email_from" value={s.email.from} /></Field>
+          <Field label="From" hint="Must use a domain verified in Resend, e.g. Go Sanchari <hello@gosanchari.com>"><input name="email_from" value={s.email.from} /></Field>
           <Field label="Reply-to"><input name="email_reply_to" value={s.email.reply_to} /></Field>
         </div>
-        <p class="small">Status: {c.env.RESEND_API_KEY ? <span class="ok">Connected</span> : <span class="error">Not connected — emails are logged only</span>}</p>
+        <p class="small">Status: {rkey ? <span class="ok">Connected ({maskKey(rkey)})</span> : <span class="error">Not connected — emails are logged only</span>}</p>
+        <p class="small muted">Create a key at <a href="https://resend.com/api-keys" target="_blank" rel="noopener">resend.com/api-keys</a> and paste it here. It is used for guest emails and for emailing resorts from Resort contacts. The key is stored privately and never shown again in full.</p>
+        <div class="row wrap-row">
+          <Field label={rkey ? 'Replace Resend API key' : 'Resend API key'}><input type="password" name="resend_key" autocomplete="off" placeholder={rkey ? 'Leave blank to keep the saved key' : 're_…'} /></Field>
+        </div>
+        {rkey && <label class="check small"><input type="checkbox" name="resend_remove" value="1" /> Remove the saved key</label>}
       </section>
 
       <section class="card stack">
@@ -685,6 +691,18 @@ admin2Routes.post('/admin/settings', requirePerm('manage_settings'), async (c) =
     await setGeminiKey(c.env, newKey)
     keyMsg = ' Gemini key saved and tested ✓.'
     await logActivity(c.env, c.get('user')!.id, 'settings.gemini_key_set', 'settings', null, { key: maskKey(newKey) })
+  }
+  const newResend = str(f.resend_key, 200).trim()
+  if (f.resend_remove) {
+    await setResendKey(c.env, null)
+    keyMsg += ' Resend key removed.'
+    await logActivity(c.env, c.get('user')!.id, 'settings.resend_key_removed', 'settings', null)
+  } else if (newResend) {
+    const problem = await testResendKey(newResend)
+    if (problem) return redirectMsg(c, '/admin/settings#email', { err: `Other settings saved, but the Resend key did not work: ${problem.slice(0, 160)}` })
+    await setResendKey(c.env, newResend)
+    keyMsg += ' Resend key saved and tested ✓.'
+    await logActivity(c.env, c.get('user')!.id, 'settings.resend_key_set', 'settings', null, { key: maskKey(newResend) })
   }
   const off = (Object.keys(features) as AiFeature[]).filter((k) => !features[k])
   await logActivity(c.env, c.get('user')!.id, 'settings.updated', 'settings', null, { aiOff: off, taxSlabs: slabs })
