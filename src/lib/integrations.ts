@@ -95,18 +95,79 @@ export async function downloadWhatsAppMedia(env: Env, mediaId: string): Promise<
 
 // ---- Email ----
 
+const RESEND_KEY_KV = 'secret:resend_api_key'
+const RESEND_API = 'https://api.resend.com'
+export const EMAIL_RE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/
+
+/** Resend key from Admin → Settings → Email (stored on its own in KV), else the RESEND_API_KEY Worker secret. */
+export async function resendKey(env: Env): Promise<string | null> {
+  const k = (await env.KV.get(RESEND_KEY_KV).catch(() => null)) || env.RESEND_API_KEY || ''
+  return k.trim() || null
+}
+
+export async function setResendKey(env: Env, key: string | null) {
+  if (key) await env.KV.put(RESEND_KEY_KV, key.trim())
+  else await env.KV.delete(RESEND_KEY_KV)
+}
+
+/** Checks a Resend key; returns the problem, or null when it works. "Sending access" keys cannot list domains, which still means the key is valid. */
+export async function testResendKey(key: string): Promise<string | null> {
+  const r = await fetch(`${RESEND_API}/domains`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) }).catch((e: unknown) => e as Error)
+  if (r instanceof Error) return r.message
+  if (r.ok) return null
+  const j = (await r.json().catch(() => ({}))) as { name?: string; message?: string }
+  return j.name === 'restricted_api_key' ? null : (j.message ?? `HTTP ${r.status}`)
+}
+
 export async function sendEmail(env: Env, to: string, subject: string, html: string): Promise<boolean> {
   const s = await getSettings(env)
-  if (!env.RESEND_API_KEY) {
+  const key = await resendKey(env)
+  if (!key) {
     console.log(`[email:dry-run] to=${to} subject=${subject}`)
     return true
   }
-  const r = await fetch('https://api.resend.com/emails', {
+  const r = await fetch(`${RESEND_API}/emails`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ from: s.email.from, to, subject, html, reply_to: s.email.reply_to }),
   })
   return r.ok
+}
+
+export interface OutgoingEmail { to: string[]; subject: string; html: string; text?: string }
+export interface SendReport { sent: number; failed: number; errors: string[]; dryRun: boolean }
+
+/** Sends many separate emails (one per recipient group) through Resend's batch endpoint, 100 per request. */
+export async function sendEmails(env: Env, emails: OutgoingEmail[]): Promise<SendReport> {
+  const s = await getSettings(env)
+  const key = await resendKey(env)
+  const report: SendReport = { sent: 0, failed: 0, errors: [], dryRun: !key }
+  if (!key) {
+    for (const e of emails) console.log(`[email:dry-run] to=${e.to.join(',')} subject=${e.subject}`)
+    report.sent = emails.length
+    return report
+  }
+  const wait = (ms: number) => new Promise((done) => setTimeout(done, ms))
+  for (let i = 0; i < emails.length; i += 100) {
+    const chunk = emails.slice(i, i + 100)
+    const body = JSON.stringify(chunk.map((e) => ({ from: s.email.from, reply_to: s.email.reply_to || undefined, to: e.to, subject: e.subject, html: e.html, text: e.text })))
+    const post = () => fetch(`${RESEND_API}/emails/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(20_000),
+    }).catch((e: unknown) => e as Error)
+    let r = await post()
+    // Resend allows a few requests per second; wait once and retry when rate limited.
+    if (!(r instanceof Error) && r.status === 429) { await wait(1500); r = await post() }
+    if (r instanceof Error || !r.ok) {
+      const msg = r instanceof Error ? r.message : ((await r.json().catch(() => ({}))) as { message?: string }).message ?? `HTTP ${r.status}`
+      report.failed += chunk.length
+      if (!report.errors.includes(msg)) report.errors.push(msg)
+    } else report.sent += chunk.length
+    if (i + 100 < emails.length) await wait(600)
+  }
+  return report
 }
 
 // ---- Media ----

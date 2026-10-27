@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 // @ts-expect-error Node filesystem is used only by the local test fixture.
 import { readFileSync, readdirSync } from 'node:fs'
 import { Hono } from 'hono'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { contactRoutes } from '../src/routes/admin-contacts'
 import { adminRoutes } from '../src/routes/admin'
 import { expiringRates, expiryText, rateExpiryAlerts, rateExpiryReminder } from '../src/lib/rate-expiry'
@@ -60,6 +60,73 @@ describe('Resort contacts (admin only)', () => {
       const f = fixture(role)
       expect((await f.app.request('http://localhost/admin/contacts', {}, f.env)).status).toBe(403)
     }
+  })
+})
+
+describe('Resort contacts export and email', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const withContacts = (f: ReturnType<typeof fixture>) => {
+    f.db.prepare('UPDATE properties SET contact = ? WHERE id = 3').run(JSON.stringify({ person: 'Abdul Salam', phone: '98470 00003', email: 'stay@greencanopy.example', email2: 'not-an-email' }))
+    f.db.prepare('UPDATE properties SET contact = ? WHERE id = 1').run(JSON.stringify({ person: '=HYPERLINK("x")', email: 'tea@misty.example' }))
+  }
+
+  it('exports the shown resorts to CSV with names, emails and numbers', async () => {
+    const f = fixture()
+    withContacts(f)
+    const res = await f.app.request('http://localhost/admin/contacts/export.csv?location=Wayanad', {}, f.env)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-disposition')).toMatch(/attachment; filename="resort-contacts-/)
+    const csv = await res.text()
+    expect(csv.split('\r\n')[0]).toBe('Resort,Location,Stay type,Status,Contact person,Email,Email 2,Phone,Phone 2,Phone 3,More contacts,Address')
+    expect(csv).toContain('Green Canopy Homestay,Wayanad')
+    expect(csv).toContain('Abdul Salam,stay@greencanopy.example')
+    expect(csv).not.toContain('Misty Tea')
+    const all = await (await f.app.request('http://localhost/admin/contacts/export.csv', {}, f.env)).text()
+    expect(all).toContain(`"'=HYPERLINK(""x"")"`) // formula injection neutralised
+  })
+
+  it('shows export and email actions, and only lets resorts with an email be picked', async () => {
+    const f = fixture()
+    withContacts(f)
+    const html = await (await f.app.request('http://localhost/admin/contacts', {}, f.env)).text()
+    expect(html).toContain('href="/admin/contacts/export.csv"')
+    expect(html).toContain('href="/admin/contacts/email?ids=3"')
+    expect(html).toMatch(/name="ids" value="3" form="contact-email"/)
+    expect(html).not.toMatch(/name="ids" value="2" form="contact-email"/)
+  })
+
+  it('composes for the selected resorts and sends one personalised email per resort', async () => {
+    const f = fixture()
+    withContacts(f)
+    const compose = await (await f.app.request('http://localhost/admin/contacts/email?ids=3&ids=1', {}, f.env)).text()
+    expect(compose).toContain('Green Canopy Homestay')
+    expect(compose).toContain('stay@greencanopy.example')
+    expect(compose).not.toContain('not-an-email')
+
+    const sent: any[] = []
+    f.env.KV.get = async (k: string) => (k === 'secret:resend_api_key' ? 're_test_key' : null)
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      sent.push({ url, auth: init.headers.Authorization, body: JSON.parse(init.body) })
+      return new Response(JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }] }), { status: 200 })
+    }))
+    const body = new URLSearchParams([['ids', '3'], ['ids', '1'], ['subject', 'Rates for {resort}'], ['message', 'Dear {person},\n<b>Hello</b> {location}'], ['action', 'send']])
+    const res = await f.app.request('http://localhost/admin/contacts/email', { method: 'POST', body, headers: { 'content-type': 'application/x-www-form-urlencoded' } }, f.env)
+    expect(res.status).toBe(303)
+    expect(new URL(res.headers.get('location')!, 'http://x').searchParams.get('ok')).toBe('Email sent to 2 resorts.')
+    expect(sent).toHaveLength(1)
+    expect(sent[0].url).toBe('https://api.resend.com/emails/batch')
+    expect(sent[0].auth).toBe('Bearer re_test_key')
+    const green = sent[0].body.find((e: any) => e.to[0] === 'stay@greencanopy.example')
+    expect(green.to).toEqual(['stay@greencanopy.example'])
+    expect(green.subject).toBe('Rates for Green Canopy Homestay')
+    expect(green.text).toBe('Dear Abdul Salam,\n<b>Hello</b> Wayanad')
+    expect(green.html).toContain('Dear Abdul Salam,<br>&lt;b&gt;Hello&lt;/b&gt; Wayanad')
+  })
+
+  it('is closed to sales staff', async () => {
+    const f = fixture('sales')
+    expect((await f.app.request('http://localhost/admin/contacts/export.csv', {}, f.env)).status).toBe(403)
+    expect((await f.app.request('http://localhost/admin/contacts/email?ids=1', {}, f.env)).status).toBe(403)
   })
 })
 

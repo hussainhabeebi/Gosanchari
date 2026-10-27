@@ -65,7 +65,22 @@
     if (input.value) url.searchParams.set('q', input.value); else url.searchParams.delete('q')
     if (place) url.searchParams.set('location', place); else url.searchParams.delete('location')
     history.replaceState(null, '', url)
+    // Export and "Email all shown" follow the current filter.
+    root.querySelectorAll('[data-filter-link]').forEach(function (a) {
+      var link = new URL(a.getAttribute('data-filter-link'), location.origin)
+      if (input.value) link.searchParams.set('q', input.value)
+      if (place) link.searchParams.set('location', place)
+      a.setAttribute('href', link.pathname + link.search)
+    })
+    if (selectShown) selectShown.checked = false
   }
+  var selectShown = root.querySelector('[data-select-shown]')
+  if (selectShown) selectShown.addEventListener('change', function () {
+    cards.forEach(function (card) {
+      var box = card.querySelector('[data-contact-pick]')
+      if (box) box.checked = selectShown.checked && !card.hidden
+    })
+  })
   input.addEventListener('input', filter)
   loc.addEventListener('change', filter)
   root.querySelector('form').addEventListener('submit', function (e) { e.preventDefault(); filter() })
