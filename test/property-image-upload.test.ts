@@ -54,7 +54,7 @@ describe('property image format support',()=>{
  it.each(['<svg onload="alert(1)"></svg>','<html>not a photo</html>','fake avif'])('rejects a renamed non-image without a supported MIME type',async body=>{
   expect(await propertyImageType(new File([body],'photo.avif',{type:'application/octet-stream'}))).toBeNull()
  })
- it.each(['image/svg+xml','text/html','image/heic','image/heif','image/tiff'])('rejects unsupported/active declared type %s',async mime=>{
+ it.each(['image/svg+xml','text/html','image/heic','image/heif','image/tiff','constructor','__proto__'])('rejects unsupported/active declared type %s',async mime=>{
   expect(await propertyImageType(new File(['photo'],'photo.avif',{type:mime}))).toBeNull()
  })
  it.each(['common','room','thumbnail','legacy-common','legacy-room'])('persists and serves AVIF correctly through %s upload',async target=>{

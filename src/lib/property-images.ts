@@ -15,7 +15,8 @@ const aliases: Record<string, string> = { 'image/jpg': 'image/jpeg', 'image/pjpe
 
 export async function propertyImageType(file: File): Promise<{ contentType: string; extension: string } | null> {
   const mime = file.type.toLowerCase().split(';')[0].trim()
-  if (types[mime] || types[aliases[mime]]) return types[mime] || types[aliases[mime]]
+  const canonical = Object.hasOwn(aliases, mime) ? aliases[mime] : mime
+  if (Object.hasOwn(types, canonical)) return types[canonical]
   if (mime && mime !== 'application/octet-stream' && mime !== 'binary/octet-stream') return null
   // OS/browser MIME databases can omit AVIF (and other image) types. Inspect only a small
   // header in that case; a renamed SVG/HTML/HEIC must not pass on its extension alone.
