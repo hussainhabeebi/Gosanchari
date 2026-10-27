@@ -678,7 +678,10 @@
     input.addEventListener('change', function () {
       var files = Array.from(input.files); input.value = '';
       files.forEach(function (file) {
-        if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 10 * 1024 * 1024 || !file.size) { state(file.name + ': choose JPG, PNG or WebP up to 10 MB.'); return; }
+        var mime = (file.type || '').toLowerCase().split(';')[0].trim();
+        var supported = /^image\/(jpeg|jpg|pjpeg|png|x-png|webp|avif|x-avif|gif|bmp|x-ms-bmp|apng)$/.test(mime);
+        var untyped = !mime || /^(application|binary)\/octet-stream$/.test(mime);
+        if ((!supported && !(untyped && /\.(jpe?g|jfif|png|webp|avif|gif|bmp|apng)$/i.test(file.name))) || file.size > 10 * 1024 * 1024 || !file.size) { state(file.name + ': choose JPG, PNG, WebP, AVIF, GIF, BMP or APNG up to 10 MB. Convert HEIC/TIFF photos before uploading.'); return; }
         if (pending.some(function (item) { return item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified; })) return;
         var card = document.createElement('span'); card.className = 'common-photo';
         var image = document.createElement('img'), preview = URL.createObjectURL(file); image.src = preview; image.alt = file.name;

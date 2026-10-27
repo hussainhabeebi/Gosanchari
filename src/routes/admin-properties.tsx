@@ -3,6 +3,7 @@
 // then (once saved) room categories, photos & videos by section, and tariff by season.
 
 import { Hono, type Context } from 'hono'
+import { PROPERTY_IMAGE_ACCEPT, propertyImageType } from '../lib/property-images'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Field, LeafletHead, Pill, Select } from '../views/components'
@@ -132,7 +133,7 @@ const NewRoomBlock = ({ idx, showNet }: { idx: string; showNet: boolean }) => (
   <fieldset class="room-edit stack new-room" data-idx={idx}>
     <legend><strong>Room category</strong></legend>
     <RoomFields pf={`nr${idx}_`} optional showNet={showNet} />
-    <Field label="Photos of this room category" hint="JPG / PNG / WebP / AVIF, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple /></Field>
+    <Field label="Photos of this room category" hint="JPG / PNG / WebP / AVIF / GIF / BMP / APNG, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept={PROPERTY_IMAGE_ACCEPT} multiple /></Field>
   </fieldset>
 )
 
@@ -359,7 +360,7 @@ function propertyForm(
               <div class="upload-box stack">
                 <h3>Common photos</h3>
                 <Field label="Section"><Select name="new_photos_category" options={COMMON_SECTIONS} /></Field>
-                <Field label="Photos" hint="JPG / PNG / WebP / AVIF, up to 15 MB each."><input type="file" name="new_photos" accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple /></Field>
+                <Field label="Photos" hint="JPG / PNG / WebP / AVIF / GIF / BMP / APNG, up to 15 MB each."><input type="file" name="new_photos" accept={PROPERTY_IMAGE_ACCEPT} multiple /></Field>
               </div>
             </section>
           </>
@@ -411,14 +412,14 @@ function propertyForm(
                   ? <Field label="Room category"><Select name="room_id" options={roomOpts} required /></Field>
                   : <p class="muted small">Add a room category first (section above).</p>}
                 <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
-                <Field label="Photos or videos" hint="Photos up to 15 MB each (20 at a time). Videos MP4/WebM up to 90 MB."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,image/avif,.avif,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <Field label="Photos or videos" hint="Photos up to 15 MB each (20 at a time). Videos MP4/WebM up to 90 MB."><input type="file" name="files" accept={`${PROPERTY_IMAGE_ACCEPT},video/mp4,video/webm,video/quicktime`} multiple required /></Field>
                 <button class="btn btn-sm" disabled={!rooms.length}>Upload room photos</button>
               </form>
               <form method="post" action={`/admin/properties/${p.id}/media`} enctype="multipart/form-data" class="upload-box stack">
                 <h3>Common photos</h3>
                 <Field label="Section"><Select name="category" options={COMMON_SECTIONS} /></Field>
                 <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
-                <Field label="Photos or videos" hint="Common areas, exterior, pool, views, restaurant, activities."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,image/avif,.avif,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <Field label="Photos or videos" hint="Common areas, exterior, pool, views, restaurant, activities."><input type="file" name="files" accept={`${PROPERTY_IMAGE_ACCEPT},video/mp4,video/webm,video/quicktime`} multiple required /></Field>
                 <button class="btn btn-sm">Upload common photos</button>
               </form>
             </div>
@@ -824,7 +825,6 @@ async function uploadNewPropertyPhotos(c: Context<AppEnv>, propertyId: number, r
 }
 
 // ---- Photos & videos ----
-const IMAGE_TYPES = /^image\/(jpeg|png|webp|avif)$/
 const VIDEO_TYPES = /^video\/(mp4|webm|quicktime)$/
 
 /** Save uploaded photos/videos to R2 and the gallery. Images get AI tag suggestions in the background. */
@@ -833,15 +833,16 @@ async function storeMedia(c: Context<AppEnv>, propertyId: number, files: File[],
   let n = 0
   const skipped: string[] = []
   for (const f of files.slice(0, 20)) {
-    const isImage = IMAGE_TYPES.test(f.type)
+    const image = f.size <= 15 * 1024 * 1024 ? await propertyImageType(f) : null
+    const isImage = !!image
     const isVideo = VIDEO_TYPES.test(f.type)
     if ((!isImage && !isVideo) || (isImage && f.size > 15 * 1024 * 1024) || (isVideo && f.size > 90 * 1024 * 1024)) {
       skipped.push(f.name)
       continue
     }
-    const ext = f.type === 'video/quicktime' ? 'mov' : f.type.split('/')[1]
+    const ext = image?.extension ?? (f.type === 'video/quicktime' ? 'mov' : f.type.split('/')[1])
     const key = `properties/${propertyId}/${category}/${crypto.randomUUID()}.${ext}`
-    await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: f.type } })
+    await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: image?.contentType ?? f.type } })
     const pid = await insertId(
       c.env,
       'INSERT INTO property_photos (property_id, r2_key, caption, sort, category, room_id, media_type) VALUES (?, ?, ?, ?, ?, ?, ?)',

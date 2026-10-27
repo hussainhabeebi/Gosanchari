@@ -120,5 +120,7 @@ export function mediaUrl(key: string | null | undefined, width = 800, transform 
     return key.includes('images.unsplash.com') ? key.replace(/([?&])w=\d+/, `$1w=${width}`) : key
   }
   const path = `/media/${key.split('/').map(encodeURIComponent).join('/')}`
-  return transform ? `/cdn-cgi/image/width=${width},quality=75,format=auto${path}` : path
+  // AVIF input resizing requires an Enterprise Images plan; BMP is not a supported
+  // transformation input. Serve these original browser-readable R2 photos directly.
+  return transform && !/\.(avif|bmp)$/i.test(key) ? `/cdn-cgi/image/width=${width},quality=75,format=auto${path}` : path
 }
