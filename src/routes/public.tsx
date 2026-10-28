@@ -10,7 +10,7 @@ import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
-import { AiInsights, type StayInsight, AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
+import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
 import { closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
@@ -37,7 +37,7 @@ async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv
 
 // ---------- 1. Home ----------
 publicRoutes.get('/', async (c) => {
-  const [content, settings, featured, offers, saved, insights] = await Promise.all([
+  const [content, settings, featured, offers, saved] = await Promise.all([
     getContent(c.env),
     getSettings(c.env),
     featuredCards(c.env, 6),
@@ -47,7 +47,6 @@ publicRoutes.get('/', async (c) => {
       todayIST(), todayIST(),
     ),
     savedIds(c),
-    all<StayInsight>(c.env, "SELECT name, slug, destination, review_summary, rating_count FROM properties WHERE status = 'live' AND rating_count > 0 AND length(trim(review_summary)) > 0 ORDER BY featured DESC, rating_count DESC, id DESC LIMIT 3"),
   ])
   const reviewIds = content.featured_review_ids
   const reviews = reviewIds.length
@@ -104,7 +103,6 @@ publicRoutes.get('/', async (c) => {
             </form>
             <div class="ai-example-chips" aria-label="Try a search">{['Munnar for 2 with a pool', 'Family stay in Wayanad under ₹6000', 'Alleppey houseboat for 4'].map((example) => <a href={`/search?ai=${encodeURIComponent(example)}`}>{example}</a>)}</div>
           </div>
-        <AiInsights entries={insights} />
       </div>
 
       {(offers.length > 0 || content.banners.length > 0) && (
@@ -171,8 +169,6 @@ publicRoutes.get('/search', async (c) => {
   const dests = catalog.map(d => d.label)
   if (f.destination && !dests.includes(f.destination)) dests.unshift(f.destination)
   const fewer = results.length < 3 ? await closeMatches(c.env, f, results.map((r) => r.id), 4) : []
-  const insightIds = results.slice(0, 12).map((p) => p.id)
-  const insights = insightIds.length ? await all<StayInsight>(c.env, `SELECT name, slug, destination, review_summary, rating_count FROM properties WHERE status = 'live' AND rating_count > 0 AND length(trim(review_summary)) > 0 AND id IN (${insightIds.map(() => '?').join(',')}) ORDER BY rating_count DESC LIMIT 3`, ...insightIds) : []
   const understood = c.req.query('understood')
   const qs = new URLSearchParams()
   if (f.checkIn) qs.set('checkIn', f.checkIn)
@@ -268,7 +264,6 @@ publicRoutes.get('/search', async (c) => {
           <input name="ai" maxlength={200} value={understood ?? ''} placeholder="Describe your stay — place, dates, guests, budget, must-haves" aria-label="Describe your stay" required />
           <button class="btn btn-sm">Search</button>
         </form>
-        <AiInsights entries={insights} search />
         {chips.length > 0 && (
           <div class="filter-chips" aria-label="Your search">
             {understood && <span class="muted small">We understood:</span>}
