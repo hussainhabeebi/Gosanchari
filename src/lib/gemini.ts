@@ -20,6 +20,13 @@ export interface GeminiRequest {
   json?: boolean
   maxTokens?: number
   temperature?: number
+  /** Opt-in Google Search grounding; unused by ordinary Gemini calls. */
+  grounding?: (metadata: GroundingMetadata) => void
+}
+
+export interface GroundingMetadata {
+  groundingChunks?: { web?: { uri?: string; title?: string } }[]
+  searchEntryPoint?: { renderedContent?: string }
 }
 
 /** Key from Admin settings, else the GEMINI_API_KEY Worker secret. */
@@ -54,6 +61,7 @@ export async function geminiGenerate(key: string, model: string, r: GeminiReques
   }))
   const body = {
     contents,
+    ...(r.grounding ? { tools: [{ google_search: {} }] } : {}),
     ...(r.system ? { systemInstruction: { parts: [{ text: r.system }] } } : {}),
     generationConfig: {
       temperature: r.temperature ?? 0.3,
@@ -67,10 +75,12 @@ export async function geminiGenerate(key: string, model: string, r: GeminiReques
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify(body),
+    ...(r.grounding ? { signal: AbortSignal.timeout(15000) } : {}),
   })
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 300)}`)
-  const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+  const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] }; groundingMetadata?: GroundingMetadata }[] }
   const text = (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
+  if (r.grounding) r.grounding(j.candidates?.[0]?.groundingMetadata ?? {})
   if (!text) throw new Error('Gemini returned an empty answer')
   return text
 }

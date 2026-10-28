@@ -549,6 +549,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
           <section class="section-sm" id="ask">
             <h2>Ask about this property</h2>
+            <p class="muted small">This is an AI-generated answer, please double-check it. External information may be outdated. Rates come only from Go Sanchari; confirm details with our team.</p>
             <div class="qa" data-qa={`/stay/${p.slug}/ask`}>
               <div class="qa-log" aria-live="polite">
                 <div class="msg msg-ai">Hi! Ask me anything about {p.name} — breakfast, kids, parking, check-in…</div>

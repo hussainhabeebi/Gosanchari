@@ -331,15 +331,31 @@
     var log = $('.qa-log', qa), qf = $('.qa-form', qa), hf = $('.qa-handoff', qa)
     qf.addEventListener('submit', function (e) {
       e.preventDefault()
-      var q = qf.q.value.trim(); if (!q) return
+      var q = qf.q.value.trim(); if (!q || qf.querySelector('button').disabled) return
+      qf.querySelector('button').disabled = true
       log.insertAdjacentHTML('beforeend', '<div class="msg msg-guest">' + esc(q) + '</div><div class="msg msg-ai typing">…</div>')
       log.scrollTop = log.scrollHeight
       qf.q.value = ''
       post(qa.dataset.qa, { q: q }).then(function (r) {
         var t = $('.typing', log); t.classList.remove('typing'); t.textContent = r.answer || r.error || 'Sorry, something went wrong.'
+        if (Array.isArray(r.sources) && r.sources.length) {
+          var refs = document.createElement('div'); refs.className = 'small muted'; refs.textContent = 'External sources (please verify): '
+          r.sources.slice(0, 6).forEach(function (value, index) {
+            try {
+              var url = new URL(value)
+              if (url.protocol !== 'https:' || url.username || url.password) return
+              var link = document.createElement('a'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = '[' + (index + 1) + '] ' + url.hostname + ' '; refs.appendChild(link)
+            } catch (e) {}
+          })
+          t.appendChild(refs)
+          if (typeof r.searchSuggestions === 'string' && r.searchSuggestions) {
+            // Provider HTML is isolated, never inserted into the parent document or allowed scripts.
+            var suggestions = document.createElement('iframe'); suggestions.title = 'Google Search suggestions'; suggestions.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox'); suggestions.setAttribute('referrerpolicy', 'no-referrer'); suggestions.style.cssText = 'width:100%;max-width:100%;height:100px;border:0'; suggestions.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src https://www.gstatic.com data:; form-action \'none\'; base-uri \'none\'">' + r.searchSuggestions; t.appendChild(suggestions)
+          }
+        }
         if (r.handoff) { hf.hidden = false; hf.message.value = 'Question from property page: ' + q }
         log.scrollTop = log.scrollHeight
-      }).catch(function () { var t = $('.typing', log); t.classList.remove('typing'); t.textContent = 'Sorry, please try again.' })
+      }).catch(function () { var t = $('.typing', log); if (t) { t.classList.remove('typing'); t.textContent = 'Sorry, please try again.' } }).finally(function () { qf.querySelector('button').disabled = false })
     })
   }
 
