@@ -1,7 +1,8 @@
 // Public comparison-rate display only; never changes the actual price or server calculations.
 function gsPublicComparisonRate(value) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return ''
-  return '<span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price.">Comparison rate (+5%) <s>₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(value * 1.05)) + '</s></span>'
+  var amount = '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(value * 1.05))
+  return '<span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price."><s aria-label="Calculated comparison rate (+5%): ' + amount + '">' + amount + '</s></span>'
 }
 
 // Go Sanchari client script: small progressive enhancements, no framework.
