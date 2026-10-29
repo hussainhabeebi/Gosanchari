@@ -1188,3 +1188,10 @@ code { overflow-wrap: anywhere; }
 /* Calculated public comparison only; selling prices and totals remain unchanged. */
 .comparison-rate { display:block;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5;overflow-wrap:anywhere; }
 .comparison-rate s { white-space:nowrap;text-decoration-color:#a94747;text-decoration-thickness:1.5px; }
+
+/* Two balanced amenity columns on public property/room pages, including phone previews. */
+.area-public .amenity-list { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(var(--amenity-rows),auto);grid-auto-flow:column;gap:7px 18px;list-style:none;margin:10px 0 0;padding:0;clear:both; }
+.area-public .amenity-list li { display:flex;align-items:flex-start;gap:6px;break-inside:avoid;page-break-inside:avoid;min-width:0;margin:0;font-size:13px;line-height:1.45; }
+.area-public .amenity-icon { flex:0 0 18px;text-align:center;color:var(--green); }
+.area-public .amenity-label { min-width:0;overflow-wrap:anywhere; }
+@media(max-width:650px) { .area-public .amenity-list { column-gap:12px; }.area-public .amenity-list li { font-size:12px;gap:4px; }.area-public .amenity-icon { flex-basis:16px; } }

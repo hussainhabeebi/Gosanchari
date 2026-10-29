@@ -44,6 +44,13 @@ export const ComparisonRate: FC<{ value: number }> = ({ value }) => Number.isFin
   ? <span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price.">Comparison rate (+5%) <s>{money(value * 1.05)}</s></span>
   : null
 
+/** Compact public amenity list; preserve custom labels and configured icons. */
+export const AmenityList: FC<{ items: string[]; label: string; labels?: Record<string, string> }> = ({ items, label, labels = FACILITIES }) => items.length > 0 ? (
+  <ul class="amenity-list" aria-label={label} style={`--amenity-rows:${Math.ceil(items.length / 2)}`}>
+    {items.map(key => <li><span class="amenity-icon" aria-hidden="true">{iconFor(key)}</span><span class="amenity-label">{labels[key] ?? key}</span></li>)}
+  </ul>
+) : null
+
 export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean; reasons?: string[] }> = ({ p, saved, qs, transform, reasons }) => {
   const fac = parseJson<string[]>(p.facilities, []).slice(0, 3)
   const price = p.stay_price ?? p.from_price
