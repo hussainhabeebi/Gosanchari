@@ -1,5 +1,7 @@
 import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
 import { PolicyContent } from '../views/policy-content'
+import { AboutContent } from '../views/about-content'
+import { DEFAULT_ABOUT } from '../lib/settings'
 import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
@@ -806,11 +808,9 @@ publicRoutes.get('/offers', async (c) => {
 publicRoutes.get('/about', async (c) => {
   const [content, s] = await Promise.all([getContent(c.env), getSettings(c.env)])
   return page(c, { title: 'About Our Kerala Travel Team', description: `Learn about ${s.business.name}, our Kerala-based travel team, and how to contact us for help choosing a stay and requesting a personalised offer.` }, (
-    <div class="wrap narrow section prose">
-      <img src="/brand/logo-wide.webp" alt={s.business.name} width="302" height="80" style="display:block;margin:0 auto 16px;height:auto;max-width:100%" />
-      <h1>About {s.business.name}</h1>
-      {(content.about || 'We are a Kerala-based team that personally checks every stay we list.').split(/\n{2,}/).map((p) => <p>{p}</p>)}
-      <p><a class="btn" href="/contact">Contact us</a></p>
+    <div class="wrap section about-page">
+      <header class="about-heading"><h1>About {s.business.name}</h1><img src="/brand/logo-wide.webp" alt={s.business.name} width="302" height="80" /></header>
+      <article class="about-story"><AboutContent text={content.about || DEFAULT_ABOUT} /><div class="about-contact"><a class="btn" href="/contact">Contact us</a></div></article>
     </div>
   ))
 })
