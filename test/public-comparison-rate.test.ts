@@ -12,21 +12,27 @@ const card: any = {id:1,slug:'test',name:'Public stay',destination:'Munnar',faci
 describe('public display-only comparison rates', () => {
   it.each([4000, 1000, 3999, 4000.5, 100000])('shows 5 percent above %s consistently on server and client', async value => {
     const html = String(await ComparisonRate({value}))
-    expect(html).toContain('<s>'+money(value*1.05)+'</s>')
+    expect(html).toContain('>'+money(value*1.05)+'</s>')
     expect(html).toBe(runtime.gsPublicComparisonRate(value))
-    expect(html).toContain('Comparison rate (+5%)'); expect(html).toContain('not a previous price')
+    expect(html.replace(/<[^>]*>/g,'')).toBe(money(value*1.05))
+    expect(html).toContain('aria-label="Calculated comparison rate (+5%):'); expect(html).toContain('not a previous price')
     expect(html).not.toMatch(/Original price|5% off|discount/)
+  })
+  it('uses a larger crossed-out amount without a visible comparison caption', () => {
+    const css = readFileSync('public/app.css','utf8') as string
+    expect(css).toMatch(/\.comparison-rate \{[^}]*font-size:14px/)
+    expect(script).not.toContain('>Comparison rate (+5%)')
   })
   it('keeps the selling price, property links and private-rate boundaries unchanged', async () => {
     const before = JSON.stringify(card)
     const html = String(await PropertyCard({p:card}))
-    expect(html).toContain('<s>₹4,200</s>'); expect(html).toContain('<div class="price">₹4,000</div>')
+    expect(html).toContain('>₹4,200</s>'); expect(html).toContain('<div class="price">₹4,000</div>')
     expect(html).toContain('/stay/test'); expect(html).not.toMatch(/123456|234567|1,23,456|2,34,567/)
     expect(JSON.stringify(card)).toBe(before)
   })
   it('uses the date-resolved public nightly rate rather than the fallback rate', async () => {
     const html = String(await PropertyCard({p:{...card,stay_price:8000,stay_total:18880}}))
-    expect(html).toContain('<s>₹8,400</s>'); expect(html).toContain('<div class="price">₹8,000</div>')
+    expect(html).toContain('>₹8,400</s>'); expect(html).toContain('<div class="price">₹8,000</div>')
     expect(html).toContain('₹18,880 total incl. GST'); expect(html).not.toContain('₹4,200')
   })
   it.each([0,-1,NaN,Infinity])('omits invalid or missing comparisons for %s', async value => {

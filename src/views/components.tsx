@@ -41,7 +41,7 @@ export const PinIcon = () => raw('<svg class="ico" viewBox="0 0 24 24" width="14
 
 /** Display-only comparison; never used as a payable or historical/original price. */
 export const ComparisonRate: FC<{ value: number }> = ({ value }) => Number.isFinite(value) && value > 0
-  ? <span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price.">Comparison rate (+5%) <s>{money(value * 1.05)}</s></span>
+  ? <span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price."><s aria-label={`Calculated comparison rate (+5%): ${money(value * 1.05)}`}>{money(value * 1.05)}</s></span>
   : null
 
 /** Compact public amenity list; preserve custom labels and configured icons. */

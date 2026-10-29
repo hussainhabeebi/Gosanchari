@@ -1186,7 +1186,7 @@ code { overflow-wrap: anywhere; }
 @media(prefers-reduced-motion:reduce) { .home-hero-slide { transition:none; } }
 
 /* Calculated public comparison only; selling prices and totals remain unchanged. */
-.comparison-rate { display:block;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5;overflow-wrap:anywhere; }
+.comparison-rate { display:block;color:var(--muted);font-size:14px;font-weight:400;line-height:1.5;overflow-wrap:anywhere; }
 .comparison-rate s { white-space:nowrap;text-decoration-color:#a94747;text-decoration-thickness:1.5px; }
 
 /* Two balanced amenity columns on public property/room pages, including phone previews. */
