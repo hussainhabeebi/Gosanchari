@@ -1184,3 +1184,7 @@ code { overflow-wrap: anywhere; }
 }
 @media(max-width:650px) { .home-hero-slides { height:auto;aspect-ratio:2/1; }.home-hero-slide img { object-fit:contain; }.home-hero-controls { padding:0 8px; }.home-hero-controls button { width:44px;height:44px;font-size:20px; }.home-search-hero:has(.home-hero-slider) .reference-search { margin-top:14px; } }
 @media(prefers-reduced-motion:reduce) { .home-hero-slide { transition:none; } }
+
+/* Calculated public comparison only; selling prices and totals remain unchanged. */
+.comparison-rate { display:block;color:var(--muted);font-size:11px;font-weight:400;line-height:1.5;overflow-wrap:anywhere; }
+.comparison-rate s { white-space:nowrap;text-decoration-color:#a94747;text-decoration-thickness:1.5px; }
