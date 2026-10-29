@@ -1,3 +1,9 @@
+// Public comparison-rate display only; never changes the actual price or server calculations.
+function gsPublicComparisonRate(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return ''
+  return '<span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price.">Comparison rate (+5%) <s>₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(value * 1.05)) + '</s></span>'
+}
+
 // Go Sanchari client script: small progressive enhancements, no framework.
 // Staff quotation: combine room categories in one option ("+ Add another room category" / ×).
 (function () {
@@ -304,7 +310,7 @@
         if (!fd.get('check_in') || !fd.get('check_out')) return
         post(bf.dataset.priceUrl, { room: fd.get('room'), checkIn: fd.get('check_in'), checkOut: fd.get('check_out'), rooms: fd.get('rooms'), adults: fd.get('adults'), children: fd.get('children') }).then(function (p) {
           if (p.errors && p.errors.length) { box2.innerHTML = '<span class="error small">' + esc(p.errors[0]) + '</span>'; return }
-          box2.innerHTML = '<div class="muted small">Estimated price (confirmed in your quote)</div><table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + money(p.roomCharges != null ? p.roomCharges : p.subtotal) + '</td></tr>' +
+          box2.innerHTML = '<div class="muted small">Estimated price (confirmed in your quote)</div><table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + gsPublicComparisonRate(p.roomCharges != null ? p.roomCharges : p.subtotal) + money(p.roomCharges != null ? p.roomCharges : p.subtotal) + '</td></tr>' +
             (p.extraGuests && p.extraGuests.total ? '<tr><td>Extra guests (' + [p.extraGuests.extraAdults ? p.extraGuests.extraAdults + ' adult' + (p.extraGuests.extraAdults > 1 ? 's' : '') : '', p.extraGuests.extraChildren ? p.extraGuests.extraChildren + ' child' + (p.extraGuests.extraChildren > 1 ? 'ren' : '') : ''].filter(Boolean).join(' + ') + ')</td><td>' + money(p.extraGuests.total) + '</td></tr>' : '') +
             (p.discount ? '<tr><td>Discount</td><td>− ' + money(p.discount) + '</td></tr>' : '') +
             '<tr><td>GST (' + p.taxRate + '%)</td><td>' + money(p.taxes) + '</td></tr><tr class="total"><td>Total</td><td>' + money(p.total) + '</td></tr></table>'
@@ -1343,7 +1349,8 @@
             var response = await fetch(previewForm.dataset.priceUrl, { method: 'POST', body: data });
             var price = await response.json(); if (version !== previewRevision) return;
             if (!response.ok || price.errors?.length || !(price.roomCharges > 0) || !(price.nights > 0)) { label.textContent = 'For a personalised offer, fill in your details below and enquire.'; return; }
-            label.textContent = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(price.roomCharges / (price.nights * price.roomsCount)) + ' / room / night · estimated for your dates';
+            var nightlyRate = price.roomCharges / (price.nights * price.roomsCount);
+            label.innerHTML = gsPublicComparisonRate(nightlyRate) + new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(nightlyRate) + ' / room / night · estimated for your dates';
           } catch (_) { if (version === previewRevision) label.textContent = 'Estimate unavailable. Please enquire.'; }
         });
       }, 250);
