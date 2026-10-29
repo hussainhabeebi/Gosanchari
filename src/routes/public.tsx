@@ -10,7 +10,7 @@ import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
-import { AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
+import { AiNote, AmenityList, Empty, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
 import { closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
@@ -446,7 +446,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                       {r.description && <p class="small mt-sm">{r.description}</p>}
                       {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
                       {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
-                      <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>
+                      <AmenityList items={am} label="Room amenities" labels={{ ...FACILITIES, ...ROOM_AMENITIES }} />
                     </div>
                     <div class="room-price" data-preview-room={preview ? r.id : undefined}>
                       {!preview && isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small" data-preview-room-price={preview ? '' : undefined}>For a personalised offer, fill in your details below and enquire.</p>}
@@ -517,7 +517,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
           <section class="section-sm" id="facilities">
             <h2>Facilities</h2>
-            <div class="facility-grid">{facilities.map((f) => <div>{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</div>)}</div>
+            <AmenityList items={facilities} label="Property facilities" />
           </section>
 
           <section class="section-sm" id="policies">
@@ -1087,7 +1087,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         {r.description && <p>{r.description}</p>}
         {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
         {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
-        {am.length > 0 && <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>}
+        {am.length > 0 && <AmenityList items={am} label="Room amenities" labels={{ ...FACILITIES, ...ROOM_AMENITIES }} />}
         <div class="row wrap-row">
           <a class="btn" href={`/stay/${p.slug}?room=${r.id}`}>Enquire about this room</a>
           <a class="btn btn-outline" href={`/stay/${p.slug}`}>See the whole property</a>
