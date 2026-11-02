@@ -90,6 +90,7 @@ const STAFF_NAV: { key: string; href: string; label: string; perm?: keyof Permis
 const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permissions }[] = [
   { key: 'admin', href: '/admin', label: 'Overview', perm: 'view_reports' },
   { key: 'properties', href: '/admin/properties', label: 'Properties', perm: 'manage_properties' },
+  { key: 'recommended', href: '/admin/recommended-properties', label: 'Recommended Properties', perm: 'manage_content' },
   { key: 'rates', href: '/admin/rates', label: 'Rates & availability', perm: 'manage_rates' },
   { key: 'rate-expiry', href: '/admin/rates/expiring', label: 'Expiring rates', perm: 'manage_rates' },
   { key: 'contacts', href: '/admin/contacts', label: 'Resort contacts', perm: 'view_property_contacts' },
@@ -108,7 +109,6 @@ const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permiss
   { key: 'ask', href: '/admin/ask', label: 'Ask AI', perm: 'ask_ai' },
   { key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' },
   { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
-  { key: 'recommended', href: '/admin/recommended-properties', label: 'Recommended Properties', perm: 'manage_content' },
   { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
   { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
   { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
@@ -140,6 +140,7 @@ const NAV_GROUPS: NavGroup[] = [
     { key: 'finder', href: '/staff/finder', label: 'Property finder', perm: 'manage_quotes' },
     { key: 'rate-calculator', href: '/staff/rate-calculator', label: 'Rate Calculator', perm: 'manage_quotes' },
     { key: 'properties', href: '/admin/properties', label: 'All Properties', perm: 'manage_properties' },
+    { key: 'recommended', href: '/admin/recommended-properties', label: 'Recommended Properties', perm: 'manage_content' },
     { key: 'prop_new', href: '/admin/properties/new', label: 'Add New Property', perm: 'manage_properties' },
     { key: 'prop_cats', href: '/admin/lists/property_type', label: 'Categories', perm: 'manage_properties' },
     { key: 'prop_facilities', href: '/admin/lists/facility', label: 'Facilities & Activities', perm: 'manage_properties' },
@@ -179,7 +180,6 @@ const NAV_GROUPS: NavGroup[] = [
   ] },
   { label: 'Website Settings', icon: 'gear', items: [
     { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
-    { key: 'recommended', href: '/admin/recommended-properties', label: 'Recommended Properties', perm: 'manage_content' },
     { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
     { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
     { key: 'staff', href: '/admin/staff', label: 'Staff & roles', perm: 'manage_staff' },
