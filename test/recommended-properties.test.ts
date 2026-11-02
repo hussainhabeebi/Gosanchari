@@ -131,6 +131,12 @@ describe('Admin-managed homepage recommendations',()=>{
       const snapshot=()=>JSON.stringify(['properties','rooms','season_rates','quotations','bookings'].map(table=>f.db.prepare('SELECT * FROM '+table+' ORDER BY id').all()))
       const before=snapshot();await f.post('add',f.ids[0]);await f.post('add',f.ids[1]);await f.post('up',f.ids[1]);await f.post('remove',f.ids[0]);await f.home()
       const html=await(await f.app.request('http://localhost'+path,{},f.env)).text();expect(html).toContain('href="/admin/recommended-properties"');expect(html).toContain('aria-label="Move Recommended Stay 1 up"')
+      const groups=html.match(/<details class="side-group"[^>]*>[\s\S]*?<\/details>/g) || []
+      const properties=groups.find(group=>group.includes('>Properties</span>'))!
+      const website=groups.find(group=>group.includes('>Website Settings</span>'))!
+      expect(properties).toContain('href="/admin/recommended-properties" class="active"')
+      expect(properties).toContain('open')
+      expect(website).not.toContain('/admin/recommended-properties')
       expect(snapshot()).toBe(before)
     }finally{f.db.close()}
   })
