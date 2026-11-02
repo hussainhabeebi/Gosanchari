@@ -174,6 +174,7 @@ export interface Content {
   faqs: Faq[]
   about: string
   policies: { privacy: string; cancellation: string; terms: string }
+  recommended_property_ids: number[]
   featured_review_ids: number[]
 }
 
@@ -214,6 +215,7 @@ export const DEFAULT_CONTENT: Content = {
   faqs: [],
   about: DEFAULT_ABOUT,
   policies: { privacy: '', cancellation: '', terms: '' },
+  recommended_property_ids: [],
   featured_review_ids: [],
 }
 

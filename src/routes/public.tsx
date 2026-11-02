@@ -2,6 +2,7 @@ import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
 import { PolicyContent } from '../views/policy-content'
 import { AboutContent } from '../views/about-content'
 import { DEFAULT_ABOUT } from '../lib/settings'
+import { recommendedIds } from '../lib/recommended'
 import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
@@ -14,7 +15,7 @@ import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, AmenityList, Empty, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
-import { closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
+import { cardsByIds, closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
 import { getContent, getSettings } from '../lib/settings'
 import { propertyQA } from '../lib/assist'
@@ -50,6 +51,7 @@ publicRoutes.get('/', async (c) => {
     ),
     savedIds(c),
   ])
+  const recommended = await cardsByIds(c.env, recommendedIds(content.recommended_property_ids))
   const reviewIds = content.featured_review_ids
   const reviews = reviewIds.length
     ? await all<ReviewRow & { property_name: string; slug: string }>(c.env, `SELECT r.*, p.name AS property_name, p.slug FROM reviews r JOIN properties p ON p.id = r.property_id WHERE r.status = 'approved' AND r.id IN (${reviewIds.map(() => '?').join(',')})`, ...reviewIds)
@@ -96,6 +98,14 @@ publicRoutes.get('/', async (c) => {
         <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
         <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
       </section>
+      {recommended.length > 0 && <section class="wrap section popular-stays recommended-properties" aria-labelledby="recommended-heading">
+        <div class="row-between"><h2 id="recommended-heading">Recommended <span>Properties</span></h2></div>
+        <div class="stay-carousel">
+          {recommended.length > 1 && <button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous recommended properties" aria-controls="recommended-track">←</button>}
+          <div class="grid grid-4" data-stay-track id="recommended-track" role="group" aria-label="Recommended properties" tabindex={0}>{recommended.map(p => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div>
+          {recommended.length > 1 && <button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next recommended properties" aria-controls="recommended-track">→</button>}
+        </div>
+      </section>}
       <div class="wrap home-ai-insights">
           <div class="hero-ai-priority" id="ai-search">
             <div class="hero-ai-heading"><span class="ai-badge">AI</span><strong>AI Search</strong><span>Describe your perfect escape</span></div>
