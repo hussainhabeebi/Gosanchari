@@ -1,5 +1,6 @@
 // Admin pages 41–47: staff & roles, reports, Ask AI, reviews, website content, settings, activity log.
 
+import { recommendedState, saveRecommended } from '../lib/recommended'
 import { Hono, type MiddlewareHandler } from 'hono'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
@@ -412,6 +413,64 @@ admin2Routes.post('/admin/reviews/:id', requirePerm('manage_reviews'), async (c)
   )
   await logActivity(c.env, c.get('user')!.id, `review.${status}`, 'review', id)
   return c.redirect(c.req.header('referer') ?? '/admin/reviews', 303)
+})
+
+// Curated homepage recommendations use the existing content table; never property duplicates.
+admin2Routes.get('/admin/recommended-properties', staffAdminOnly, requirePerm('manage_content'), async c => {
+  const state = await recommendedState(c.env)
+  const q = str(c.req.query('q'), 100)
+  const selectedRows = state.ids.length ? await all<{ id: number; name: string; destination: string; status: string }>(c.env,
+    `SELECT id,name,destination,status FROM properties WHERE id IN (${state.ids.map(() => '?').join(',')})`, ...state.ids) : []
+  const selected = state.ids.map(id => selectedRows.find(p => p.id === id) ?? {id,name:'Unavailable property',destination:'',status:'missing'})
+  const search = '%' + q.replace(/[\\%_]/g, '\\$&') + '%'
+  const choices = await all<{ id: number; name: string; destination: string }>(c.env,
+    "SELECT id,name,destination FROM properties WHERE status = 'live' AND (name LIKE ? ESCAPE '\\' OR destination LIKE ? ESCAPE '\\') ORDER BY name,id LIMIT 30", search, search)
+  const fields = <><input type="hidden" name="revision" value={state.revision} /><input type="hidden" name="q" value={q} /></>
+  return page(c, {title:'Recommended Properties',area:'admin',active:'recommended'}, <div class="stack-lg recommended-manager">
+    <div><h1>Recommended Properties</h1><p class="muted">Choose up to 6 Live properties for the homepage. Changes save immediately. Hidden or inactive properties are never displayed publicly; removing a selection also clears other unavailable entries.</p></div>
+    <section class="card stack"><h2>Selected properties ({selected.length}/6)</h2>
+      {selected.length === 0 && <p class="muted">No properties selected. The homepage section is hidden.</p>}
+      <ol class="recommended-selected">{selected.map((p,index) => <li><div class="recommended-property-name"><strong>{p.name}</strong><span class="muted small">{p.destination}{p.status !== 'live' ? ' · Unavailable publicly — remove this selection' : ''}</span></div>
+        <form method="post" action="/admin/recommended-properties" class="recommended-actions">{fields}<input type="hidden" name="property_id" value={p.id} />
+          <button class="btn btn-sm btn-outline" name="action" value="up" disabled={index === 0} aria-label={`Move ${p.name} up`}>↑</button>
+          <button class="btn btn-sm btn-outline" name="action" value="down" disabled={index === selected.length-1} aria-label={`Move ${p.name} down`}>↓</button>
+          <button class="btn btn-sm btn-outline" name="action" value="remove" aria-label={`Remove ${p.name}`}>Remove</button>
+        </form></li>)}</ol>
+    </section>
+    <section class="card stack"><h2>Add a property</h2>
+      <form method="get" action="/admin/recommended-properties" class="recommended-search"><Field label="Search properties or destinations"><input name="q" value={q} maxlength={100} placeholder="Property name or destination" /></Field><button class="btn">Search</button></form>
+      <p class="muted small">Showing up to 30 Live properties. Refine your search to find another stay.</p>
+      {choices.length === 0 && <p class="muted">No matching Live properties.</p>}
+      <ul class="recommended-candidates">{choices.map(p => <li><div class="recommended-property-name"><strong>{p.name}</strong><span class="muted small">{p.destination}</span></div>
+        <form method="post" action="/admin/recommended-properties">{fields}<input type="hidden" name="property_id" value={p.id}/><button class="btn btn-sm" name="action" value="add" disabled={state.ids.includes(p.id) || state.ids.length >= 6} aria-label={`Add ${p.name}`}>{state.ids.includes(p.id) ? 'Selected' : 'Add'}</button></form>
+      </li>)}</ul>
+    </section>
+  </div>)
+})
+admin2Routes.post('/admin/recommended-properties', staffAdminOnly, requirePerm('manage_content'), async c => {
+  const f = await form(c), state = await recommendedState(c.env)
+  const target = '/admin/recommended-properties' + (f.q ? '?q=' + encodeURIComponent(str(f.q,100)) : '')
+  const fail = (err: string) => redirectMsg(c,target,{err})
+  if (f.revision !== state.revision) return fail('Selections changed in another session. Review the latest list and try again.')
+  if (!/^[1-9]\d*$/.test(String(f.property_id ?? '')) || !Number.isSafeInteger(Number(f.property_id))) return fail('Choose a valid property.')
+  const id = Number(f.property_id), next = [...state.ids], index = next.indexOf(id)
+  if (f.action === 'add') {
+    if (index >= 0) return fail('This property is already selected.')
+    if (next.length >= 6) return fail('Select no more than 6 recommended properties.')
+    next.push(id)
+  } else if (f.action === 'remove' && index >= 0) next.splice(index,1)
+  else if ((f.action === 'up' || f.action === 'down') && index >= 0) {
+    const other = index + (f.action === 'up' ? -1 : 1)
+    if (other < 0 || other >= next.length) return fail('This property cannot move any further.')
+    ;[next[index],next[other]] = [next[other],next[index]]
+  } else return fail('Invalid recommendation action.')
+  if (f.action === 'remove' && next.length) {
+    const live = await all<{id:number}>(c.env, `SELECT id FROM properties WHERE status = 'live' AND id IN (${next.map(() => '?').join(',')})`, ...next)
+    const keep = new Set(live.map(p => p.id)); next.splice(0,next.length,...next.filter(id => keep.has(id)))
+  }
+  if (!await saveRecommended(c.env,next,state.revision)) return fail('The list or property visibility changed. Remove unavailable properties and try again.')
+  await logActivity(c.env,c.get('user')!.id,'recommendations.updated','content','recommended_property_ids',{ids:next,action:f.action})
+  return redirectMsg(c,target,{ok:'Recommended properties saved.'})
 })
 
 // ---------- 45. Website content ----------

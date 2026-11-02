@@ -108,6 +108,7 @@ const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permiss
   { key: 'ask', href: '/admin/ask', label: 'Ask AI', perm: 'ask_ai' },
   { key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' },
   { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
+  { key: 'recommended', href: '/admin/recommended-properties', label: 'Recommended Properties', perm: 'manage_content' },
   { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
   { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
   { key: 'activity', href: '/admin/activity', label: 'Activity log', perm: 'view_activity' },
@@ -178,6 +179,7 @@ const NAV_GROUPS: NavGroup[] = [
   ] },
   { label: 'Website Settings', icon: 'gear', items: [
     { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
+    { key: 'recommended', href: '/admin/recommended-properties', label: 'Recommended Properties', perm: 'manage_content' },
     { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
     { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
     { key: 'staff', href: '/admin/staff', label: 'Staff & roles', perm: 'manage_staff' },
@@ -186,14 +188,14 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'My profile', icon: 'user', items: [{ key: 'profile', href: '/staff/profile', label: 'My profile' }] },
 ]
 
-const AppSide: FC<{ active?: string; perms: Permissions | null; settings: Settings }> = ({ active, perms, settings }) => (
+const AppSide: FC<{ active?: string; perms: Permissions | null; settings: Settings; user: SessionUser }> = ({ active, perms, settings, user }) => (
   <aside class="app-side">
     <a href="/" class="side-logo"><img src="/brand/logo-wide-light.webp" alt={settings.business.name} width="150" height="40" /><span>Travel more, worry less</span></a>
     <input type="checkbox" id="side-toggle" class="nav-toggle" />
     <label for="side-toggle" class="side-burger">☰ Menu</label>
     <nav class="side-nav">
       {NAV_GROUPS.map((g) => {
-        const items = g.items.filter((i) => !i.perm || perms?.[i.perm])
+        const items = g.items.filter((i) => (i.key !== 'recommended' || user.role === 'admin') && (!i.perm || perms?.[i.perm]))
         if (!items.length) return null
         const on = items.some((i) => i.key === active)
         if (items.length === 1) return <a href={items[0].href} class={`side-link ${on ? 'active' : ''}`}>{ico(g.icon)}<span>{g.label}</span></a>
@@ -333,7 +335,7 @@ const Footer: FC<{ settings: Settings }> = ({ settings }) => (
 
 const SideNav: FC<{ area: Area; active?: string; perms: Permissions | null; user: SessionUser }> = ({ area, active, perms, user }) => {
   const staffItems = STAFF_NAV.filter((i) => !i.perm || perms?.[i.perm])
-  const adminItems = ADMIN_NAV.filter((i) => perms?.[i.perm])
+  const adminItems = ADMIN_NAV.filter((i) => perms?.[i.perm] && (i.key !== 'recommended' || user.role === 'admin'))
   return (
     <aside class="sidenav">
       <input type="checkbox" id="side-toggle" class="nav-toggle" />
@@ -400,7 +402,7 @@ export const Layout: FC<LayoutProps> = (p) => {
           {!(dash && area !== 'guest') && <TopBar user={p.user} settings={p.settings} nav={p.nav} />}
           {dash && area !== 'guest' ? (
             <div class="app-shell">
-              <AppSide active={p.active} perms={p.perms} settings={p.settings} />
+              <AppSide active={p.active} perms={p.perms} settings={p.settings} user={p.user!} />
               <div class="app-main">
                 <AppTop user={p.user!} perms={p.perms} bell={p.bell ?? 0} />
                 <main id="main" class="dash-main">
