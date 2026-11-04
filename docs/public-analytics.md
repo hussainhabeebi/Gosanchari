@@ -1,13 +1,13 @@
 # Public GA4 activation checklist
 
-Measurement ID: `G-J5JVRNNVKL`. The implementation is **disabled by default**.
+Measurement ID: `G-GKM3ZDK7XT`. The implementation is **disabled by default**.
 No deployment settings, database content or Google account settings were changed.
 
 Before enabling:
 
 1. Publish owner-approved privacy wording at Admin → Website Settings → Website content → About and policies → Privacy policy (`/admin/content`). The current placeholder is insufficient. The disclosure must accurately describe optional Google Analytics, its purposes/data/cookies, Google processing/transfers and retention as applicable, consent and withdrawal, and the site's actual privacy practices. Obtain appropriate legal review; this document is not replacement legal wording.
 2. In the GA4 web stream, disable **all Enhanced Measurement**, including history page views, form interactions, site search, outbound clicks, downloads and video events. Remove any stream event modifications/custom definitions or connected tags that collect personal information or duplicate page views. Keep Google Signals, advertising personalisation and user-provided data collection disabled. Review retention and data-sharing settings in the Google account. These account settings cannot be verified from this repository.
-3. Only after those checks, set the optional Worker variable `GA4_READINESS=privacy-approved-enhanced-measurement-off` through an approved future rollout. Do not set it merely to install the code. A policy text sanity check is additional protection, not proof of legal adequacy.
+3. Only after those checks, set the optional Worker variable `GA4_READINESS=privacy-approved-enhanced-measurement-off:G-GKM3ZDK7XT` through an approved future rollout. Do not set it merely to install the code. The previous property’s readiness value does not enable this property. A policy text sanity check is additional protection, not proof of legal adequacy.
 4. In a fresh production-browser session, verify no Google requests or analytics cookies before consent, or after rejection. Accept and inspect requests: one `page_view` per full public document, fixed page-category URL/title, empty referrer, no query/hash/search terms/form values. Verify withdrawal removes GA cookies and stops collection. Confirm private/authenticated/customer/preview pages never receive the controller.
 5. Check GA4 Realtime/DebugView with authorised account access. Confirm no duplicate events and exercise enquiry submission without sending any enquiry data. Verify mobile consent controls manually before launch.
 

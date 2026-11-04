@@ -61,7 +61,7 @@ describe('consent-first public GA4', () => {
       const tabs=[a,b];expect(tabs.map(t=>t.scripts.length)).toEqual([1,1])
       tabs[withdrawing].nodes.reject.click();bus.flush()
       for(const tab of tabs) {
-        expect(tab.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+        expect(tab.window['ga-disable-G-GKM3ZDK7XT']).toBe(true)
         expect(tab.commands()).toHaveLength(0);expect(tab.scripts[0].removed).toBe(true)
         expect(tab.reloads()).toBe(0)
       }
@@ -73,7 +73,7 @@ describe('consent-first public GA4', () => {
     const b=browser({state:a.state,bus});bus.flush();expect(b.scripts).toHaveLength(1)
     options.writeBlocked=true
     a.nodes.reject.click();bus.flush()
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.commands()).toHaveLength(0)
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true);expect(b.commands()).toHaveLength(0)
     expect(JSON.parse(a.state.raw).value).toBe('rejected')
     expect(browser({state:a.state}).scripts).toHaveLength(0)
   })
@@ -81,7 +81,7 @@ describe('consent-first public GA4', () => {
     const bus=consentBus(), a=browser({stored:{value:'accepted',at:Date.now()-1000},bus}), b=browser({state:a.state,bus});bus.flush()
     a.state.failWrite=true;a.state.failCookie=true;a.nodes.reject.click();bus.flush()
     for(const tab of [a,b]) {
-      expect(tab.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(tab.commands()).toHaveLength(0)
+      expect(tab.window['ga-disable-G-GKM3ZDK7XT']).toBe(true);expect(tab.commands()).toHaveLength(0)
       expect(tab.nodes.panel.children[0].textContent).toContain('could not be saved')
     }
     expect(browser({state:a.state}).scripts).toHaveLength(0)
@@ -99,28 +99,28 @@ describe('consent-first public GA4', () => {
     b.storageEvent({value:'rejected',at,check:'ok'},'unrelated')
     b.storageEvent({value:'rejected',at,check:'ok'},undefined,{})
     for(const message of [null,'withdraw',{version:2,type:'withdraw',at},{version:1,type:'withdraw',at:at-1},{version:1,type:'withdraw',at:Date.now()+86400000},{version:1,type:'withdraw',at,extra:true},{version:1,type:'accepted',at}]) b.broadcast(message)
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(false)
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(false)
     expect(b.commands().filter((c:any[])=>c[0]==='event')).toHaveLength(1)
     b.broadcast({version:1,type:'withdraw',at:Date.now()})
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true)
   })
   it('fails closed on consent removal and storage clear events', () => {
     for(const key of ['gs-analytics-consent-v1',null]) {
       const b=browser({stored:{value:'accepted',at:Date.now()-1000}})
       b.listeners.storage({key,newValue:null,storageArea:b.context.localStorage})
-      expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.commands()).toHaveLength(0)
+      expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true);expect(b.commands()).toHaveLength(0)
     }
   })
   it('falls back to storage events when BroadcastChannel construction fails', () => {
     const bus=consentBus(), a=browser({stored:{value:'accepted',at:Date.now()-1000},bus,channelFails:true})
     const b=browser({state:a.state,bus,channelFails:true});bus.flush();a.nodes.reject.click();bus.flush()
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true)
   })
   it('does not re-enable a withdrawn tab on peer acceptance, duplicate messages or controller execution', () => {
     const bus=consentBus(), a=browser({stored:{value:'accepted',at:Date.now()-1000},bus}), b=browser({state:a.state,bus});bus.flush()
     a.nodes.reject.click();bus.flush();a.nodes.accept.click();bus.flush();runInNewContext(source,b.context)
     b.broadcast({version:1,type:'withdraw',at:Date.now()});bus.flush()
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.commands()).toHaveLength(0)
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true);expect(b.commands()).toHaveLength(0)
     expect(b.scripts).toHaveLength(1);expect(b.reloads()).toBe(0)
   })
   it('never installs cross-tab listeners or channels on excluded/private pages', () => {
@@ -131,7 +131,7 @@ describe('consent-first public GA4', () => {
   })
   it('is disabled unless privacy and account readiness are explicitly approved and the policy is not a placeholder', () => {
     expect(analyticsPage(ready)).toBe('/')
-    for (const change of [{readiness:undefined},{readiness:'true'},{policy:''},{policy:'This policy is being updated. Google Analytics consent'},{policy:'A privacy policy without analytics disclosure'},{origin:'http://localhost'}]) expect(analyticsPage({...ready,...change})).toBeUndefined()
+    for (const change of [{readiness:undefined},{readiness:'true'},{readiness:'privacy-approved-enhanced-measurement-off'},{readiness:'privacy-approved-enhanced-measurement-off:G-J5JVRNNVKL'},{policy:''},{policy:'This policy is being updated. Google Analytics consent'},{policy:'A privacy policy without analytics disclosure'},{origin:'http://localhost'}]) expect(analyticsPage({...ready,...change})).toBeUndefined()
   })
   it('excludes private, sensitive, unknown, authenticated, preview and error pages even with readiness approval', () => {
     for (const path of ['/staff','/admin','/my','/q/customer-token','/booking/token','/invoice/token','/login','/help','/enquiry','/enquiry/thanks/code','/unrecognised','/stay/person@example.com']) expect(analyticsPage({...ready,path})).toBeUndefined()
@@ -151,8 +151,8 @@ describe('consent-first public GA4', () => {
   it('loads the official tag once and sends exactly one sanitised page view after acceptance', () => {
     const b=browser({path:'/search'});b.nodes.accept.click();b.nodes.accept.click();runInNewContext(source,b.context)
     expect(b.scripts).toHaveLength(1)
-    expect(b.scripts[0]).toMatchObject({src:'https://www.googletagmanager.com/gtag/js?id=G-J5JVRNNVKL',async:true,referrerPolicy:'no-referrer'})
-    const commands=b.commands();const config=commands.filter((v:any[])=>v[0]==='config');expect(config).toHaveLength(1)
+    expect(b.scripts[0]).toMatchObject({src:'https://www.googletagmanager.com/gtag/js?id=G-GKM3ZDK7XT',async:true,referrerPolicy:'no-referrer'})
+    const commands=b.commands();const config=commands.filter((v:any[])=>v[0]==='config');expect(config).toHaveLength(1);expect(config[0][1]).toBe('G-GKM3ZDK7XT')
     expect(config[0][2]).toMatchObject({send_page_view:false,allow_google_signals:false,allow_ad_personalization_signals:false,page_referrer:'',page_location:'https://gosanchari.com/search'})
     const events=commands.filter((v:any[])=>v[0]==='event');expect(events).toHaveLength(1);expect(events[0][1]).toBe('page_view')
     expect(JSON.stringify(commands)).not.toMatch(/private@example|email=|phone|customer|enquiry/)
@@ -161,7 +161,7 @@ describe('consent-first public GA4', () => {
   it('restores consent, permits withdrawal, disables further collection and leaves unrelated cookies alone', () => {
     const b=browser({stored:{value:'accepted',at:Date.now()}});expect(b.scripts).toHaveLength(1)
     b.nodes.settings.click();expect(b.nodes.panel.hidden).toBe(false);b.nodes.reject.click()
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.reloads()).toBe(0);expect(JSON.parse(b.state.raw).value).toBe('rejected')
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true);expect(b.reloads()).toBe(0);expect(JSON.parse(b.state.raw).value).toBe('rejected')
     expect(b.state.cookies.has('_ga')).toBe(false);expect(b.state.cookies.get('unrelated')).toBe('keep');expect(b.scripts[0].removed).toBe(true);expect(b.commands()).toHaveLength(0)
   })
   it('stops immediately when withdrawal cannot overwrite old acceptance, never reloads, and remains off on a subsequent visit', () => {
@@ -169,7 +169,7 @@ describe('consent-first public GA4', () => {
     expect(b.scripts).toHaveLength(1)
     b.state.failWrite=true
     b.nodes.reject.click()
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true)
     expect(b.reloads()).toBe(0);expect(b.commands()).toHaveLength(0);expect(b.scripts[0].removed).toBe(true)
     expect(JSON.parse(b.state.raw)).toMatchObject(accepted)
     expect(b.nodes.panel.children[0].textContent).toContain('Analytics is off')
@@ -181,7 +181,7 @@ describe('consent-first public GA4', () => {
   it('fails closed with read-only acceptance when all consent writes fail, including on manual reload', () => {
     const b=browser({stored:{value:'accepted',at:Date.now()}})
     b.state.failWrite=true;b.state.failCookie=true;b.nodes.reject.click()
-    expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true);expect(b.reloads()).toBe(0)
+    expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true);expect(b.reloads()).toBe(0)
     expect(browser({state:b.state}).scripts).toHaveLength(0)
   })
   it('persists withdrawal in localStorage if consent-cookie writes fail and does not reactivate after reload', () => {
@@ -200,7 +200,7 @@ describe('consent-first public GA4', () => {
   it('does not start tracking after acceptance if storage throws, silently fails, or cookies are blocked', () => {
     for(const mode of ['failWrite','silentWrite','failCookie','failRead']) {
       const b=browser();b.state[mode]=true;b.nodes.accept.click()
-      expect(b.scripts).toHaveLength(0);expect(b.window['ga-disable-G-J5JVRNNVKL']).toBe(true)
+      expect(b.scripts).toHaveLength(0);expect(b.window['ga-disable-G-GKM3ZDK7XT']).toBe(true)
       expect(b.nodes.panel.hidden).toBe(false);expect(browser({state:b.state}).scripts).toHaveLength(0)
     }
   })
