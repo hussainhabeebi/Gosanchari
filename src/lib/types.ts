@@ -109,6 +109,12 @@ export interface PhotoRow {
   room_id: number | null
   media_type: 'image' | 'video'
   video_url: string | null
+  /** AI (Gemini) suggestions — see migration 0021. */
+  ai_category?: string | null
+  ai_caption?: string | null
+  ai_score?: number | null
+  auto_sort?: number
+  source_url?: string | null
 }
 
 export interface NearbyPlace {

@@ -65,7 +65,7 @@ export interface Settings {
     assistant_tone: string
     handoff_topics: string[]
     daily_limit: number
-    models: { small: string; large: string; embed: string; whisper: string; translate: string; vision: string; fallback: string; gemini: string }
+    models: { small: string; large: string; embed: string; whisper: string; translate: string; vision: string; fallback: string; gemini: string; gemini_pro: string }
     /** 'auto' = Gemini for text when an API key is saved, else Workers AI; 'workers' = always Workers AI. */
     provider: 'auto' | 'workers'
   }
@@ -124,6 +124,8 @@ export const DEFAULT_SETTINGS: Settings = {
       vision: '@cf/llava-hf/llava-1.5-7b-hf',
       fallback: '@cf/meta/llama-3.1-8b-instruct-fast',
       gemini: 'gemini-2.5-flash',
+      /** "Read carefully" in property quick fill: slower, better on messy scanned brochures. */
+      gemini_pro: 'gemini-2.5-pro',
     },
     provider: 'auto',
   },
