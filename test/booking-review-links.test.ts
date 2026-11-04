@@ -6,6 +6,7 @@ import { Hono } from 'hono'
 import type { AppEnv } from '../src/env'
 import { csrf } from 'hono/csrf'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { reviewBotRoutes } from '../src/routes/review-bot'
 import { bookingReviewRoutes } from '../src/routes/booking-reviews'
 import { admin2Routes } from '../src/routes/admin2'
 import { publicRoutes } from '../src/routes/public'
@@ -27,7 +28,7 @@ function fixture() {
   let code = ''
   const send = vi.fn(async (_url: unknown, options?: RequestInit) => {
     const payload=JSON.parse(String(options?.body));expect(payload.to).toBe('919876543210')
-    code=payload.template.components[0].parameters[0].text
+    if (payload.template.name === 'otp') code=payload.template.components[0].parameters[0].text
     return Response.json({messages:[{id:'local-test'}]})
   })
   vi.stubGlobal('fetch',send)
@@ -39,7 +40,7 @@ function fixture() {
       async delete(keys:string[]){keys.forEach(k=>media.delete(k))}},
     DB:{prepare(sql:string){let args:any[]=[]; const stmt={bind(...v:any[]){args=v;return stmt},async first(){return db.prepare(sql).get(...args)??null},async all(){return {results:db.prepare(sql).all(...args)}},async run(){return {meta:{last_row_id:Number(db.prepare(sql).run(...args).lastInsertRowid)}}}};return stmt}}
   }
-  const app = new Hono<AppEnv>().use('*',csrf()).use('*',async(c,next)=>{c.set('user',user);await next()}).route('/',bookingReviewRoutes).route('/',admin2Routes).route('/',publicRoutes)
+  const app = new Hono<AppEnv>().use('*',csrf()).use('*',async(c,next)=>{c.set('user',user);await next()}).route('/',bookingReviewRoutes).route('/',reviewBotRoutes).route('/',admin2Routes).route('/',publicRoutes)
   const request = (path:string, init?:RequestInit)=>app.request('http://localhost'+path,{...init,headers:{Origin:'http://localhost',...init?.headers}},env)
   const manage = (action='issue')=>request(`/staff/bookings/${id}/review-link`,{method:'POST',body:new URLSearchParams({action})})
   const issue=async()=>{const res=await manage();expect(res.status).toBe(200);const html=await res.text();expect(html).toContain('Copy Review Link');expect(html).toContain('Share via WhatsApp');return html.match(/\/review-stay#[\w-]{43}/)![0]}
@@ -167,5 +168,85 @@ describe('booking-linked review invitations',()=>{
       expect((await f.manage()).status).toBe(409)
       expect(f.rows()).toEqual([expect.objectContaining({body:'Existing review',status:'approved'})])
     }finally{f.db.close()}
+  })
+})
+
+const botKey = 't'.repeat(43)
+async function configureBot(f: ReturnType<typeof fixture>) {
+  f.env.REVIEW_BOT_KEY_SHA256 = await sha256Hex(botKey)
+  f.env.REVIEW_BOT_SEND_ENABLED = 'true'
+  f.env.REVIEW_BOT_WHATSAPP_TEMPLATE = 'stay_review'
+}
+function dispatch(f: ReturnType<typeof fixture>, fields = {}, key = botKey) {
+  return f.request('/integrations/review-bot/dispatch', {
+    method: 'POST', headers: { Authorization: 'Bearer '+key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ booking_code: 'PRIVATE-CODE', whatsapp_number: f.phone, ...fields }),
+  })
+}
+describe('WhatsApp bot review dispatch', () => {
+  it('requires a dedicated key and explicit configuration and checks checkout and recipient', async () => {
+    const f = fixture()
+    try {
+      expect((await dispatch(f)).status).toBe(401)
+      await configureBot(f)
+      expect((await dispatch(f, {}, 'x'.repeat(43))).status).toBe(401)
+      delete f.env.REVIEW_BOT_SEND_ENABLED
+      expect((await dispatch(f)).status).toBe(503)
+      await configureBot(f)
+      expect((await dispatch(f, {whatsapp_number: '+919999999999'})).status).toBe(404)
+      f.db.prepare('UPDATE bookings SET check_out=? WHERE id=?').run(todayIST(), f.id)
+      expect((await dispatch(f)).status).toBe(404)
+      expect(f.send).not.toHaveBeenCalled()
+      expect(f.db.prepare('SELECT * FROM booking_review_deliveries').all()).toEqual([])
+    } finally { f.db.close() }
+  })
+  it('sends once to the booking number and completes guest verification, moderation and publication', async () => {
+    const f = fixture()
+    try {
+      await configureBot(f)
+      const responses = await Promise.all([dispatch(f), dispatch(f)])
+      expect((await Promise.all(responses.map(r => r.json())))).toContainEqual({status:'sent'})
+      expect(f.send).toHaveBeenCalledTimes(1)
+      const payload = JSON.parse(String(f.send.mock.calls[0][1]?.body))
+      expect(payload).toMatchObject({to:'919876543210',type:'template',template:{name:'stay_review'}})
+      const link = payload.template.components[0].parameters[0].text
+      expect(link).toMatch(/^http:\/\/localhost\/review-stay#[\w-]{43}$/)
+      expect(await (await dispatch(f)).json()).toEqual({status:'sent',duplicate:true})
+      const ledger = f.db.prepare('SELECT * FROM booking_review_deliveries').get()
+      expect(ledger).toMatchObject({booking_id:f.id,status:'sent',provider_message_id:'local-test'})
+      expect(JSON.stringify(ledger)).not.toContain(link.split('#')[1])
+      f.as(null)
+      expect((await f.open(link)).status).toBe(303)
+      expect((await f.sendCode(link)).status).toBe(303)
+      expect((await f.submit(link)).status).toBe(303)
+      expect(f.rows()[0]).toMatchObject({booking_id:f.id,property_id:f.property,status:'pending'})
+      f.as({id:f.admin,role:'admin',name:'Admin'})
+      expect((await f.request('/admin/reviews/'+f.rows()[0].id,{method:'POST',body:new URLSearchParams({action:'approve'})})).status).toBe(303)
+      f.as(null)
+      expect(await(await f.request('/stay/review-lodge')).text()).toContain('A quiet and comfortable stay.')
+    } finally { f.db.close() }
+  })
+  it('never replaces a manual or revoked invitation', async () => {
+    const f = fixture()
+    try {
+      await configureBot(f)
+      const manual = await f.issue()
+      expect(await (await dispatch(f)).json()).toMatchObject({status:'not_issued'})
+      expect((await f.manage('revoke')).status).toBe(303)
+      expect(await (await dispatch(f)).json()).toMatchObject({status:'not_issued'})
+      f.as(null)
+      expect((await f.open(manual)).status).toBe(404)
+      expect(f.send).not.toHaveBeenCalled()
+    } finally { f.db.close() }
+  })
+  it('logs provider failure and does not send again even if the workflow retries', async () => {
+    const f = fixture()
+    try {
+      await configureBot(f)
+      f.send.mockResolvedValueOnce(Response.json({error:{message:'provider error'}},{status:503}))
+      expect((await dispatch(f)).status).toBe(502)
+      expect(await (await dispatch(f)).json()).toEqual({status:'failed',duplicate:true})
+      expect(f.send).toHaveBeenCalledTimes(1)
+    } finally { f.db.close() }
   })
 })

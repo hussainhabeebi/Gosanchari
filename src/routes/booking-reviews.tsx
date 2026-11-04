@@ -3,11 +3,11 @@ import { getCookie, setCookie } from 'hono/cookie'
 import { bodyLimit } from 'hono/body-limit'
 import type { AppEnv } from '../env'
 import { permissionsFor, rateLimit, requirePerm, requireStaff } from '../lib/auth'
-import { reviewEligibleSql, reviewOtpHash, reviewPhotoKey, reviewStay } from '../lib/booking-reviews'
+import { guestVerificationPhone, reviewInviteExpiry, reviewInviteUrl, reviewEligibleSql, reviewOtpHash, reviewPhotoKey, reviewStay } from '../lib/booking-reviews'
 import { enqueue, first, logActivity, run } from '../lib/db'
 import { sendWhatsApp, whatsappConfigured } from '../lib/integrations'
 import { propertyImageType } from '../lib/property-images'
-import { int, normalizePhone, nowIso, randomToken, sha256Hex, todayIST } from '../lib/util'
+import { int, nowIso, randomToken, sha256Hex, todayIST } from '../lib/util'
 import { Field } from '../views/components'
 import { page } from '../views/layout'
 
@@ -33,8 +33,10 @@ bookingReviewRoutes.post(staffPath, requireStaff, requirePerm('manage_bookings')
   const owner = '(b.staff_id = ? OR ? = 1)'
   const scope = [id, user.id, Number(accessAll)] as const
   if (action === 'revoke') {
-    const removed = await first<{ booking_id: number }>(c.env, `DELETE FROM booking_review_links WHERE booking_id IN
-      (SELECT b.id FROM bookings b WHERE b.id=? AND ${owner}) RETURNING booking_id`, ...scope)
+    // Keep the expired row so automated dispatch cannot recreate a revoked invitation.
+    const removed = await first<{ booking_id: number }>(c.env, `UPDATE booking_review_links
+      SET expires_at=?,otp_hash=NULL,otp_expires_at=NULL WHERE expires_at>? AND booking_id IN
+      (SELECT b.id FROM bookings b WHERE b.id=? AND ${owner}) RETURNING booking_id`, nowIso(), nowIso(), ...scope)
     if (!removed) return c.notFound()
     await logActivity(c.env, user.id, 'review_link.revoked', 'booking', id)
     return c.redirect(bookingPath(id), 303)
@@ -44,17 +46,17 @@ bookingReviewRoutes.post(staffPath, requireStaff, requirePerm('manage_bookings')
   const booking = await first<{ guest_phone: string }>(c.env, `SELECT b.guest_phone FROM bookings b JOIN properties p ON p.id=b.property_id
     WHERE b.id=? AND ${owner} AND ${reviewEligibleSql}`, ...scope, todayIST())
   if (!booking) return c.text('This booking is not eligible for a review link.', 409)
-  if (!(await guestVerificationPhone(c, booking.guest_phone))) return c.text('A valid guest WhatsApp number is required for review verification.', 422)
+  if (!(await guestVerificationPhone(c.env, booking.guest_phone))) return c.text('A valid guest WhatsApp number is required for review verification.', 422)
   const token = randomToken(32)
   const issued = await first<{ booking_id: number }>(c.env, `INSERT INTO booking_review_links (booking_id,property_id,token_hash,expires_at)
     SELECT b.id,b.property_id,?,? FROM bookings b JOIN properties p ON p.id=b.property_id
     WHERE b.id=? AND ${owner} AND ${reviewEligibleSql} AND b.guest_phone=?
     ON CONFLICT(booking_id) DO UPDATE SET property_id=excluded.property_id, token_hash=excluded.token_hash, expires_at=excluded.expires_at,
       otp_hash=NULL, otp_expires_at=NULL, otp_sent_at=NULL, otp_attempts=0 RETURNING booking_id`,
-    await sha256Hex(token), new Date(Date.now() + 30 * 86400000).toISOString(), ...scope, todayIST(), booking.guest_phone)
+    await sha256Hex(token), reviewInviteExpiry(), ...scope, todayIST(), booking.guest_phone)
   if (!issued) return c.text('This booking is not eligible for a review link.', 409)
   await logActivity(c.env, user.id, 'review_link.issued', 'booking', id)
-  const url = new URL('/review-stay#' + token, c.env.SITE_URL).href
+  const url = reviewInviteUrl(c.env, token)
   return page(c, { title: 'Send review link', area: 'staff', active: 'bookings', noindex: true }, (
     <section class="card stack narrow">
       <h1>Send review link</h1>
@@ -107,15 +109,6 @@ function reviewForm(c: Context<AppEnv>, name: string, hash: string, step: 'code'
   ))
 }
 
-async function guestVerificationPhone(c: Context<AppEnv>, rawPhone: string) {
-  const phone = normalizePhone(rawPhone)
-  if (!phone || !/^\+[1-9][0-9]{9,14}$/.test(phone)) return null
-  const digits = phone.slice(1)
-  const local = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits
-  if (await first(c.env, "SELECT 1 FROM users WHERE role != 'guest' AND phone IN (?,?,?,?,?)", phone, digits, '00'+digits, local, '0'+local)) return null
-  return phone
-}
-
 async function lookup(c: Context<AppEnv>) {
   const token = getCookie(c, 'gs_review_invite') ?? ''
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null
@@ -157,7 +150,7 @@ bookingReviewRoutes.post(guestPath + '/code', bodyLimit({ maxSize: 1024 }), asyn
   if (!found) return unavailable(c)
   const { hash, stay } = found
   if ((await c.req.parseBody().catch(() => ({} as Record<string, string>))).invite !== hash) return unavailable(c)
-  const phone = await guestVerificationPhone(c, stay.guest_phone)
+  const phone = await guestVerificationPhone(c.env, stay.guest_phone)
   if (!phone) return c.text('This booking cannot be verified. Please contact Go Sanchari.', 422)
   if (!(await rateLimit(c.env, `review-code-booking:${stay.booking_id}`, 4, 3600))) return c.text('Too many requests. Try later.', 429)
   // Rejection sampling avoids modulo bias in the six-digit code.
@@ -190,7 +183,7 @@ bookingReviewRoutes.post(guestPath, bodyLimit({ maxSize: 17 * 1024 * 1024 }), as
   const { code, rating } = fields
   const feedback = typeof fields.body === 'string' ? fields.body.trim() : ''
   if (typeof rating !== 'string' || !/^[1-5]$/.test(rating) || !feedback || feedback.length > 2000 || typeof code !== 'string' || !/^\d{6}$/.test(code)) return c.text('Enter a rating, review and six-digit verification code.', 400)
-  const phone = await guestVerificationPhone(c, stay.guest_phone)
+  const phone = await guestVerificationPhone(c.env, stay.guest_phone)
   if (!phone) return unavailable(c)
   const codeHash = await reviewOtpHash(secret, hash, phone, code)
   const attempt = await first<{ valid: number }>(c.env, `UPDATE booking_review_links SET otp_attempts=otp_attempts+1

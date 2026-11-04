@@ -39,6 +39,9 @@ export interface Env {
   TURNSTILE_SITE_KEY: string
 
   SESSION_SECRET?: string
+  REVIEW_BOT_KEY_SHA256?: string
+  REVIEW_BOT_SEND_ENABLED?: string
+  REVIEW_BOT_WHATSAPP_TEMPLATE?: string
   TURNSTILE_SECRET?: string
   WHATSAPP_TOKEN?: string
   WHATSAPP_PHONE_NUMBER_ID?: string

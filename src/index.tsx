@@ -15,6 +15,7 @@ import { authRoutes } from './routes/auth'
 import { guestRoutes } from './routes/guest'
 import { staffRoutes } from './routes/staff'
 import { calculatorRoutes } from './routes/rate-calculator'
+import { reviewBotRoutes } from './routes/review-bot'
 import { bookingReviewRoutes } from './routes/booking-reviews'
 import { opsRoutes } from './routes/staff-ops'
 import { staffRoomRoutes } from './routes/staff-rooms'
@@ -102,6 +103,7 @@ app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
 app.route('/', bookingReviewRoutes)
+app.route('/', reviewBotRoutes)
 app.route('/', quotationArchiveRoutes)
 app.route('/', calculatorRoutes)
 app.route('/', staffRoomRoutes)
