@@ -1,6 +1,6 @@
 import type { Env } from '../env'
 import { first } from './db'
-import { isDate, nowIso, todayIST } from './util'
+import { isDate, normalizePhone, nowIso, todayIST } from './util'
 
 export const reviewEligibleSql = "b.status = 'completed' AND b.check_out < ? AND p.status = 'live' AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.booking_id = b.id)"
 export const reviewPhotoKey = /^private\/booking-review-photos\/[a-f0-9-]{36}\.(jpg|png|webp|avif)$/
@@ -27,3 +27,15 @@ export function reviewStay(env: Env, hash: string) {
     JOIN properties p ON p.id=b.property_id
     WHERE l.token_hash=? AND l.expires_at>? AND ${reviewEligibleSql}`, hash, nowIso(), todayIST())
 }
+
+export async function guestVerificationPhone(env: Env, rawPhone: string) {
+  const phone = normalizePhone(rawPhone)
+  if (!phone || !/^\+[1-9][0-9]{9,14}$/.test(phone)) return null
+  const digits = phone.slice(1)
+  const local = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits
+  if (await first(env, "SELECT 1 FROM users WHERE role != 'guest' AND phone IN (?,?,?,?,?)", phone, digits, '00'+digits, local, '0'+local)) return null
+  return phone
+}
+
+export const reviewInviteExpiry = () => new Date(Date.now() + 30 * 86400000).toISOString()
+export const reviewInviteUrl = (env: Env, token: string) => new URL('/review-stay#' + token, env.SITE_URL).href
