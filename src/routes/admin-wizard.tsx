@@ -583,9 +583,9 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
             <button type="button" class="linklike add-new" data-add-managed-peak>{I.plus} Add New Peak Time</button>
           </div>
           <div class="peak-rows" data-managed-peaks="common"><div data-peak-entries>{(common.length ? common : [null]).map(x => <PeakEntry row={x} rooms={rooms} overrides={rows.filter(y => overridePeakKey(y))} />)}</div></div>
-          {/* Saved room-specific records remain untouched and visible for their original room. */}
+          {/* Only legacy room-specific charges belong here; managed overrides are edited above. */}
           {rooms.map(r => <div data-legacy-peak-room={r.id} hidden={r.id !== rooms[0].id}>
-            {rows.filter(x => x.room_id === r.id && x.supplement != null && !commonPeakKey(x)).map(x => <div class="wiz-4 peak-row">
+            {rows.filter(x => x.room_id === r.id && x.supplement != null && !commonPeakKey(x) && !overridePeakKey(x)).map(x => <div class="wiz-4 peak-row">
               <label class="wf"><span class="wl">From Date</span><input type="date" value={x.start_date} readonly /></label>
               <label class="wf"><span class="wl">To Date</span><input type="date" value={x.end_date} readonly /></label>
               <label class="wf"><span class="wl">Additional Charge (₹)</span><input type="number" value={x.supplement ?? ''} readonly /></label>
