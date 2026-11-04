@@ -9,7 +9,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bookingReviewRoutes } from '../src/routes/booking-reviews'
 import { admin2Routes } from '../src/routes/admin2'
 import { publicRoutes } from '../src/routes/public'
-import { reviewOtpHash } from '../src/lib/booking-reviews'
 import { sha256Hex, todayIST } from '../src/lib/util'
 
 function fixture() {
@@ -24,14 +23,9 @@ function fixture() {
     VALUES('PRIVATE-CODE',?,?,?,?,1,98765,98765,'completed','staff','Private Guest',?,?)`).run(property,room,todayIST(-2),todayIST(-1),phone,admin).lastInsertRowid)
   const kv = new Map<string,string>(), jobs: unknown[] = [], media = new Map<string,{body:Uint8Array,type:string}>()
   let user: any = { id: admin, role: 'admin', name:'Admin' }
-  let code = ''
-  const send = vi.fn(async (_url: unknown, options?: RequestInit) => {
-    const payload=JSON.parse(String(options?.body));expect(payload.to).toBe('919876543210')
-    code=payload.template.components[0].parameters[0].text
-    return Response.json({messages:[{id:'local-test'}]})
-  })
+  const send = vi.fn(async () => { throw new Error('Unexpected external request') })
   vi.stubGlobal('fetch',send)
-  const env:any = { SITE_URL:'http://localhost', ENVIRONMENT:'development', SESSION_SECRET:'test-secret', WHATSAPP_TOKEN:'test-token', WHATSAPP_PHONE_NUMBER_ID:'test-id',
+  const env:any = { SITE_URL:'http://localhost', ENVIRONMENT:'development',
     KV:{async get(k:string,type?:string){const v=kv.get(k);return v==null?null:type==='json'?JSON.parse(v):v},async put(k:string,v:string){kv.set(k,v)},async delete(k:string){kv.delete(k)}},
     JOBS:{async send(j:unknown){jobs.push(j)}},
     MEDIA:{async put(k:string,b:ReadableStream,options:any){media.set(k,{body:new Uint8Array(await new Response(b).arrayBuffer()),type:options.httpMetadata.contentType})},
@@ -47,21 +41,19 @@ function fixture() {
   const open=(link:string)=>request('/review-stay/open',{method:'POST',body:new URLSearchParams({token:link.split('#')[1]})})
   const cookie=(link:string)=>({Cookie:'gs_review_invite='+link.split('#')[1]})
   const get=(link:string)=>request('/review-stay',{headers:cookie(link)})
-  const sendCode=async(path:string)=>request('/review-stay/code',{method:'POST',headers:cookie(path),body:new URLSearchParams({invite:await sha256Hex(path.split('#')[1])})})
-  const submit=async(path:string, overrides: Record<string,string>={})=>request('/review-stay',{method:'POST',headers:cookie(path),body:new URLSearchParams({invite:await sha256Hex(path.split('#')[1]),code,rating:'5',body:'A quiet and comfortable stay.',...overrides})})
-  return {db,env,media,admin,phone,id,property,jobs,request,manage,issue,rows,open,get,sendCode,submit,as:(u:any)=>{user=u},send,get code(){return code}}
+  const submit=async(path:string, overrides: Record<string,string>={})=>request('/review-stay',{method:'POST',headers:cookie(path),body:new URLSearchParams({invite:await sha256Hex(path.split('#')[1]),guest_name:'Review Guest',rating:'5',body:'A quiet and comfortable stay.',...overrides})})
+  return {db,env,media,admin,phone,id,property,jobs,request,manage,issue,rows,open,get,submit,as:(u:any)=>{user=u},send}
 }
 
 afterEach(()=>vi.unstubAllGlobals())
 
 describe('booking-linked review invitations',()=>{
-  it('issues an opaque link, keeps booking information private and accepts one verified anonymous review',async()=>{
+  it('issues an opaque link, keeps booking information private and accepts one review without login or OTP',async()=>{
     const f=fixture();try {
       const path=await f.issue(), token=path.split('#')[1]
       expect(f.db.prepare('SELECT token_hash FROM booking_review_links').get().token_hash).toBe(await sha256Hex(token))
       expect(f.send).not.toHaveBeenCalled()
       expect((await f.get(path)).status).toBe(403)
-      expect((await f.sendCode(path)).status).toBe(403)
       expect((await f.submit(path)).status).toBe(403)
       f.as(null)
       const exchange=await f.open(path);expect(exchange.status).toBe(303);expect(exchange.headers.get('Set-Cookie')).toMatch(/HttpOnly; SameSite=Strict/);expect(exchange.headers.get('Location')).toBe('/review-stay')
@@ -70,16 +62,16 @@ describe('booking-linked review invitations',()=>{
       expect(page.headers.get('Referrer-Policy')).toBe('no-referrer')
       expect(html).toContain('Review Lodge')
       expect(html).not.toMatch(/Private Guest|PRIVATE-CODE|98765|919876543210/)
-      expect((await f.sendCode(path)).status).toBe(303)
-      expect((await f.sendCode(path)).status).toBe(429)
       const form=await(await f.get(path)).text()
       expect(form).toContain('multipart/form-data')
-      expect(form).toContain('one-time-code')
+      expect(form).not.toContain('one-time-code')
+      expect(form).toContain('name="guest_name"')
       expect((await f.submit(path,{invite:'stale-tab'})).status).toBe(404)
       const responses=await Promise.all([f.submit(path,{property_id:'999',booking_id:'999'}),f.submit(path)])
       expect(responses.map(r=>r.status).sort()).toEqual([303,404])
-      expect(f.rows()).toEqual([expect.objectContaining({booking_id:f.id,property_id:f.property,user_id:null,guest_name:'Verified guest',status:'pending',rating:5})])
+      expect(f.rows()).toEqual([expect.objectContaining({booking_id:f.id,property_id:f.property,user_id:null,guest_name:'Review Guest',status:'pending',rating:5})])
       expect(f.jobs).toHaveLength(2)
+      expect(f.send).not.toHaveBeenCalled()
       expect((await f.request('/review-stay/thanks')).status).toBe(200)
       expect(await(await f.request('/stay/review-lodge')).text()).not.toContain('A quiet and comfortable stay.')
       f.as({id:f.admin,role:'admin',name:'Admin'})
@@ -103,16 +95,15 @@ describe('booking-linked review invitations',()=>{
       expect(f.db.prepare('SELECT count(*) AS n FROM booking_review_links').get().n).toBe(0)
     }finally{f.db.close()}
   })
-  it('allows the assigned staff member to issue but blocks verification to a staff phone',async()=>{
+  it('allows assigned staff to issue without requiring a guest phone',async()=>{
     const f=fixture();try{
       const staffId=Number(f.db.prepare("INSERT INTO users(name,role,phone) VALUES('Assigned staff','sales','+919800000001')").run().lastInsertRowid)
       f.db.prepare('UPDATE bookings SET staff_id=? WHERE id=?').run(staffId,f.id)
       f.as({id:staffId,role:'sales',name:'Assigned staff'})
+      f.db.prepare("UPDATE bookings SET guest_phone='' WHERE id=?").run(f.id)
       const path=await f.issue()
-      f.db.prepare("UPDATE bookings SET guest_phone='9800000001' WHERE id=?").run(f.id)
-      expect((await f.manage()).status).toBe(422)
       f.as(null)
-      expect((await f.sendCode(path)).status).toBe(422)
+      expect((await f.open(path)).status).toBe(303)
       expect(f.send).not.toHaveBeenCalled()
     }finally{f.db.close()}
   })
@@ -130,24 +121,21 @@ describe('booking-linked review invitations',()=>{
       f.as(null);expect((await f.open(fresh)).status).toBe(404)
     }finally{f.db.close()}
   })
-  it('requires a live OTP and limits guesses even with a valid invite',async()=>{
+  it('rejects spam traps, invalid inputs and cross-origin submissions',async()=>{
     const f=fixture();try{
       const path=await f.issue();f.as(null)
-      expect((await f.submit(path,{code:'111111'})).status).toBe(403)
-      const hash=await sha256Hex(path.split('#')[1])
-      const otp=await reviewOtpHash(f.env.SESSION_SECRET,hash,f.phone,'777777')
-      f.db.prepare('UPDATE booking_review_links SET otp_hash=?,otp_expires_at=?').run(otp,'2000-01-01')
-      expect((await f.submit(path,{code:'777777'})).status).toBe(403)
-      f.db.prepare('UPDATE booking_review_links SET otp_expires_at=?').run(new Date(Date.now()+600000).toISOString())
-      for(let i=0;i<5;i++)expect((await f.submit(path,{code:'111111'})).status).toBe(403)
-      expect((await f.submit(path,{code:'777777'})).status).toBe(403)
-      expect(f.rows()).toHaveLength(0)
+      for (const invalid of [{website:'spam'}, {guest_name:' '}, {guest_name:'a'.repeat(81)}, {rating:'6'}, {body:''}] as Record<string,string>[]) {
+        expect((await f.submit(path,invalid)).status).toBe(400)
+      }
+      const crossOrigin=await f.request('/review-stay',{method:'POST',headers:{Origin:'https://other.example'},body:new URLSearchParams()})
+      expect(crossOrigin.status).toBe(403)
+      expect(f.rows()).toEqual([])
     }finally{f.db.close()}
   })
   it('rejects disguised uploads and restricts submitted photos to moderators until approval',async()=>{
     const f=fixture();try{
-      const path=await f.issue();f.as(null);await f.sendCode(path)
-      const sendPhoto=async(file:File)=>{const body=new FormData();body.set('invite',await sha256Hex(path.split('#')[1]));body.set('code',f.code);body.set('rating','4');body.set('body','Our photos');body.set('photos',file);return f.request('/review-stay',{method:'POST',headers:{Cookie:'gs_review_invite='+path.split('#')[1]},body})}
+      const path=await f.issue();f.as(null)
+      const sendPhoto=async(file:File)=>{const body=new FormData();body.set('invite',await sha256Hex(path.split('#')[1]));body.set('guest_name','Photo Guest');body.set('rating','4');body.set('body','Our photos');body.set('photos',file);return f.request('/review-stay',{method:'POST',headers:{Cookie:'gs_review_invite='+path.split('#')[1]},body})}
       expect((await sendPhoto(new File(['<svg onload="alert(1)">'],'fake.png',{type:'image/png'}))).status).toBe(400)
       expect(f.media.size).toBe(0)
       expect((await sendPhoto(new File([new Uint8Array([137,80,78,71,13,10,26,10])],'photo.png',{type:'image/png'}))).status).toBe(303)
@@ -159,6 +147,11 @@ describe('booking-linked review invitations',()=>{
       f.as(null)
       f.db.prepare("UPDATE reviews SET status='approved' WHERE booking_id=?").run(f.id)
       expect((await f.request('/media/'+key)).status).toBe(200)
+      f.as({id:f.admin,role:'admin',name:'Admin'})
+      expect((await f.request('/admin/reviews/'+f.rows()[0].id,{method:'POST',body:new URLSearchParams({action:'hide'})})).status).toBe(303)
+      f.as(null)
+      expect((await f.request('/media/'+key)).status).toBe(404)
+      expect(await(await f.request('/stay/review-lodge')).text()).not.toContain('Our photos')
     }finally{f.db.close()}
   })
   it('does not issue another invite for a review from the existing account flow',async()=>{
