@@ -15,6 +15,7 @@ import { authRoutes } from './routes/auth'
 import { guestRoutes } from './routes/guest'
 import { staffRoutes } from './routes/staff'
 import { calculatorRoutes } from './routes/rate-calculator'
+import { bookingReviewRoutes } from './routes/booking-reviews'
 import { opsRoutes } from './routes/staff-ops'
 import { staffRoomRoutes } from './routes/staff-rooms'
 import { rateSheetRoutes } from './routes/admin-ratesheet'
@@ -100,6 +101,7 @@ app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', bookingReviewRoutes)
 app.route('/', quotationArchiveRoutes)
 app.route('/', calculatorRoutes)
 app.route('/', staffRoomRoutes)
@@ -126,7 +128,8 @@ app.notFound((c) =>
 
 app.onError(async (err, c) => {
   if (err instanceof HTTPException) return err.getResponse()
-  console.error('Unhandled error', c.req.method, c.req.path, err)
+  if (c.req.path.startsWith('/review-stay/')) console.error('Unhandled guest review error', c.req.method)
+  else console.error('Unhandled error', c.req.method, c.req.path, err)
   if (c.req.header('accept')?.includes('application/json')) return c.json({ error: 'Something went wrong' }, 500)
   const s = await getSettings(c.env).catch(() => null)
   return c.html(

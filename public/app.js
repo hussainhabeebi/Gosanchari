@@ -1050,6 +1050,29 @@ function gsPublicComparisonRate(value) {
     }
   })
 
+  if (location.pathname === '/review-stay' && /^#[A-Za-z0-9_-]{43}$/.test(location.hash)) {
+    var reviewToken = location.hash.slice(1)
+    history.replaceState(null, '', location.pathname)
+    var reviewForm = document.createElement('form')
+    reviewForm.method = 'post'
+    reviewForm.action = '/review-stay/open'
+    var reviewInput = document.createElement('input')
+    reviewInput.type = 'hidden'
+    reviewInput.name = 'token'
+    reviewInput.value = reviewToken
+    reviewForm.appendChild(reviewInput)
+    document.body.appendChild(reviewForm)
+    reviewForm.submit()
+  }
+
+  $$('[data-copy-review-link]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var fallback = function () { prompt('Copy this review link', button.dataset.copyReviewLink) }
+      if (!navigator.clipboard) { fallback(); return }
+      navigator.clipboard.writeText(button.dataset.copyReviewLink).then(function () { button.textContent = 'Link copied' }, fallback)
+    })
+  })
+
   // Share a link: phone share sheet when available, otherwise copy to clipboard
   function shareOrCopy(b, d) {
     var url = d.url, old = b.textContent

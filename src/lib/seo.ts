@@ -37,7 +37,7 @@ export function travelAgencySchema(site: string, business: Settings['business'])
 const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 
 export function robotsText(site: string): string {
-  return `User-agent: *\nDisallow: /staff\nDisallow: /admin\nDisallow: /my\nDisallow: /q/\nDisallow: /invoice/\nDisallow: /booking/\nDisallow: /enquiry/thanks/\nSitemap: ${new URL('/sitemap.xml', site).href}\n`
+  return `User-agent: *\nDisallow: /staff\nDisallow: /admin\nDisallow: /my\nDisallow: /q/\nDisallow: /invoice/\nDisallow: /booking/\nDisallow: /review-stay\nDisallow: /enquiry/thanks/\nSitemap: ${new URL('/sitemap.xml', site).href}\n`
 }
 
 export async function publicSitemap(c: Context<AppEnv>) {
