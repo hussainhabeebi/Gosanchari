@@ -1,6 +1,6 @@
 /** Fail closed until the policy and GA4 account configuration have been reviewed. */
-export const GA4_ID = 'G-J5JVRNNVKL'
-export const GA4_READINESS = 'privacy-approved-enhanced-measurement-off'
+export const GA4_ID = 'G-GKM3ZDK7XT'
+export const GA4_READINESS = `privacy-approved-enhanced-measurement-off:${GA4_ID}`
 
 export function analyticsPage(input: {
   readiness?: string; policy: string; origin: string; path: string

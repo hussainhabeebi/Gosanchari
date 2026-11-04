@@ -4,7 +4,7 @@
   const root = document.getElementById('public-analytics');
   if (!root || window.__gsAnalytics) return;
   window.__gsAnalytics = true;
-  const id = 'G-J5JVRNNVKL';
+  const id = 'G-GKM3ZDK7XT';
   const paths = ['/', '/search', '/offers', '/about', '/contact', '/policies/privacy', '/policies/terms', '/policies/cancellation', '/stay/property'];
   const path = root.dataset.page;
   if (location.origin !== 'https://gosanchari.com' || !paths.includes(path)) return;
