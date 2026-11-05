@@ -1,3 +1,4 @@
+import { reviewEligibleSql, isReviewCheckoutPast } from '../lib/booking-reviews'
 import { QuotationArchiveDialog } from '../lib/quotation-archive'
 import { REVIEW_STATUS_SQL, QuotationStatus, quotationReviewHistory, ReviewHistory } from '../lib/quotation-review'
 import { advanceDetails, validateAdvanceDetails, QuotationPayment, reportedAdvance, quotationPaymentHtml } from '../lib/quotation-payment'
@@ -1144,6 +1145,13 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
     int(c.req.param('id')),
   )
   if (!b) return c.notFound()
+  const manageReviewLink = u.role === 'admin' || b.staff_id === u.id
+  const [reviewEligible, reviewLink] = manageReviewLink ? await Promise.all([
+    b.status === 'completed' && isReviewCheckoutPast(b.check_out)
+      ? first(c.env, `SELECT 1 FROM bookings b JOIN properties p ON p.id=b.property_id WHERE b.id=? AND ${reviewEligibleSql}`, b.id, todayIST())
+      : null,
+    first(c.env, 'SELECT 1 FROM booking_review_links WHERE booking_id=? AND expires_at>?', b.id, nowIso()),
+  ]) : [null, null]
   const [payments, refunds, msgs, rooms, voucher] = await Promise.all([
     all<{ id: number; amount: number; status: string; gateway: string; gateway_payment_id: string | null; created_at: string; failure_reason: string | null }>(c.env, 'SELECT * FROM payments WHERE booking_id = ? ORDER BY id', b.id),
     all<{ id: number; amount: number; status: string; reason: string; created_at: string }>(c.env, 'SELECT * FROM refunds WHERE booking_id = ? ORDER BY id', b.id),
@@ -1232,6 +1240,17 @@ opsRoutes.get('/staff/bookings/:id', requirePerm('manage_bookings'), async (c) =
           </ul>
         </section>
         <section class="card stack">
+          {(reviewEligible || reviewLink) && <section class="stack">
+            <h3>Guest review</h3>
+            <div class="row wrap-row">
+              {reviewEligible && <form method="post" action={`/staff/bookings/${b.id}/review-link`}>
+                <button class="btn btn-sm" name="action" value="issue">{reviewLink ? 'Replace Review Link' : 'Send Review Link'}</button>
+              </form>}
+              {reviewLink && <form method="post" action={`/staff/bookings/${b.id}/review-link`}>
+                <button class="btn btn-sm btn-outline" name="action" value="revoke">Revoke Review Link</button>
+              </form>}
+            </div>
+          </section>}
           <h3>Send on WhatsApp</h3>
           <div class="row wrap-row">
             {(['confirmation', 'checkin', 'reminder'] as const).map((k) => (
