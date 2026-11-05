@@ -370,7 +370,7 @@ admin2Routes.get('/admin/reviews', requirePerm('manage_reviews'), async (c) => {
   const problems = await all<{ body: string; period: string; property_id: number | null }>(c.env, "SELECT body, period, property_id FROM insights WHERE kind = 'review_problems' ORDER BY id DESC LIMIT 5")
   return page(c, { title: 'Reviews', area: 'admin', active: 'reviews' }, (
     <div class="stack-lg">
-      <h1>Reviews</h1>
+      <div class="row-between wrap-row"><h1>Reviews</h1><a class="btn btn-outline" href="/staff/review-links">Generate Review Link</a></div>
       {problems.map((p) => <AiNote label={`Problem alert (${p.period})`}>{p.body}</AiNote>)}
       <nav class="tabs">{[['pending', 'Waiting'], ['approved', 'Live'], ['hidden', 'Hidden'], ['all', 'All']].map(([k, l]) => <a href={`/admin/reviews?status=${k}`} class={status === k ? 'active' : ''}>{l}</a>)}</nav>
       {rows.length === 0 && <Empty>No reviews here.</Empty>}
