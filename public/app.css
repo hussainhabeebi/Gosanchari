@@ -462,6 +462,15 @@ code { overflow-wrap: anywhere; }
 .quick-fill textarea { margin: 8px 0; }
 .qf-filled { background: #fff6cc; border-radius: 8px; box-shadow: 0 0 0 4px #fff6cc; }
 .qf-filled input, .qf-filled select, .qf-filled textarea { border-color: #e6a700; }
+.qf-filled { position: relative; }
+.qf-src { display: inline-block; align-self: flex-start; width: auto; margin: 2px 0 0 6px; padding: 0 7px; border-radius: 999px; font-size: .7rem; font-weight: 600; background: #e6a700; color: #fff; vertical-align: middle; }
+.pill-warn { background: var(--amber-soft); color: var(--amber); text-transform: none; }
+.qf-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.qf-photo { position: relative; display: block; border-radius: 8px; overflow: hidden; border: 2px solid transparent; cursor: pointer; aspect-ratio: 4 / 3; background: #eef1f0; }
+.qf-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.qf-photo input { position: absolute; top: 6px; left: 6px; width: 18px; height: 18px; }
+.qf-photo:has(input:checked) { border-color: var(--ok); }
+.qf-photo[hidden] { display: none; }
 #qf-extra-list ul { margin: 4px 0 8px; padding-left: 20px; }
 @media (max-width: 600px) {
   .row.wrap-row.sticky-actions { padding: 8px 0; gap: 8px; flex-wrap: nowrap; }

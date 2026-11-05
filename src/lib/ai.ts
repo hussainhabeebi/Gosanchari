@@ -125,6 +125,12 @@ export interface TextOptions {
   json?: boolean
   /** Files for the model to read (Gemini only; PDF, images). */
   files?: GeminiFile[]
+  /** Gemini structured-output schema (ignored by Workers AI). */
+  schema?: Record<string, unknown>
+  /** Gemini opens the links in the prompt itself (Gemini only). */
+  urlContext?: boolean
+  /** Use the careful Gemini model (Settings → AI → gemini_pro) instead of the everyday one. */
+  careful?: boolean
 }
 
 export async function aiText(env: Env, feature: AiFeature, o: TextOptions): Promise<string | null> {
@@ -136,12 +142,14 @@ export async function aiText(env: Env, feature: AiFeature, o: TextOptions): Prom
     ...(o.prompt ? [{ role: 'user' as const, content: o.prompt }] : []),
   ]
   const gkey = await geminiFor(env, s)
-  const models = [...(gkey ? [`gemini:${s.ai.models.gemini}`] : []), ...(env.AI && !o.files?.length ? [primary, s.ai.models.fallback] : [])]
+  const geminiOnly = !!o.files?.length || !!o.urlContext
+  const gModels = gkey ? (o.careful && s.ai.models.gemini_pro ? [s.ai.models.gemini_pro, s.ai.models.gemini] : [s.ai.models.gemini]) : []
+  const models = [...gModels.map((m) => `gemini:${m}`), ...(env.AI && !geminiOnly ? [primary, s.ai.models.fallback] : [])]
   const out = await guarded(env, feature, models, async (model) => {
     if (model.startsWith('gemini:')) {
       const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
       const chat = messages.filter((m) => m.role !== 'system') as { role: 'user' | 'assistant'; content: string }[]
-      return geminiGenerate(gkey!, model.slice(7), { system, messages: chat, files: o.files, json: o.json, maxTokens: Math.max(o.maxTokens ?? 512, 1024), temperature: o.temperature })
+      return geminiGenerate(gkey!, model.slice(7), { system, messages: chat, files: o.files, json: o.json, schema: o.schema, urlContext: o.urlContext, maxTokens: Math.max(o.maxTokens ?? 512, 1024), temperature: o.temperature })
     }
     const r = await callModel(env, model, { messages, max_tokens: o.maxTokens ?? 512, temperature: o.temperature ?? 0.3 }, o.cacheTtl)
     const t = textOf(r).trim()
@@ -256,6 +264,48 @@ export async function aiImageTags(env: Env, image: ArrayBuffer, allowed: string[
     const t = textOf(r).toLowerCase()
     return allowed.filter((a) => t.includes(a.toLowerCase().replace(/_/g, ' ')) || t.includes(a.toLowerCase()))
   })
+}
+
+export interface PhotoInsight {
+  /** Suggested gallery section (a PHOTO_CATEGORIES key). */
+  category: string | null
+  /** Short alt text for the photo. */
+  caption: string | null
+  /** Facilities / amenities visible in the photo (keys from `allowed`). */
+  tags: string[]
+  /** 1–10: how well it works as the property's cover photo. */
+  score: number | null
+}
+
+/** Gemini looks at one property photo: section, alt text, visible amenities and cover score. Null without Gemini. */
+export async function aiPhotoInsight(env: Env, image: ArrayBuffer, mimeType: string, categories: Record<string, string>, allowed: string[]): Promise<PhotoInsight | null> {
+  if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(mimeType) || !(await geminiActive(env))) return null
+  const cats = Object.keys(categories)
+  const r = await aiJson<Record<string, unknown>>(env, 'photo_tags', {
+    files: [{ mimeType, data: image }],
+    maxTokens: 300,
+    schema: {
+      type: 'OBJECT',
+      properties: {
+        category: { type: 'STRING', enum: cats },
+        caption: { type: 'STRING' },
+        tags: { type: 'ARRAY', items: { type: 'STRING', enum: allowed } },
+        cover_score: { type: 'INTEGER' },
+      },
+      required: ['category', 'caption', 'tags', 'cover_score'],
+    },
+    prompt: `This is a photo of a holiday property in Kerala, India, for its listing page. Reply as JSON:
+- "category": which gallery section it belongs to, one of: ${cats.map((k) => `${k} (${categories[k]})`).join(', ')}
+- "caption": alt text for the photo, plain English, at most 12 words, describe only what is visible (e.g. "Infinity pool facing misty tea hills")
+- "tags": facilities or amenities clearly visible, only from: ${allowed.join(', ')}
+- "cover_score": 1-10, how good it is as the main cover photo (sharp, bright, shows the property or its best view; low for close-ups, documents, people, logos)`,
+  })
+  if (!r) return null
+  const category = typeof r.category === 'string' && cats.includes(r.category) ? r.category : null
+  const caption = typeof r.caption === 'string' ? r.caption.replace(/\s+/g, ' ').trim().slice(0, 120) || null : null
+  const tags = Array.isArray(r.tags) ? [...new Set(r.tags.filter((t): t is string => typeof t === 'string' && allowed.includes(t)))] : []
+  const n = Number(r.cover_score)
+  return { category, caption, tags, score: Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : null }
 }
 
 export interface KbChunk {
