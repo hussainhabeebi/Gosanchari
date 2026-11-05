@@ -70,6 +70,27 @@ describe('property-only guest review links',()=>{
       expect((await f.open(path)).status).toBe(404)
     }finally{f.db.close()}
   })
+  it('offers Copy Link and manual WhatsApp sharing with the selected resort and identical private link for staff and Admin',async()=>{
+    const f=fixture();try{
+      const name='Lake & Hills / Munnar 🌿'
+      f.db.prepare('UPDATE properties SET name=? WHERE id=?').run(name,f.property)
+      for(const user of [{id:f.staff,role:'sales',name:'Staff'},{id:f.admin,role:'admin',name:'Admin'}]){
+        f.as(user)
+        const response=await f.issueRequest();expect(response.status).toBe(200)
+        const html=await response.text()
+        expect(html).toContain('>Copy Link</button>');expect(html).toContain('>Share via WhatsApp</a>')
+        const copy=html.match(/data-copy-review-link="([^"]+)"/)![1]
+        const href=html.match(/href="(https:\/\/wa\.me\/[^"]+)"/)![1]
+        const share=new URL(href)
+        expect(share.origin).toBe('https://wa.me');expect(share.pathname).toBe('/')
+        expect([...share.searchParams.keys()]).toEqual(['text'])
+        expect(share.searchParams.get('text')).toBe(`Hi! Thank you for choosing Go Sanchari. How was your stay at ${name}? Please share your feedback here: ${copy}`)
+        expect(copy).toMatch(/^http:\/\/localhost\/review-stay#[A-Za-z0-9_-]{43}$/)
+        expect(html).toMatch(/target="_blank" rel="noopener noreferrer">Share via WhatsApp/)
+      }
+      expect(f.send).not.toHaveBeenCalled();expect(f.rows()).toHaveLength(0)
+    }finally{f.db.close()}
+  })
   it('enforces one submission atomically, including concurrent attempts, and allows distinct guests for the same property',async()=>{
     const f=fixture();try{
       const path=await f.issue(),second=await f.issue();f.as(null)

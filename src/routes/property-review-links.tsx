@@ -76,7 +76,7 @@ propertyReviewLinkRoutes.post(path, bodyLimit({ maxSize: 2048 }), async c => {
       <p>Expires in 30 days. Share privately with one guest. The link allows one submission and does not verify a completed stay.</p>
       <Field label="Review link"><input readonly value={url} /></Field>
       <div class="row wrap-row"><button type="button" class="btn btn-outline" data-copy-review-link={url}>Copy Link</button>
-        <a class="btn btn-wa" href={'https://wa.me/?text='+encodeURIComponent('Share your experience with Go Sanchari: '+url)} target="_blank" rel="noopener noreferrer">Share via WhatsApp</a></div>
+        <a class="btn btn-wa" href={'https://wa.me/?text='+encodeURIComponent(`Hi! Thank you for choosing Go Sanchari. How was your stay at ${property?.name || 'the resort'}? Please share your feedback here: ${url}`)} target="_blank" rel="noopener noreferrer">Share via WhatsApp</a></div>
       <form method="post" action={`${path}/${link.id}/revoke`}><button class="btn btn-outline">Revoke Link</button></form>
       <a href={path}>Back to Review Links</a>
     </section>
