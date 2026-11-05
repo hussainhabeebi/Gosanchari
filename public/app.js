@@ -430,59 +430,151 @@ function gsPublicComparisonRate(value) {
       $('#desc-en').value = r.en; if (r.ml) $('#desc-ml').value = r.ml
     })
   })
-  // Property quick fill: paste one paragraph, AI fills the editor fields (staff review, then save).
+  // Property "Import with AI": notes + files + website link, AI fills the editor fields (staff review, then save).
+  // Fields staff already filled are kept unless "Also replace values I already filled" is ticked; every AI-filled
+  // field gets a small "AI · source" badge until staff edit it.
   var qfBtn = $('[data-ai-extract]')
+  var qfForm = $('#prop-form')
+  var QF_SRC = { notes: 'your notes', file: 'file', website: 'website' }
+  function qfUnmark(box) {
+    box.classList.remove('qf-filled')
+    var b = $('.qf-src', box)
+    if (b && b.parentNode) b.parentNode.removeChild(b)
+  }
+  if (qfBtn && qfForm) {
+    var qfNew = /\/new$/.test(qfForm.getAttribute('action') || '')
+    $$('input, select, textarea', qfForm).forEach(function (el) { el.dataset.qfInit = el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? '1' : '') : el.value })
+    var qfClear = function (e) {
+      if (!e.isTrusted) return
+      var box = e.target.closest('.qf-filled')
+      if (box) qfUnmark(box)
+    }
+    qfForm.addEventListener('input', qfClear); qfForm.addEventListener('change', qfClear)
+  }
+  function qfPhotoSync() {
+    var out = $('#qf-photo-urls')
+    if (!out) return
+    var urls = $$('#qf-photo-grid input:checked').map(function (x) { return x.value })
+    out.value = urls.length ? JSON.stringify(urls) : ''
+  }
+  function qfPhotos(list) {
+    var box = $('#qf-photos'), grid = $('#qf-photo-grid')
+    if (!box) return
+    if (!list || !list.length) { box.hidden = true; grid.innerHTML = ''; qfPhotoSync(); return }
+    grid.innerHTML = list.map(function (u, i) {
+      return '<label class="qf-photo"><input type="checkbox" value="' + esc(u) + '"><img src="' + esc(u) + '" alt="Website photo ' + (i + 1) + '" loading="lazy" referrerpolicy="no-referrer"></label>'
+    }).join('')
+    // Broken or blocked images are hidden so staff only see what can be imported.
+    $$('img', grid).forEach(function (img) { img.addEventListener('error', function () { var l = img.closest('.qf-photo'); if (l) l.hidden = true; var c = l && $('input', l); if (c) c.checked = false; qfPhotoSync() }) })
+    box.hidden = false
+    qfPhotoSync()
+  }
+  document.addEventListener('change', function (e) { if (e.target.closest && e.target.closest('#qf-photo-grid')) qfPhotoSync() })
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-qf-photos-all],[data-qf-photos-none]')
+    if (!btn) return
+    var on = btn.hasAttribute('data-qf-photos-all')
+    $$('#qf-photo-grid .qf-photo').forEach(function (l) { var c = $('input', l); if (c) c.checked = on && !l.hidden })
+    qfPhotoSync()
+  })
   if (qfBtn) qfBtn.addEventListener('click', function () {
-    var f = $('#prop-form'), st = $('#qf-status'), text = $('#qf-text').value.trim(), docIn = $('#qf-doc'), doc = docIn && docIn.files[0]
-    if (text.length < 20 && !doc) { st.textContent = 'Paste a few lines about the property, or attach a PDF / Word file.'; return }
-    var old = qfBtn.textContent; qfBtn.disabled = true; qfBtn.textContent = 'Reading… (up to a minute)'; st.textContent = ''
-    var fd = new FormData(); fd.append('text', text); if (doc) fd.append('doc', doc)
+    var f = qfForm, st = $('#qf-status'), text = $('#qf-text').value.trim(), docIn = $('#qf-doc'), docs = docIn ? Array.prototype.slice.call(docIn.files) : []
+    var urlIn = $('#qf-url'), url = urlIn ? urlIn.value.trim() : '', careful = $('#qf-careful'), ow = $('#qf-overwrite'), overwrite = !!(ow && ow.checked)
+    if (text.length < 20 && !docs.length && !url) { st.textContent = 'Paste a few lines about the property, attach a file, or give the resort’s website link.'; return }
+    if (docs.length > 10) { st.textContent = 'Please attach at most 10 files at a time.'; return }
+    var old = qfBtn.textContent; qfBtn.disabled = true; qfBtn.textContent = url ? 'Reading the website… (up to a minute)' : 'Reading… (up to a minute)'; st.textContent = ''
+    var fd = new FormData(); fd.append('text', text); docs.forEach(function (d) { fd.append('doc', d) })
+    if (url) fd.append('url', url)
+    if (careful && careful.checked) fd.append('careful', '1')
     fetch(qfBtn.dataset.aiExtract, { method: 'POST', body: fd, headers: { Accept: 'application/json' }, credentials: 'same-origin' }).then(function (res) { return res.json() }).then(function (r) {
       qfBtn.disabled = false; qfBtn.textContent = old
       if (r.error) { st.textContent = r.error; return }
-      $$('.qf-filled', f).forEach(function (el) { el.classList.remove('qf-filled') })
-      var n = 0
-      Object.keys(r.fields || {}).forEach(function (k) { if (fillField(f, k, r.fields[k])) n++ })
+      $$('.qf-filled', f).forEach(qfUnmark)
+      var n = 0, kept = [], srcs = r.sources || {}, carry = {}, carried = 0
+      // The wizard's first step names some fields differently.
+      var ALIAS = { themes: 'best_for' }
+      Object.keys(r.fields || {}).forEach(function (k) {
+        var name = $('[name="' + k + '"]', f) || !ALIAS[k] ? k : ALIAS[k]
+        if (!$('[name="' + name + '"]', f)) { carry[k] = r.fields[k]; carried++; return }
+        var res = fillField(f, name, r.fields[k], { overwrite: overwrite, isNew: qfNew, src: srcs[k] })
+        if (res === 'filled') n++; else if (res === 'kept') kept.push(fieldLabel(f, name))
+      })
+      // Details with no field on this page (wizard step 1) are saved with the property.
+      var carryIn = $('#qf-fields')
+      if (carryIn) carryIn.value = carried ? JSON.stringify(carry) : ''
       var rooms = r.rooms || [], seasons = r.seasons || []
-      // New property: put rooms straight into the room category blocks; otherwise they are added on save.
-      var blocks = $('#new-rooms')
+      var fromWeb = function (x) { return x.src === 'website' }
+      // New property: rooms go straight into the room category blocks — except website-only rates, which wait for a tick.
+      var blocks = $('#new-rooms'), listed = rooms
       if (blocks && rooms.length) {
-        rooms.forEach(function (room, i) {
+        rooms.filter(function (x) { return !fromWeb(x) }).forEach(function (room, i) {
           var b = $$('.new-room', blocks)[i] || addRoomBlock()
           var idx = b.dataset.idx
-          Object.keys(room).forEach(function (k) { fillField(f, 'nr' + idx + '_' + k, room[k]) })
+          Object.keys(room).forEach(function (k) { if (k !== 'src') fillField(f, 'nr' + idx + '_' + k, room[k], { overwrite: overwrite, isNew: true, src: room.src }) })
         })
-        $('#qf-rooms').value = ''
-      } else $('#qf-rooms').value = rooms.length ? JSON.stringify(rooms) : ''
+        listed = rooms.filter(fromWeb)
+      }
+      $('#qf-rooms').value = listed.length ? JSON.stringify(listed) : ''
       $('#qf-seasons').value = seasons.length ? JSON.stringify(seasons) : ''
-      var box = $('#qf-extra'), list = $('#qf-extra-list')
-      if (rooms.length || seasons.length) {
-        list.innerHTML = (rooms.length ? '<strong>Room categories found:</strong><ul>' + rooms.map(function (x) {
-          return '<li>' + esc(x.name) + (x.units ? ' · ' + esc(x.units) + ' room(s)' : '') + (x.capacity ? ' · sleeps ' + esc(x.capacity) : '') + (x.base_rate ? ' · ' + money(+x.base_rate) : '') + (x.weekend_rate ? ' / ' + money(+x.weekend_rate) + ' wknd' : '') + '</li>'
+      var box = $('#qf-extra'), list = $('#qf-extra-list'), apply = $('#qf-apply-extra')
+      var tag = function (x) { return fromWeb(x) ? ' <span class="pill pill-warn">from website — please verify</span>' : '' }
+      var webRates = listed.some(fromWeb) || seasons.some(fromWeb)
+      if (listed.length || seasons.length) {
+        list.innerHTML = (listed.length ? '<strong>Room categories found:</strong><ul>' + listed.map(function (x) {
+          return '<li>' + esc(x.name) + (x.units ? ' · ' + esc(x.units) + ' room(s)' : '') + (x.capacity ? ' · sleeps ' + esc(x.capacity) : '') + (x.base_rate ? ' · ' + money(+x.base_rate) : '') + (x.weekend_rate ? ' / ' + money(+x.weekend_rate) + ' wknd' : '') + tag(x) + '</li>'
         }).join('') + '</ul>' : '') + (seasons.length ? '<strong>Seasons found:</strong><ul>' + seasons.map(function (x) {
-          return '<li>' + esc(x.name) + ' · ' + esc(x.start_date) + ' to ' + esc(x.end_date) + ' · ' + Object.keys(x.rates).map(function (k) { return esc(k) + ' ' + money(x.rates[k]) }).join(', ') + '</li>'
-        }).join('') + '</ul>' : '')
+          return '<li>' + esc(x.name) + ' · ' + esc(x.start_date) + ' to ' + esc(x.end_date) + ' · ' + Object.keys(x.rates).map(function (k) { return esc(k) + ' ' + money(x.rates[k]) }).join(', ') + tag(x) + '</li>'
+        }).join('') + '</ul>' : '') + (webRates ? '<p class="muted small">Website rates are often old or rack rates. Check them, then tick the box to add them.</p>' : '')
+        if (apply) apply.checked = !webRates
         box.hidden = false
       } else box.hidden = true
-      st.textContent = (n ? 'Filled ' + n + ' field(s) — highlighted in yellow. Please check them, then press Save.' : 'Could not find details to fill. Try adding more information.') + (r.warning ? ' ' + r.warning : '')
+      qfPhotos(r.website && r.website.images)
+      var parts = []
+      parts.push(n ? 'Filled ' + n + ' field(s) — highlighted in yellow with where each came from. Please check them, then press Save.' : 'Could not find new details to fill.')
+      if (carried && carryIn && !$('#basics')) parts.push(carried + ' more detail(s) (address, dining, policies, contacts…) will be saved with the property — check them later in the full property editor.')
+      if (kept.length) parts.push('Kept ' + kept.length + ' field(s) you had already filled (AI suggested something different): ' + kept.slice(0, 6).join(', ') + (kept.length > 6 ? '…' : '') + '. Tick “Also replace values I already filled” to use the AI values.')
+      if (r.website) parts.push('Read ' + r.website.pages.length + ' page(s) of the website' + (r.website.images.length ? ', found ' + r.website.images.length + ' photo(s) below.' : '.'))
+      if (r.warning) parts.push(r.warning)
+      st.textContent = parts.join(' ')
       var first = $('.qf-filled', f); if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }).catch(function () { qfBtn.disabled = false; qfBtn.textContent = old; st.textContent = 'Something went wrong. Please try again.' })
   })
-  function markFilled(el) { (el.closest('.field') || el.closest('label') || el).classList.add('qf-filled') }
-  function fillField(f, k, v) {
-    var els = $$('[name="' + k + '"]', f), touched = false
+  function fieldLabel(f, k) {
+    var el = $('[name="' + k + '"]', f), box = el && (el.closest('.field') || el.closest('label'))
+    var l = box && $('label, .label, span', box)
+    return ((l && l.textContent) || k).replace(/\s+/g, ' ').trim().slice(0, 40)
+  }
+  function markFilled(el, src) {
+    var box = el.closest('.field') || el.closest('label') || el
+    box.classList.add('qf-filled')
+    // Tick boxes (facility tiles, amenities) only get the highlight: a badge would cover the tile.
+    if (box === el || el.type === 'checkbox' || el.type === 'radio') return
+    var b = $('.qf-src', box)
+    if (!b) { b = document.createElement('span'); b.className = 'qf-src'; box.appendChild(b) }
+    b.textContent = 'AI' + (src && QF_SRC[src] ? ' · ' + QF_SRC[src] : '')
+  }
+  // Returns 'filled', 'kept' (a value staff already gave was left alone) or false (nothing to do).
+  function fillField(f, k, v, o) {
+    o = o || {}
+    var els = $$('[name="' + k + '"]', f), result = false
+    var untouched = function (el) { return (el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value) === (el.dataset.qfInit || '') }
+    var mayReplace = function (el) { return o.overwrite || (o.isNew && untouched(el)) }
     els.forEach(function (el) {
       var hit = false
       if (el.type === 'file' || el.type === 'hidden') return
       if (el.type === 'checkbox') {
         if (Array.isArray(v)) { if (v.indexOf(el.value) >= 0 && !el.checked) { el.checked = true; hit = true } }
-        else if (typeof v === 'boolean' && el.checked !== v) { el.checked = v; hit = true }
+        else if (typeof v === 'boolean' && el.checked !== v) { if (mayReplace(el)) { el.checked = v; hit = true } else if (result !== 'filled') result = 'kept' }
       } else if (el.tagName === 'SELECT') {
-        if ($$('option', el).some(function (o) { return o.value === String(v) })) { el.value = String(v); hit = true }
-      } else if ((typeof v === 'string' || typeof v === 'number') && v !== '') { el.value = String(v); hit = true }
-      if (hit) { touched = true; markFilled(el); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
+        if (el.value !== String(v) && $$('option', el).some(function (op) { return op.value === String(v) })) {
+          if (el.value === '' || mayReplace(el)) { el.value = String(v); hit = true } else if (result !== 'filled') result = 'kept'
+        }
+      } else if ((typeof v === 'string' || typeof v === 'number') && v !== '' && el.value.trim() !== String(v).trim()) {
+        if (!el.value.trim() || o.overwrite) { el.value = String(v); hit = true } else if (result !== 'filled') result = 'kept'
+      }
+      if (hit) { result = 'filled'; markFilled(el, o.src); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
     })
-    return touched
+    return result
   }
   // ---------- Staff AI assistant ----------
   var asBox = $('[data-assistant]')

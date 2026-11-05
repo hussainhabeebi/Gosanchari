@@ -19,7 +19,7 @@ import { mediaUrl } from '../lib/integrations'
 import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { int, isDate, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg } from './helpers'
-import { afterPropertySave } from './admin-properties'
+import { afterPropertySave, AiImportBox, applyAiImport } from './admin-properties'
 import { commonPeakKey, overridePeakKey, parseWeekdays, type SeasonRate } from '../lib/pricing'
 import { peakStatements } from '../lib/wizard-peaks'
 
@@ -208,7 +208,8 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
   const video = photos.find((x) => x.video_url)
   return page(c, { title: p ? `Edit ${p.name}` : 'Add Property', area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={1} done={done} icon={I.home} title="Property Details" sub="Add the property details here. AI can fetch location info and nearby attractions.">
-      <form method="post" action={p ? `/admin/properties/${p.id}/setup/1` : '/admin/properties/new'} enctype="multipart/form-data" class="stack wiz-form">
+      {!p && <AiImportBox open wizard />}
+      <form method="post" action={p ? `/admin/properties/${p.id}/setup/1` : '/admin/properties/new'} enctype="multipart/form-data" class="stack wiz-form" id={p ? undefined : 'prop-form'}>
         <div class="wiz-2">
           <label class="wf"><span class="wl">Property Name <b>*</b></span><input name="name" value={p?.name ?? ''} required maxlength={100} placeholder="e.g. Elixir Woods Resort" /></label>
           <label class="wf"><span class="wl">Destination / Location <b>*</b></span><span class="with-ico">{I.pin}<input name="destination" value={p ? `${p.destination}, Kerala` : ''} required maxlength={80} placeholder="e.g. Munnar, Kerala" /></span></label>
@@ -297,15 +298,18 @@ async function saveStep1(c: Context<AppEnv>, existing: PropertyRow | null) {
     const had = await first(c.env, "SELECT 1 FROM property_photos WHERE property_id = ? AND video_url = ?", id, video)
     if (!had) await run(c.env, "INSERT INTO property_photos (property_id, r2_key, caption, sort, category, media_type, video_url) VALUES (?, '', NULL, 999, 'common', 'video', ?)", id, video)
   }
-  // Keep location/nearby enrichment, without generating property descriptions.
+  // New property: details "Import with AI" found beyond this step (address, dining, rooms, seasons, website photos).
+  const imported = existing ? '' : await applyAiImport(c, id, f)
+  // Keep location/nearby enrichment (it only fills what is still empty), without generating property descriptions.
   await enqueue(c.env, { type: 'enrich_property', propertyId: id })
   await afterPropertySave(c, id)
-  return { id }
+  return { id, imported }
 }
 
 wizardRoutes.post('/admin/properties/new', requirePerm('manage_properties'), async (c) => {
   const r = await saveStep1(c, null)
   if ('err' in r) return redirectMsg(c, '/admin/properties/new', { err: r.err })
+  if (r.imported) return redirectMsg(c, `/admin/properties/${r.id}/setup/2`, { ok: `Property created.${r.imported}` })
   return c.redirect(`/admin/properties/${r.id}/setup/2`, 303)
 })
 

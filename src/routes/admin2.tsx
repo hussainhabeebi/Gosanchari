@@ -682,10 +682,12 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
         <div class="upload-box stack" id="gemini">
           <h3>Google Gemini (recommended for the staff assistant and reading PDF / Word rate sheets)</h3>
           <p class="small muted">Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and paste it here. The key is stored privately and never shown again in full.</p>
+          <p class="small muted">Privacy: files, website text and notes used for AI features (e.g. property quick fill) are sent to Google for reading. Bank details are never copied into the form by AI, but they are still sent if they appear in an uploaded file — remove them from documents first if that matters.</p>
           {gkey ? <p class="small ok">✓ Gemini key saved ({maskKey(gkey)}).</p> : <p class="small">No Gemini key yet — Workers AI is used.</p>}
           <div class="row wrap-row">
             <Field label={gkey ? 'Replace Gemini API key' : 'Gemini API key'}><input type="password" name="gemini_key" autocomplete="off" placeholder={gkey ? 'Leave blank to keep the saved key' : 'AIza…'} /></Field>
             <Field label="Gemini model"><input name="model_gemini" value={s.ai.models.gemini} placeholder={DEFAULT_SETTINGS.ai.models.gemini} /></Field>
+            <Field label="Gemini model for “Read carefully”"><input name="model_gemini_pro" value={s.ai.models.gemini_pro} placeholder={DEFAULT_SETTINGS.ai.models.gemini_pro} /></Field>
             <Field label="Use for AI text"><Select name="ai_provider" value={s.ai.provider} options={[['auto', 'Gemini when a key is saved (fallback: Workers AI)'], ['workers', 'Always Workers AI']]} /></Field>
           </div>
           {gkey && <label class="check small"><input type="checkbox" name="gemini_remove" value="1" /> Remove the saved key</label>}
@@ -698,7 +700,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
         <Field label="Daily AI call limit"><input type="number" name="ai_limit" value={s.ai.daily_limit} min="0" /></Field>
         <details>
           <summary>Models</summary>
-          {(Object.keys(s.ai.models) as (keyof Settings['ai']['models'])[]).filter((k) => k !== 'gemini').map((k) => <Field label={k}><input name={`model_${k}`} value={s.ai.models[k]} placeholder={DEFAULT_SETTINGS.ai.models[k]} /></Field>)}
+          {(Object.keys(s.ai.models) as (keyof Settings['ai']['models'])[]).filter((k) => k !== 'gemini' && k !== 'gemini_pro').map((k) => <Field label={k}><input name={`model_${k}`} value={s.ai.models[k]} placeholder={DEFAULT_SETTINGS.ai.models[k]} /></Field>)}
         </details>
         <h3>Usage by feature (30 days)</h3>
         <Table head={['Feature', 'Calls', 'Failed', 'Avg time']}>{usage.map((u) => <tr><td>{AI_FEATURES[u.feature as AiFeature] ?? u.feature}</td><td>{u.n}</td><td>{u.failed}</td><td>{Math.round(u.avg_ms ?? 0)} ms</td></tr>)}</Table>

@@ -162,3 +162,26 @@ describe('booking-linked review invitations',()=>{
     }finally{f.db.close()}
   })
 })
+
+
+describe('review migration sequence and compatibility', () => {
+  it('upgrades the Photo AI schema without rewriting existing records or reusing a migration number', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      db.exec('PRAGMA foreign_keys=ON')
+      const files = readdirSync('migrations').filter((name: string) => name.endsWith('.sql')).sort()
+      expect(new Set(files.map((name: string) => name.split('_')[0])).size).toBe(files.length)
+      expect(files.at(-2)).toBe('0024_photo_ai.sql')
+      expect(files.at(-1)).toBe('0025_booking_review_links.sql')
+      for (const file of files.slice(0,-1)) db.exec(readFileSync('migrations/'+file, 'utf8'))
+      db.exec(readFileSync('seed/seed.sql','utf8'))
+      const tables = ['properties','property_photos','bookings','reviews','payments']
+      const before = tables.map(table => db.prepare('SELECT * FROM '+table+' ORDER BY id').all())
+      const schema = db.prepare("SELECT sql FROM sqlite_master WHERE name='property_photos'").get().sql
+      db.exec(readFileSync('migrations/0025_booking_review_links.sql','utf8'))
+      expect(tables.map(table => db.prepare('SELECT * FROM '+table+' ORDER BY id').all())).toEqual(before)
+      expect(db.prepare("SELECT sql FROM sqlite_master WHERE name='property_photos'").get().sql).toBe(schema)
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    } finally { db.close() }
+  })
+})
