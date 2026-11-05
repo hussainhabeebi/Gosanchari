@@ -108,6 +108,7 @@ const ADMIN_NAV: { key: string; href: string; label: string; perm: keyof Permiss
   { key: 'reports', href: '/admin/reports', label: 'Reports', perm: 'view_reports' },
   { key: 'ask', href: '/admin/ask', label: 'Ask AI', perm: 'ask_ai' },
   { key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' },
+  { key: 'review-links', href: '/staff/review-links', label: 'Review Links', perm: 'manage_bookings' },
   { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
   { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
   { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
@@ -173,7 +174,7 @@ const NAV_GROUPS: NavGroup[] = [
     { key: 'all-guests', href: '/admin/guests', label: 'All guests', perm: 'manage_guests' },
   ] },
   { label: 'Offers & Packages', icon: 'offer', items: [{ key: 'offers', href: '/admin/offers', label: 'Offers & coupons', perm: 'manage_offers' }] },
-  { label: 'Reviews', icon: 'star', items: [{ key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' }] },
+  { label: 'Reviews', icon: 'star', items: [{ key: 'reviews', href: '/admin/reviews', label: 'Reviews', perm: 'manage_reviews' }, { key: 'review-links', href: '/staff/review-links', label: 'Review Links', perm: 'manage_bookings' }] },
   { label: 'Reports', icon: 'chart', items: [
     { key: 'reports', href: '/admin/reports', label: 'Reports', perm: 'view_reports' },
     { key: 'ask', href: '/admin/ask', label: 'Ask AI', perm: 'ask_ai' },

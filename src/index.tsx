@@ -15,6 +15,7 @@ import { authRoutes } from './routes/auth'
 import { guestRoutes } from './routes/guest'
 import { staffRoutes } from './routes/staff'
 import { calculatorRoutes } from './routes/rate-calculator'
+import { propertyReviewLinkRoutes } from './routes/property-review-links'
 import { bookingReviewRoutes } from './routes/booking-reviews'
 import { opsRoutes } from './routes/staff-ops'
 import { staffRoomRoutes } from './routes/staff-rooms'
@@ -101,6 +102,7 @@ app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', propertyReviewLinkRoutes)
 app.route('/', bookingReviewRoutes)
 app.route('/', quotationArchiveRoutes)
 app.route('/', calculatorRoutes)

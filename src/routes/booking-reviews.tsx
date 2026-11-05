@@ -162,7 +162,12 @@ bookingReviewRoutes.post(guestPath, bodyLimit({ maxSize: 17 * 1024 * 1024 }), as
     return c.text('Photo upload failed. Please try again.', 503)
   }
   try {
-    review = await first<{ id: number }>(c.env, `INSERT INTO reviews (booking_id,property_id,guest_name,rating,body,photos)
+    review = found.stay.kind === 'property' ? await first<{ id: number }>(c.env, `INSERT INTO reviews (property_review_link_id,property_id,guest_name,rating,body,photos)
+      SELECT l.id,l.property_id,?,?,?,? FROM property_review_links l JOIN properties p ON p.id=l.property_id
+      WHERE l.token_hash=? AND l.expires_at>? AND l.revoked_at IS NULL AND p.status='live'
+      AND NOT EXISTS(SELECT 1 FROM reviews r WHERE r.property_review_link_id=l.id)
+      ON CONFLICT DO NOTHING RETURNING id`, name, Number(rating), feedback, JSON.stringify(keys), hash, nowIso())
+      : await first<{ id: number }>(c.env, `INSERT INTO reviews (booking_id,property_id,guest_name,rating,body,photos)
       SELECT b.id,b.property_id,?,?,?,? FROM booking_review_links l
       JOIN bookings b ON b.id=l.booking_id AND b.property_id=l.property_id JOIN properties p ON p.id=b.property_id
       WHERE l.token_hash=? AND l.expires_at>? AND ${reviewEligibleSql}

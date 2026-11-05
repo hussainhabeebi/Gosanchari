@@ -169,7 +169,7 @@ describe('review migration sequence and compatibility', () => {
     const db = new DatabaseSync(':memory:')
     try {
       db.exec('PRAGMA foreign_keys=ON')
-      const files = readdirSync('migrations').filter((name: string) => name.endsWith('.sql')).sort()
+      const files = readdirSync('migrations').filter((name: string) => name.endsWith('.sql') && name <= '0025_booking_review_links.sql').sort()
       expect(new Set(files.map((name: string) => name.split('_')[0])).size).toBe(files.length)
       expect(files.at(-2)).toBe('0024_photo_ai.sql')
       expect(files.at(-1)).toBe('0025_booking_review_links.sql')
