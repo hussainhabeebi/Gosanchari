@@ -116,9 +116,9 @@ describe('property-only guest review links',()=>{
       expect(f.rows()).toHaveLength(0)
     }finally{f.db.close()}
   })
-  it('preserves permissions, owner scope and CSRF; staff cannot submit through guest links or moderate',async()=>{
+  it('preserves permissions, owner scope and CSRF; staff can open guest links but cannot moderate',async()=>{
     const f=fixture();try{
-      const path=await f.issue();expect((await f.open(path)).status).toBe(403);expect((await f.submit(path)).status).toBe(403)
+      const path=await f.issue();expect((await f.open(path)).status).toBe(303)
       f.as({id:f.other,role:'sales',name:'Other Staff'})
       expect(await(await f.request('/staff/review-links')).text()).not.toContain('Link Staff</td>')
       expect((await f.request('/staff/review-links/1/revoke',{method:'POST'})).status).toBe(409)

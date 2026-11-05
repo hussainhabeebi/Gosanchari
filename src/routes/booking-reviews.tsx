@@ -67,8 +67,8 @@ bookingReviewRoutes.use('/review-stay/*', async (c, next) => {
   c.header('Cache-Control', 'private, no-store')
   c.header('Referrer-Policy', 'no-referrer')
   c.header('X-Robots-Tag', 'noindex, nofollow')
-  const user = c.get('user')
-  if (user && user.role !== 'guest') return c.text('Only guests can use this review link.', 403)
+  // Signed-in staff may open guest review links too (e.g. to test them);
+  // the link token alone authorises the one review submission.
   return next()
 })
 

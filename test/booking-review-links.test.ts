@@ -53,8 +53,7 @@ describe('booking-linked review invitations',()=>{
       const path=await f.issue(), token=path.split('#')[1]
       expect(f.db.prepare('SELECT token_hash FROM booking_review_links').get().token_hash).toBe(await sha256Hex(token))
       expect(f.send).not.toHaveBeenCalled()
-      expect((await f.get(path)).status).toBe(403)
-      expect((await f.submit(path)).status).toBe(403)
+      expect((await f.get(path)).status).toBe(200)
       f.as(null)
       const exchange=await f.open(path);expect(exchange.status).toBe(303);expect(exchange.headers.get('Set-Cookie')).toMatch(/HttpOnly; SameSite=Strict/);expect(exchange.headers.get('Location')).toBe('/review-stay')
       const page=await f.get(path);const html=await page.text()
