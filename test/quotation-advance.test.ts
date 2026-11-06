@@ -73,6 +73,7 @@ describe('quotation reported advance',()=>{
  it('prefills confirmation, allows audited Admin correction and issues no voucher before explicit verification',async()=>{
   const f=fixture('admin');try{f.db.prepare("UPDATE quotation_options SET subtotal=60000,taxes=1200,total=61200,reported_advance=20000 WHERE id=?").run(f.oid);
    const html=await(await f.app.request(f.url+'/confirmation',{},f.env)).text();expect(html).toContain('name="advance" type="number" value="20000"');
+   f.db.prepare('UPDATE quotation_options SET advance_details=? WHERE id=?').run(JSON.stringify({date:'2020-01-01',method:'upi',reference:'UTR-TEST'}),f.oid);
    const b=new URLSearchParams({option_id:String(f.oid),submission_key:'advance-test-submission-key',guest_name:'Guest',guest_phone:'9999999999',resort_name:'Resort',resort_phone:'9999999998',location:'Munnar',kids_ages:'',room_rent:'60000',advance:'20000'});
    await f.app.request(f.url+'/confirmation',{method:'POST',body:b},f.env);const r=f.db.prepare('SELECT * FROM quotation_confirmation_requests').get() as any;expect(r.status).toBe('pending');expect(r.payment_verified).toBe(0);expect(JSON.parse(r.details).balance).toBe(41200);
    const view='http://localhost/staff/confirmation-requests/'+r.id;expect((await f.app.request(view+'/print',{},f.env)).status).toBe(404);

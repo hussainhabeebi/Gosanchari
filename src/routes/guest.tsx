@@ -37,7 +37,7 @@ guestRoutes.get('/my', async (c) => {
   const s = await getSettings(c.env)
   const [upcoming, quotes, enquiries] = await Promise.all([
     all<BookingView>(c.env, `${BOOKING_SELECT} WHERE b.user_id = ? AND b.status IN ('confirmed','checked_in') AND b.check_out >= ? ORDER BY b.check_in LIMIT 3`, u.id, todayIST()),
-    all<QuotationRow & { total: number }>(c.env, "SELECT q.*, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total FROM quotations q WHERE (q.user_id = ? OR q.phone = ?) AND q.status IN ('sent','viewed','changes_requested') AND (q.valid_till IS NULL OR q.valid_till >= ?) ORDER BY q.id DESC", u.id, u.phone ?? '-', todayIST()),
+    all<QuotationRow & { total: number }>(c.env, "SELECT q.*, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total FROM quotations q WHERE q.archived_at IS NULL AND (q.user_id = ? OR q.phone = ?) AND q.status IN ('sent','viewed','changes_requested') AND (q.valid_till IS NULL OR q.valid_till >= ?) ORDER BY q.id DESC", u.id, u.phone ?? '-', todayIST()),
     all<EnquiryRow>(c.env, "SELECT * FROM enquiries WHERE user_id = ? AND status IN ('new','in_progress','quoted') ORDER BY id DESC LIMIT 5", u.id),
   ])
   const next = upcoming[0]
@@ -228,7 +228,7 @@ guestRoutes.get('/my/enquiries', async (c) => {
       c.env,
       `SELECT q.*, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total,
         (SELECT p.name FROM quotation_options o JOIN properties p ON p.id = o.property_id WHERE o.quotation_id = q.id LIMIT 1) AS property_name
-       FROM quotations q WHERE (q.user_id = ? OR q.phone = ?) AND q.status NOT IN ('draft','pending_approval') ORDER BY q.id DESC`,
+       FROM quotations q WHERE q.archived_at IS NULL AND (q.user_id = ? OR q.phone = ?) AND q.status NOT IN ('draft','pending_approval') ORDER BY q.id DESC`,
       u.id, u.phone ?? '-',
     ),
   ])

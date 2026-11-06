@@ -14,7 +14,7 @@ import { nightlyRate, type SeasonRate, SEASON_KINDS, seasonKindLabel, weekdaysLa
 import type { PropertyRow, RoomRow } from '../lib/types'
 import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShort, nowIso, parseJson, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
-import { renderBookings, renderQuotes } from './staff-ops'
+import { bookingFilters, renderBookings, renderQuotes } from './staff-ops'
 import { renderGuests, renderInbox } from './staff'
 import { destinations, reindexKb } from '../lib/properties'
 import { daysLeft, EXPIRY_WINDOW_DAYS, expiryText, rateExpiryAlerts } from '../lib/rate-expiry'
@@ -52,7 +52,7 @@ adminRoutes.get('/admin', async (c) => {
     all<{ name: string; rev: number }>(c.env, `SELECT p.name, SUM(b.total) AS rev FROM bookings b JOIN properties p ON p.id = b.property_id WHERE b.${CONFIRMED.replace('status', 'status')} AND b.created_at >= ? GROUP BY p.id ORDER BY rev DESC LIMIT 10`, since30),
     all<{ source: string; n: number }>(c.env, 'SELECT source, COUNT(*) AS n FROM enquiries WHERE created_at >= ? GROUP BY source', since30),
     all<{ id: number; guest_name: string; code: string; last: string }>(c.env, "SELECT id, guest_name, code, COALESCE(last_guest_msg_at, created_at) AS last FROM enquiries WHERE waiting_on = 'us' AND status IN ('new','in_progress','quoted') AND COALESCE(last_guest_msg_at, created_at) < ? ORDER BY last LIMIT 10", new Date(Date.now() - 3 * 3600_000).toISOString()),
-    all<{ id: number; code: string; guest_name: string }>(c.env, "SELECT q.id, q.code, q.guest_name FROM quotations q WHERE q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.quotation_id = q.id AND b.status != 'cancelled') ORDER BY q.updated_at LIMIT 10"),
+    all<{ id: number; code: string; guest_name: string }>(c.env, "SELECT q.id, q.code, q.guest_name FROM quotations q WHERE q.archived_at IS NULL AND q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.quotation_id = q.id AND b.status != 'cancelled') ORDER BY q.updated_at LIMIT 10"),
     all<{ id: number; rating: number; property_name: string; body: string }>(c.env, "SELECT r.id, r.rating, p.name AS property_name, r.body FROM reviews r JOIN properties p ON p.id = r.property_id WHERE r.rating <= 2 AND r.created_at >= ? ORDER BY r.id DESC LIMIT 10", new Date(Date.now() - 14 * 86400_000).toISOString()),
     all<{ id: number; name: string }>(c.env, "SELECT id, name FROM properties p WHERE status = 'live' AND NOT EXISTS (SELECT 1 FROM rooms r WHERE r.property_id = p.id AND r.active = 1 AND r.base_rate > 0)"),
     all<{ name: string; n: number; last: string }>(c.env, 'SELECT u.name, COUNT(*) AS n, MAX(a.created_at) AS last FROM activity_log a JOIN users u ON u.id = a.user_id WHERE a.created_at >= ? AND u.role != \'guest\' GROUP BY u.id ORDER BY n DESC LIMIT 10', new Date(Date.now() - 86400_000).toISOString()),
@@ -480,31 +480,10 @@ adminRoutes.post('/admin/offers/:id/toggle', requirePerm('manage_offers'), async
 adminRoutes.get('/admin/enquiries', requirePerm('view_all_enquiries'), (c) => renderInbox(c, { admin: true }))
 adminRoutes.get('/admin/quotes', requirePerm('approve_discounts'), (c) => renderQuotes(c, true))
 
-// The lifecycle CHECK has no "approved" value. Persist the separate review decision
-// atomically with its lifecycle transition, and read it consistently from the audit log.
-async function decideQuotation(c: Context<AppEnv>, decision: 'approved' | 'rejected') {
-  const id = int(c.req.param('id')), u = c.get('user')!
-  if(u.role!=='admin')return c.text('Admin quotation review required.',403)
-  const submitted=await form(c), reason=str(submitted.reason,1000)
-  if(!submitted.reviewed_at)return redirectMsg(c,'/admin/quotes',{err:'Open and review the current quotation before making a decision.'})
-  if(decision==='rejected'&&!reason)return redirectMsg(c,`/staff/quotes/${id}`,{err:'Enter a reason for rejecting the quotation.'})
-  const version=nowIso()===submitted.reviewed_at ? new Date(Date.parse(submitted.reviewed_at)+1).toISOString() : nowIso()
-  const action=decision==='approved'?'quote.discount_approved':'quote.review_rejected'
-  const status=decision==='approved'?'draft':'changes_requested'
-  const details=JSON.stringify({status:decision,reason,reviewed_at:submitted.reviewed_at,quotation_version:version})
-  // D1 batch is a transaction: a failed status update rolls back the approval audit.
-  // Stale/double submissions insert nothing and update nothing.
-  const result=await c.env.DB.batch([
-    c.env.DB.prepare("INSERT INTO activity_log(user_id,action,entity,entity_id,details) SELECT ?,?,'quotation',CAST(id AS TEXT),? FROM quotations WHERE id=? AND status='pending_approval' AND updated_at=?").bind(u.id,action,details,id,submitted.reviewed_at),
-    c.env.DB.prepare("UPDATE quotations SET status=?,updated_at=? WHERE id=? AND status='pending_approval' AND updated_at=? RETURNING id").bind(status,version,id,submitted.reviewed_at),
-  ])
-  if(!result[1].results?.length)return redirectMsg(c,'/admin/quotes',{err:'This quotation changed or is no longer waiting for review. Open it again.'})
-  if(decision==='approved') {
-    await run(c.env,'UPDATE quotation_options SET discount_approved_by=? WHERE quotation_id=?',u.id,id)
-    const q=await first<{staff_id:number|null;code:string;guest_name:string}>(c.env,'SELECT staff_id,code,guest_name FROM quotations WHERE id=?',id)
-    if(q?.staff_id)await run(c.env,'INSERT INTO tasks(assigned_to,quotation_id,guest_name,reason,due_at,created_by) VALUES(?,?,?,?,?,?)',q.staff_id,id,q.guest_name,`Quotation Approved: ${q.code} — quotation approval only; booking confirmation requires separate verification`,nowIso(),u.id)
-  }
-  return redirectMsg(c,`/staff/quotes/${id}`,{ok:decision==='approved'?'Quotation Approved. No booking or payment has been confirmed.':'Quotation Rejected. The reason is available in approval history.'})
+// Retain old URLs without allowing another preliminary approval stage or altering history.
+async function decideQuotation(c: Context<AppEnv>, _decision: 'approved' | 'rejected') {
+  if(c.get('user')!.role!=='admin')return c.text('Admin access required.',403)
+  return redirectMsg(c,'/admin/booking-approvals',{err:'Preliminary quotation approval is retired. Review final booking confirmation requests here.'})
 }
 adminRoutes.post('/admin/quotes/:id/approve',requirePerm('approve_discounts'),c=>decideQuotation(c,'approved'))
 adminRoutes.post('/admin/quotes/:id/reject',requirePerm('approve_discounts'),c=>decideQuotation(c,'rejected'))
@@ -512,19 +491,19 @@ adminRoutes.post('/admin/quotes/:id/reject',requirePerm('approve_discounts'),c=>
 adminRoutes.get('/admin/bookings', requirePerm('approve_cancellations'), (c) => renderBookings(c, true))
 
 adminRoutes.get('/admin/bookings/export', requirePerm('export_data'), async (c) => {
-  const from = isDate(c.req.query('from')) ? c.req.query('from')! : '0000-01-01'
-  const to = isDate(c.req.query('to')) ? c.req.query('to')! : '9999-12-31'
+  // Same filters as the All bookings page, so the file matches what the admin sees.
+  const f = bookingFilters(c, true)
   const rows = await all<Record<string, unknown>>(
     c.env,
     `SELECT b.code, b.created_at, p.name AS property, r.name AS room, b.check_in, b.check_out, b.nights, b.adults, b.children, b.rooms_count,
        b.guest_name, b.guest_phone, b.guest_email, b.subtotal, b.discount, b.extra_charges, b.taxes, b.total, b.amount_paid, b.coupon_code,
        b.status, b.payment_status, b.source, s.name AS staff
      FROM bookings b JOIN properties p ON p.id = b.property_id JOIN rooms r ON r.id = b.room_id LEFT JOIN users s ON s.id = b.staff_id
-     WHERE b.check_in >= ? AND b.check_in <= ? ${int(c.req.query('property')) ? 'AND b.property_id = ' + int(c.req.query('property')) : ''} ORDER BY b.check_in`,
-    from, to,
+     ${f.sql} ORDER BY b.check_in`,
+    ...f.binds,
   )
   await logActivity(c.env, c.get('user')!.id, 'export.bookings', 'booking', null, { rows: rows.length })
-  return new Response('﻿' + toCsv(rows), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="bookings-${todayIST()}.csv"` } })
+  return new Response('\ufeff' + toCsv(rows), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="bookings-${todayIST()}.csv"` } })
 })
 
 adminRoutes.post('/admin/bookings/:id/reject-request', requirePerm('approve_cancellations'), async (c) => {

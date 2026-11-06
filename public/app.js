@@ -1,3 +1,10 @@
+// Public comparison-rate display only; never changes the actual price or server calculations.
+function gsPublicComparisonRate(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return ''
+  var amount = '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(value * 1.05))
+  return '<span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price."><s aria-label="Calculated comparison rate (+5%): ' + amount + '">' + amount + '</s></span>'
+}
+
 // Go Sanchari client script: small progressive enhancements, no framework.
 // Staff quotation: combine room categories in one option ("+ Add another room category" / ×).
 (function () {
@@ -65,7 +72,22 @@
     if (input.value) url.searchParams.set('q', input.value); else url.searchParams.delete('q')
     if (place) url.searchParams.set('location', place); else url.searchParams.delete('location')
     history.replaceState(null, '', url)
+    // Export and "Email all shown" follow the current filter.
+    root.querySelectorAll('[data-filter-link]').forEach(function (a) {
+      var link = new URL(a.getAttribute('data-filter-link'), location.origin)
+      if (input.value) link.searchParams.set('q', input.value)
+      if (place) link.searchParams.set('location', place)
+      a.setAttribute('href', link.pathname + link.search)
+    })
+    if (selectShown) selectShown.checked = false
   }
+  var selectShown = root.querySelector('[data-select-shown]')
+  if (selectShown) selectShown.addEventListener('change', function () {
+    cards.forEach(function (card) {
+      var box = card.querySelector('[data-contact-pick]')
+      if (box) box.checked = selectShown.checked && !card.hidden
+    })
+  })
   input.addEventListener('input', filter)
   loc.addEventListener('change', filter)
   root.querySelector('form').addEventListener('submit', function (e) { e.preventDefault(); filter() })
@@ -163,15 +185,35 @@
     if (!box) {
       box = document.createElement('div')
       box.className = 'lightbox'
-      box.innerHTML = '<img alt=""><button class="lb-close" aria-label="Close">×</button><button class="lb-prev" aria-label="Previous">‹</button><button class="lb-next" aria-label="Next">›</button>'
+      box.innerHTML = '<img alt=""><button class="lb-close" aria-label="Close">×</button><button class="lb-prev" aria-label="Previous">‹</button><button class="lb-next" aria-label="Next">›</button><button class="lb-share" type="button">Share photo</button>'
       document.body.appendChild(box)
       box.addEventListener('click', function (e) {
-        if (e.target.classList.contains('lb-prev')) show(set, idx - 1)
+        if (e.target.classList.contains('lb-share')) sharePhoto(e.target)
+        else if (e.target.classList.contains('lb-prev')) show(set, idx - 1)
         else if (e.target.classList.contains('lb-next')) show(set, idx + 1)
         else if (e.target.tagName !== 'IMG') { box.remove(); box = null }
       })
     }
     $('img', box).src = set[idx].href
+    preparePhoto(set[idx].href)
+  }
+  // Share the photo itself (WhatsApp etc. on phones) when the browser can share files; otherwise share its link.
+  var photoFile = null
+  function preparePhoto(href) {
+    photoFile = null
+    if (!navigator.canShare || !window.fetch || !/Mobi|Android|iPhone/i.test(navigator.userAgent)) return
+    fetch(href).then(function (r) { return r.ok ? r.blob() : null }).then(function (b) {
+      if (!b || !box || $('img', box).src !== new URL(href, location.href).href) return
+      var ext = (b.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+      var f = new File([b], 'photo-' + (idx + 1) + '.' + ext, { type: b.type || 'image/jpeg' })
+      if (navigator.canShare({ files: [f] })) photoFile = f
+    }).catch(function () {})
+  }
+  function sharePhoto(btn) {
+    var title = (document.querySelector('h1') || {}).textContent || document.title
+    var canonical = document.querySelector('link[rel="canonical"]'), page = canonical ? canonical.href : location.href.split('#')[0]
+    if (photoFile) return navigator.share({ files: [photoFile], title: title, text: title + ' · ' + page }).catch(function () {})
+    shareOrCopy(btn, { url: new URL(set[idx].href, location.href).href, title: title })
   }
   document.addEventListener('keydown', function (e) {
     if (!box) return
@@ -269,7 +311,7 @@
         if (!fd.get('check_in') || !fd.get('check_out')) return
         post(bf.dataset.priceUrl, { room: fd.get('room'), checkIn: fd.get('check_in'), checkOut: fd.get('check_out'), rooms: fd.get('rooms'), adults: fd.get('adults'), children: fd.get('children') }).then(function (p) {
           if (p.errors && p.errors.length) { box2.innerHTML = '<span class="error small">' + esc(p.errors[0]) + '</span>'; return }
-          box2.innerHTML = '<div class="muted small">Estimated price (confirmed in your quote)</div><table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + money(p.roomCharges != null ? p.roomCharges : p.subtotal) + '</td></tr>' +
+          box2.innerHTML = '<div class="muted small">Estimated price (confirmed in your quote)</div><table class="breakdown"><tr><td>' + p.nights + ' night' + (p.nights > 1 ? 's' : '') + ' × ' + p.roomsCount + ' room' + (p.roomsCount > 1 ? 's' : '') + '</td><td>' + gsPublicComparisonRate(p.roomCharges != null ? p.roomCharges : p.subtotal) + money(p.roomCharges != null ? p.roomCharges : p.subtotal) + '</td></tr>' +
             (p.extraGuests && p.extraGuests.total ? '<tr><td>Extra guests (' + [p.extraGuests.extraAdults ? p.extraGuests.extraAdults + ' adult' + (p.extraGuests.extraAdults > 1 ? 's' : '') : '', p.extraGuests.extraChildren ? p.extraGuests.extraChildren + ' child' + (p.extraGuests.extraChildren > 1 ? 'ren' : '') : ''].filter(Boolean).join(' + ') + ')</td><td>' + money(p.extraGuests.total) + '</td></tr>' : '') +
             (p.discount ? '<tr><td>Discount</td><td>− ' + money(p.discount) + '</td></tr>' : '') +
             '<tr><td>GST (' + p.taxRate + '%)</td><td>' + money(p.taxes) + '</td></tr><tr class="total"><td>Total</td><td>' + money(p.total) + '</td></tr></table>'
@@ -296,15 +338,31 @@
     var log = $('.qa-log', qa), qf = $('.qa-form', qa), hf = $('.qa-handoff', qa)
     qf.addEventListener('submit', function (e) {
       e.preventDefault()
-      var q = qf.q.value.trim(); if (!q) return
+      var q = qf.q.value.trim(); if (!q || qf.querySelector('button').disabled) return
+      qf.querySelector('button').disabled = true
       log.insertAdjacentHTML('beforeend', '<div class="msg msg-guest">' + esc(q) + '</div><div class="msg msg-ai typing">…</div>')
       log.scrollTop = log.scrollHeight
       qf.q.value = ''
       post(qa.dataset.qa, { q: q }).then(function (r) {
         var t = $('.typing', log); t.classList.remove('typing'); t.textContent = r.answer || r.error || 'Sorry, something went wrong.'
+        if (Array.isArray(r.sources) && r.sources.length) {
+          var refs = document.createElement('div'); refs.className = 'small muted'; refs.textContent = 'External sources (please verify): '
+          r.sources.slice(0, 6).forEach(function (value, index) {
+            try {
+              var url = new URL(value)
+              if (url.protocol !== 'https:' || url.username || url.password) return
+              var link = document.createElement('a'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = '[' + (index + 1) + '] ' + url.hostname + ' '; refs.appendChild(link)
+            } catch (e) {}
+          })
+          t.appendChild(refs)
+          if (typeof r.searchSuggestions === 'string' && r.searchSuggestions) {
+            // Provider HTML is isolated, never inserted into the parent document or allowed scripts.
+            var suggestions = document.createElement('iframe'); suggestions.title = 'Google Search suggestions'; suggestions.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox'); suggestions.setAttribute('referrerpolicy', 'no-referrer'); suggestions.style.cssText = 'width:100%;max-width:100%;height:100px;border:0'; suggestions.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src https://www.gstatic.com data:; form-action \'none\'; base-uri \'none\'">' + r.searchSuggestions; t.appendChild(suggestions)
+          }
+        }
         if (r.handoff) { hf.hidden = false; hf.message.value = 'Question from property page: ' + q }
         log.scrollTop = log.scrollHeight
-      }).catch(function () { var t = $('.typing', log); t.classList.remove('typing'); t.textContent = 'Sorry, please try again.' })
+      }).catch(function () { var t = $('.typing', log); if (t) { t.classList.remove('typing'); t.textContent = 'Sorry, please try again.' } }).finally(function () { qf.querySelector('button').disabled = false })
     })
   }
 
@@ -372,59 +430,151 @@
       $('#desc-en').value = r.en; if (r.ml) $('#desc-ml').value = r.ml
     })
   })
-  // Property quick fill: paste one paragraph, AI fills the editor fields (staff review, then save).
+  // Property "Import with AI": notes + files + website link, AI fills the editor fields (staff review, then save).
+  // Fields staff already filled are kept unless "Also replace values I already filled" is ticked; every AI-filled
+  // field gets a small "AI · source" badge until staff edit it.
   var qfBtn = $('[data-ai-extract]')
+  var qfForm = $('#prop-form')
+  var QF_SRC = { notes: 'your notes', file: 'file', website: 'website' }
+  function qfUnmark(box) {
+    box.classList.remove('qf-filled')
+    var b = $('.qf-src', box)
+    if (b && b.parentNode) b.parentNode.removeChild(b)
+  }
+  if (qfBtn && qfForm) {
+    var qfNew = /\/new$/.test(qfForm.getAttribute('action') || '')
+    $$('input, select, textarea', qfForm).forEach(function (el) { el.dataset.qfInit = el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? '1' : '') : el.value })
+    var qfClear = function (e) {
+      if (!e.isTrusted) return
+      var box = e.target.closest('.qf-filled')
+      if (box) qfUnmark(box)
+    }
+    qfForm.addEventListener('input', qfClear); qfForm.addEventListener('change', qfClear)
+  }
+  function qfPhotoSync() {
+    var out = $('#qf-photo-urls')
+    if (!out) return
+    var urls = $$('#qf-photo-grid input:checked').map(function (x) { return x.value })
+    out.value = urls.length ? JSON.stringify(urls) : ''
+  }
+  function qfPhotos(list) {
+    var box = $('#qf-photos'), grid = $('#qf-photo-grid')
+    if (!box) return
+    if (!list || !list.length) { box.hidden = true; grid.innerHTML = ''; qfPhotoSync(); return }
+    grid.innerHTML = list.map(function (u, i) {
+      return '<label class="qf-photo"><input type="checkbox" value="' + esc(u) + '"><img src="' + esc(u) + '" alt="Website photo ' + (i + 1) + '" loading="lazy" referrerpolicy="no-referrer"></label>'
+    }).join('')
+    // Broken or blocked images are hidden so staff only see what can be imported.
+    $$('img', grid).forEach(function (img) { img.addEventListener('error', function () { var l = img.closest('.qf-photo'); if (l) l.hidden = true; var c = l && $('input', l); if (c) c.checked = false; qfPhotoSync() }) })
+    box.hidden = false
+    qfPhotoSync()
+  }
+  document.addEventListener('change', function (e) { if (e.target.closest && e.target.closest('#qf-photo-grid')) qfPhotoSync() })
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-qf-photos-all],[data-qf-photos-none]')
+    if (!btn) return
+    var on = btn.hasAttribute('data-qf-photos-all')
+    $$('#qf-photo-grid .qf-photo').forEach(function (l) { var c = $('input', l); if (c) c.checked = on && !l.hidden })
+    qfPhotoSync()
+  })
   if (qfBtn) qfBtn.addEventListener('click', function () {
-    var f = $('#prop-form'), st = $('#qf-status'), text = $('#qf-text').value.trim(), docIn = $('#qf-doc'), doc = docIn && docIn.files[0]
-    if (text.length < 20 && !doc) { st.textContent = 'Paste a few lines about the property, or attach a PDF / Word file.'; return }
-    var old = qfBtn.textContent; qfBtn.disabled = true; qfBtn.textContent = 'Reading… (up to a minute)'; st.textContent = ''
-    var fd = new FormData(); fd.append('text', text); if (doc) fd.append('doc', doc)
+    var f = qfForm, st = $('#qf-status'), text = $('#qf-text').value.trim(), docIn = $('#qf-doc'), docs = docIn ? Array.prototype.slice.call(docIn.files) : []
+    var urlIn = $('#qf-url'), url = urlIn ? urlIn.value.trim() : '', careful = $('#qf-careful'), ow = $('#qf-overwrite'), overwrite = !!(ow && ow.checked)
+    if (text.length < 20 && !docs.length && !url) { st.textContent = 'Paste a few lines about the property, attach a file, or give the resort’s website link.'; return }
+    if (docs.length > 10) { st.textContent = 'Please attach at most 10 files at a time.'; return }
+    var old = qfBtn.textContent; qfBtn.disabled = true; qfBtn.textContent = url ? 'Reading the website… (up to a minute)' : 'Reading… (up to a minute)'; st.textContent = ''
+    var fd = new FormData(); fd.append('text', text); docs.forEach(function (d) { fd.append('doc', d) })
+    if (url) fd.append('url', url)
+    if (careful && careful.checked) fd.append('careful', '1')
     fetch(qfBtn.dataset.aiExtract, { method: 'POST', body: fd, headers: { Accept: 'application/json' }, credentials: 'same-origin' }).then(function (res) { return res.json() }).then(function (r) {
       qfBtn.disabled = false; qfBtn.textContent = old
       if (r.error) { st.textContent = r.error; return }
-      $$('.qf-filled', f).forEach(function (el) { el.classList.remove('qf-filled') })
-      var n = 0
-      Object.keys(r.fields || {}).forEach(function (k) { if (fillField(f, k, r.fields[k])) n++ })
+      $$('.qf-filled', f).forEach(qfUnmark)
+      var n = 0, kept = [], srcs = r.sources || {}, carry = {}, carried = 0
+      // The wizard's first step names some fields differently.
+      var ALIAS = { themes: 'best_for' }
+      Object.keys(r.fields || {}).forEach(function (k) {
+        var name = $('[name="' + k + '"]', f) || !ALIAS[k] ? k : ALIAS[k]
+        if (!$('[name="' + name + '"]', f)) { carry[k] = r.fields[k]; carried++; return }
+        var res = fillField(f, name, r.fields[k], { overwrite: overwrite, isNew: qfNew, src: srcs[k] })
+        if (res === 'filled') n++; else if (res === 'kept') kept.push(fieldLabel(f, name))
+      })
+      // Details with no field on this page (wizard step 1) are saved with the property.
+      var carryIn = $('#qf-fields')
+      if (carryIn) carryIn.value = carried ? JSON.stringify(carry) : ''
       var rooms = r.rooms || [], seasons = r.seasons || []
-      // New property: put rooms straight into the room category blocks; otherwise they are added on save.
-      var blocks = $('#new-rooms')
+      var fromWeb = function (x) { return x.src === 'website' }
+      // New property: rooms go straight into the room category blocks — except website-only rates, which wait for a tick.
+      var blocks = $('#new-rooms'), listed = rooms
       if (blocks && rooms.length) {
-        rooms.forEach(function (room, i) {
+        rooms.filter(function (x) { return !fromWeb(x) }).forEach(function (room, i) {
           var b = $$('.new-room', blocks)[i] || addRoomBlock()
           var idx = b.dataset.idx
-          Object.keys(room).forEach(function (k) { fillField(f, 'nr' + idx + '_' + k, room[k]) })
+          Object.keys(room).forEach(function (k) { if (k !== 'src') fillField(f, 'nr' + idx + '_' + k, room[k], { overwrite: overwrite, isNew: true, src: room.src }) })
         })
-        $('#qf-rooms').value = ''
-      } else $('#qf-rooms').value = rooms.length ? JSON.stringify(rooms) : ''
+        listed = rooms.filter(fromWeb)
+      }
+      $('#qf-rooms').value = listed.length ? JSON.stringify(listed) : ''
       $('#qf-seasons').value = seasons.length ? JSON.stringify(seasons) : ''
-      var box = $('#qf-extra'), list = $('#qf-extra-list')
-      if (rooms.length || seasons.length) {
-        list.innerHTML = (rooms.length ? '<strong>Room categories found:</strong><ul>' + rooms.map(function (x) {
-          return '<li>' + esc(x.name) + (x.units ? ' · ' + esc(x.units) + ' room(s)' : '') + (x.capacity ? ' · sleeps ' + esc(x.capacity) : '') + (x.base_rate ? ' · ' + money(+x.base_rate) : '') + (x.weekend_rate ? ' / ' + money(+x.weekend_rate) + ' wknd' : '') + '</li>'
+      var box = $('#qf-extra'), list = $('#qf-extra-list'), apply = $('#qf-apply-extra')
+      var tag = function (x) { return fromWeb(x) ? ' <span class="pill pill-warn">from website — please verify</span>' : '' }
+      var webRates = listed.some(fromWeb) || seasons.some(fromWeb)
+      if (listed.length || seasons.length) {
+        list.innerHTML = (listed.length ? '<strong>Room categories found:</strong><ul>' + listed.map(function (x) {
+          return '<li>' + esc(x.name) + (x.units ? ' · ' + esc(x.units) + ' room(s)' : '') + (x.capacity ? ' · sleeps ' + esc(x.capacity) : '') + (x.base_rate ? ' · ' + money(+x.base_rate) : '') + (x.weekend_rate ? ' / ' + money(+x.weekend_rate) + ' wknd' : '') + tag(x) + '</li>'
         }).join('') + '</ul>' : '') + (seasons.length ? '<strong>Seasons found:</strong><ul>' + seasons.map(function (x) {
-          return '<li>' + esc(x.name) + ' · ' + esc(x.start_date) + ' to ' + esc(x.end_date) + ' · ' + Object.keys(x.rates).map(function (k) { return esc(k) + ' ' + money(x.rates[k]) }).join(', ') + '</li>'
-        }).join('') + '</ul>' : '')
+          return '<li>' + esc(x.name) + ' · ' + esc(x.start_date) + ' to ' + esc(x.end_date) + ' · ' + Object.keys(x.rates).map(function (k) { return esc(k) + ' ' + money(x.rates[k]) }).join(', ') + tag(x) + '</li>'
+        }).join('') + '</ul>' : '') + (webRates ? '<p class="muted small">Website rates are often old or rack rates. Check them, then tick the box to add them.</p>' : '')
+        if (apply) apply.checked = !webRates
         box.hidden = false
       } else box.hidden = true
-      st.textContent = (n ? 'Filled ' + n + ' field(s) — highlighted in yellow. Please check them, then press Save.' : 'Could not find details to fill. Try adding more information.') + (r.warning ? ' ' + r.warning : '')
+      qfPhotos(r.website && r.website.images)
+      var parts = []
+      parts.push(n ? 'Filled ' + n + ' field(s) — highlighted in yellow with where each came from. Please check them, then press Save.' : 'Could not find new details to fill.')
+      if (carried && carryIn && !$('#basics')) parts.push(carried + ' more detail(s) (address, dining, policies, contacts…) will be saved with the property — check them later in the full property editor.')
+      if (kept.length) parts.push('Kept ' + kept.length + ' field(s) you had already filled (AI suggested something different): ' + kept.slice(0, 6).join(', ') + (kept.length > 6 ? '…' : '') + '. Tick “Also replace values I already filled” to use the AI values.')
+      if (r.website) parts.push('Read ' + r.website.pages.length + ' page(s) of the website' + (r.website.images.length ? ', found ' + r.website.images.length + ' photo(s) below.' : '.'))
+      if (r.warning) parts.push(r.warning)
+      st.textContent = parts.join(' ')
       var first = $('.qf-filled', f); if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }).catch(function () { qfBtn.disabled = false; qfBtn.textContent = old; st.textContent = 'Something went wrong. Please try again.' })
   })
-  function markFilled(el) { (el.closest('.field') || el.closest('label') || el).classList.add('qf-filled') }
-  function fillField(f, k, v) {
-    var els = $$('[name="' + k + '"]', f), touched = false
+  function fieldLabel(f, k) {
+    var el = $('[name="' + k + '"]', f), box = el && (el.closest('.field') || el.closest('label'))
+    var l = box && $('label, .label, span', box)
+    return ((l && l.textContent) || k).replace(/\s+/g, ' ').trim().slice(0, 40)
+  }
+  function markFilled(el, src) {
+    var box = el.closest('.field') || el.closest('label') || el
+    box.classList.add('qf-filled')
+    // Tick boxes (facility tiles, amenities) only get the highlight: a badge would cover the tile.
+    if (box === el || el.type === 'checkbox' || el.type === 'radio') return
+    var b = $('.qf-src', box)
+    if (!b) { b = document.createElement('span'); b.className = 'qf-src'; box.appendChild(b) }
+    b.textContent = 'AI' + (src && QF_SRC[src] ? ' · ' + QF_SRC[src] : '')
+  }
+  // Returns 'filled', 'kept' (a value staff already gave was left alone) or false (nothing to do).
+  function fillField(f, k, v, o) {
+    o = o || {}
+    var els = $$('[name="' + k + '"]', f), result = false
+    var untouched = function (el) { return (el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value) === (el.dataset.qfInit || '') }
+    var mayReplace = function (el) { return o.overwrite || (o.isNew && untouched(el)) }
     els.forEach(function (el) {
       var hit = false
       if (el.type === 'file' || el.type === 'hidden') return
       if (el.type === 'checkbox') {
         if (Array.isArray(v)) { if (v.indexOf(el.value) >= 0 && !el.checked) { el.checked = true; hit = true } }
-        else if (typeof v === 'boolean' && el.checked !== v) { el.checked = v; hit = true }
+        else if (typeof v === 'boolean' && el.checked !== v) { if (mayReplace(el)) { el.checked = v; hit = true } else if (result !== 'filled') result = 'kept' }
       } else if (el.tagName === 'SELECT') {
-        if ($$('option', el).some(function (o) { return o.value === String(v) })) { el.value = String(v); hit = true }
-      } else if ((typeof v === 'string' || typeof v === 'number') && v !== '') { el.value = String(v); hit = true }
-      if (hit) { touched = true; markFilled(el); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
+        if (el.value !== String(v) && $$('option', el).some(function (op) { return op.value === String(v) })) {
+          if (el.value === '' || mayReplace(el)) { el.value = String(v); hit = true } else if (result !== 'filled') result = 'kept'
+        }
+      } else if ((typeof v === 'string' || typeof v === 'number') && v !== '' && el.value.trim() !== String(v).trim()) {
+        if (!el.value.trim() || o.overwrite) { el.value = String(v); hit = true } else if (result !== 'filled') result = 'kept'
+      }
+      if (hit) { result = 'filled'; markFilled(el, o.src); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
     })
-    return touched
+    return result
   }
   // ---------- Staff AI assistant ----------
   var asBox = $('[data-assistant]')
@@ -658,7 +808,10 @@
     input.addEventListener('change', function () {
       var files = Array.from(input.files); input.value = '';
       files.forEach(function (file) {
-        if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 10 * 1024 * 1024 || !file.size) { state(file.name + ': choose JPG, PNG or WebP up to 10 MB.'); return; }
+        var mime = (file.type || '').toLowerCase().split(';')[0].trim();
+        var supported = /^image\/(jpeg|jpg|pjpeg|png|x-png|webp|avif|x-avif|gif|bmp|x-ms-bmp|apng)$/.test(mime);
+        var untyped = !mime || /^(application|binary)\/octet-stream$/.test(mime);
+        if ((!supported && !(untyped && /\.(jpe?g|jfif|png|webp|avif|gif|bmp|apng)$/i.test(file.name))) || file.size > 10 * 1024 * 1024 || !file.size) { state(file.name + ': choose JPG, PNG, WebP, AVIF, GIF, BMP or APNG up to 10 MB. Convert HEIC/TIFF photos before uploading.'); return; }
         if (pending.some(function (item) { return item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified; })) return;
         var card = document.createElement('span'); card.className = 'common-photo';
         var image = document.createElement('img'), preview = URL.createObjectURL(file); image.src = preview; image.alt = file.name;
@@ -989,16 +1142,40 @@
     }
   })
 
-  // Share a link: phone share sheet when available, otherwise copy to clipboard
-  $$('[data-share]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var url = b.dataset.share, old = b.textContent
-      var done = function (msg) { b.textContent = msg; setTimeout(function () { b.textContent = old }, 1800) }
-      if (navigator.share && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
-        navigator.share({ title: b.dataset.shareTitle || document.title, text: b.dataset.shareText || '', url: b.dataset.shareText ? undefined : url }).catch(function () {})
-      } else if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { done('Link copied ✓') }, function () { prompt('Copy this link', url) })
-      else prompt('Copy this link', url)
+  if (location.pathname === '/review-stay' && /^#[A-Za-z0-9_-]{43}$/.test(location.hash)) {
+    var reviewToken = location.hash.slice(1)
+    history.replaceState(null, '', location.pathname)
+    var reviewForm = document.createElement('form')
+    reviewForm.method = 'post'
+    reviewForm.action = '/review-stay/open'
+    var reviewInput = document.createElement('input')
+    reviewInput.type = 'hidden'
+    reviewInput.name = 'token'
+    reviewInput.value = reviewToken
+    reviewForm.appendChild(reviewInput)
+    document.body.appendChild(reviewForm)
+    reviewForm.submit()
+  }
+
+  $$('[data-copy-review-link]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var fallback = function () { prompt('Copy this review link', button.dataset.copyReviewLink) }
+      if (!navigator.clipboard) { fallback(); return }
+      navigator.clipboard.writeText(button.dataset.copyReviewLink).then(function () { button.textContent = 'Link copied' }, fallback)
     })
+  })
+
+  // Share a link: phone share sheet when available, otherwise copy to clipboard
+  function shareOrCopy(b, d) {
+    var url = d.url, old = b.textContent
+    var done = function (msg) { b.textContent = msg; setTimeout(function () { b.textContent = old }, 1800) }
+    if (navigator.share && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+      navigator.share({ title: d.title || document.title, text: d.text || '', url: d.text ? undefined : url }).catch(function () {})
+    } else if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { done('Link copied ✓') }, function () { prompt('Copy this link', url) })
+    else prompt('Copy this link', url)
+  }
+  $$('[data-share]').forEach(function (b) {
+    b.addEventListener('click', function () { shareOrCopy(b, { url: b.dataset.share, title: b.dataset.shareTitle, text: b.dataset.shareText }) })
   })
   // New property: add more room category blocks
   var roomTpl = document.getElementById('new-room-tpl')
@@ -1153,6 +1330,55 @@
 })();
 // End homepage destination combobox.
 
+// Homepage banner carousel: no navigation or pricing side effects.
+(function () {
+  'use strict';
+  var carousel = document.querySelector('[data-home-hero-slider]');
+  if (!carousel) return;
+  var slides = Array.from(carousel.querySelectorAll('[data-hero-slide]'));
+  var pause = carousel.querySelector('[data-hero-pause]');
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var index = 0, timer = null, paused = reduced.matches, hovering = false, focused = false;
+  function schedule() {
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+    if (!paused && !reduced.matches && !hovering && !focused && !document.hidden && slides.length > 1) {
+      timer = window.setTimeout(function () { show(index + 1); }, 4000);
+    }
+  }
+  function show(next) {
+    next = (next + slides.length) % slides.length;
+    var image = slides[next].querySelector('img');
+    // Never fade to a blank banner while a slow connection is still loading it.
+    if (image.complete && image.naturalWidth > 0) {
+      index = next;
+      slides.forEach(function (slide, i) {
+        slide.classList.toggle('is-active', i === index);
+        slide.setAttribute('aria-hidden', String(i !== index));
+      });
+    } else if (!image.complete) { image.loading = 'eager'; }
+    schedule();
+  }
+  function updatePause() {
+    pause.textContent = paused ? 'Play slideshow' : 'Pause slideshow';
+    pause.setAttribute('aria-pressed', String(paused));
+    schedule();
+  }
+  carousel.querySelector('[data-hero-prev]').addEventListener('click', function () { show(index - 1); });
+  carousel.querySelector('[data-hero-next]').addEventListener('click', function () { show(index + 1); });
+  pause.addEventListener('click', function () { paused = !paused; updatePause(); });
+  carousel.addEventListener('mouseenter', function () { hovering = true; schedule(); });
+  carousel.addEventListener('mouseleave', function () { hovering = false; schedule(); });
+  carousel.addEventListener('focusin', function () { focused = true; schedule(); });
+  carousel.addEventListener('focusout', function (event) { focused = carousel.contains(event.relatedTarget); schedule(); });
+  document.addEventListener('visibilitychange', schedule);
+  reduced.addEventListener('change', function () { if (reduced.matches) paused = true; updatePause(); });
+  window.addEventListener('pagehide', function () { if (timer !== null) window.clearTimeout(timer); timer = null; });
+  window.addEventListener('pageshow', schedule);
+  updatePause();
+})();
+// End homepage banner carousel.
+
 // Reference navigation, stay preview and quote review. Existing URLs remain usable without JS.
 (function () {
   document.querySelectorAll('.nav-dropdown').forEach(function (item) {
@@ -1180,7 +1406,7 @@
       var title = document.createElement('strong'); title.textContent = 'Property details';
       var close = document.createElement('button'); close.type = 'button'; close.className = 'dialog-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Close property details');
       var loading = document.createElement('div'); loading.className = 'stay-preview-loading'; loading.setAttribute('role', 'status'); loading.textContent = 'Loading property details…';
-      var frame = document.createElement('iframe'); var url = new URL(link.href); url.searchParams.set('preview', '1'); frame.src = url.href; frame.title = 'Property details and enquiry';
+      var frame = document.createElement('iframe'); var url = new URL(link.href); url.searchParams.set('preview', '1'); frame.src = url.href; frame.title = 'Property details and enquiry'; frame.allow = 'web-share; clipboard-write';
       head.append(title, close); dialog.append(head, loading, frame); document.body.append(dialog);
       var previousBodyOverflow = document.body.style.overflow, previousRootOverflow = document.documentElement.style.overflow;
       document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden';
@@ -1239,7 +1465,8 @@
             var response = await fetch(previewForm.dataset.priceUrl, { method: 'POST', body: data });
             var price = await response.json(); if (version !== previewRevision) return;
             if (!response.ok || price.errors?.length || !(price.roomCharges > 0) || !(price.nights > 0)) { label.textContent = 'For a personalised offer, fill in your details below and enquire.'; return; }
-            label.textContent = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(price.roomCharges / (price.nights * price.roomsCount)) + ' / room / night · estimated for your dates';
+            var nightlyRate = price.roomCharges / (price.nights * price.roomsCount);
+            label.innerHTML = gsPublicComparisonRate(nightlyRate) + new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(nightlyRate) + ' / room / night · estimated for your dates';
           } catch (_) { if (version === previewRevision) label.textContent = 'Estimate unavailable. Please enquire.'; }
         });
       }, 250);
@@ -1388,10 +1615,35 @@
   form.addEventListener('change', changed);
 })();
 
+
+
 // Approval uses the saved revision, never unsaved edits from the adjacent form.
 (function () {
   var edit = document.querySelector('[data-confirmation-edit]') || document.querySelector('[data-quotation-admin-edit]');
   var approve = document.querySelector('[data-confirmation-approve]') || document.querySelector('[data-quotation-approve]');
   if (!edit || !approve) return;
   edit.addEventListener('input', function () { approve.disabled = true; approve.textContent = 'Save Admin edits before approving'; });
+})();
+
+// Recoverable quotation deletion: native dialog handles focus trapping and Escape.
+(function () {
+  var dialog = document.querySelector('[data-quotation-archive-dialog]');
+  if (!dialog || typeof dialog.showModal !== 'function') return;
+  var form = dialog.querySelector('[data-quotation-archive-form]'), trigger;
+  document.querySelectorAll('[data-quotation-archive-url]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); trigger = link; form.reset();
+      form.action = link.dataset.quotationArchiveUrl;
+      form.elements.reviewed_at.value = link.dataset.archiveVersion;
+      form.elements.archive_revision.value = link.dataset.archiveRevision;
+      dialog.querySelector('[data-quotation-archive-code]').textContent = link.dataset.archiveCode;
+      form.querySelector('[data-archive-submit]').disabled = false;
+      dialog.showModal(); dialog.querySelector('[data-archive-cancel]').focus();
+    });
+  });
+  dialog.querySelector('[data-archive-cancel]').addEventListener('click', function () { dialog.close(); });
+  dialog.addEventListener('close', function () { if (trigger) trigger.focus(); });
+  dialog.addEventListener('click', function (event) { if (event.target === dialog) { var r=dialog.getBoundingClientRect(); if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close(); } });
+  form.addEventListener('submit', function () { form.querySelector('[data-archive-submit]').disabled = true; });
 })();

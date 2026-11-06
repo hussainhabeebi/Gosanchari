@@ -1,3 +1,4 @@
+import { quotationArchiveRoutes } from './routes/quotation-archive'
 import { publicSitemap, robotsText } from './lib/seo'
 // Go Sanchari web portal — one Cloudflare Worker serving pages, API, queue consumer and cron jobs.
 
@@ -14,6 +15,8 @@ import { authRoutes } from './routes/auth'
 import { guestRoutes } from './routes/guest'
 import { staffRoutes } from './routes/staff'
 import { calculatorRoutes } from './routes/rate-calculator'
+import { propertyReviewLinkRoutes } from './routes/property-review-links'
+import { bookingReviewRoutes } from './routes/booking-reviews'
 import { opsRoutes } from './routes/staff-ops'
 import { staffRoomRoutes } from './routes/staff-rooms'
 import { rateSheetRoutes } from './routes/admin-ratesheet'
@@ -27,6 +30,8 @@ import { propertyEditorRoutes } from './routes/admin-properties'
 import { wizardRoutes } from './routes/admin-wizard'
 import { admin2Routes } from './routes/admin2'
 import { webhookRoutes } from './routes/webhooks'
+import { apiRoutes } from './routes/api'
+import { integrationRoutes } from './routes/admin-integrations'
 import { handleQueue } from './jobs/queue'
 import { handleScheduled } from './jobs/cron'
 import { getSettings } from './lib/settings'
@@ -39,11 +44,11 @@ const app = new Hono<AppEnv>()
 const security = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
-    scriptSrc: [NONCE, 'https://connect.facebook.net', "'self'", 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net'],
+    scriptSrc: [NONCE, "'self'", 'https://connect.facebook.net', 'https://challenges.cloudflare.com', 'https://unpkg.com', 'https://cdn.jsdelivr.net', 'https://www.googletagmanager.com'],
     styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
     fontSrc: ["'self'"],
     imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-    connectSrc: ["'self'", 'https://www.facebook.com', 'https://www.facebook.net', 'https://connect.facebook.net'],
+    connectSrc: ["'self'", 'https://www.facebook.com', 'https://www.facebook.net', 'https://connect.facebook.net', 'https://www.google-analytics.com', 'https://region1.google-analytics.com'],
     frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
     mediaSrc: ["'self'"],
     formAction: ["'self'"],
@@ -91,11 +96,15 @@ app.get('/sitemap.xml', publicSitemap)
 app.get('/healthz', (c) => c.json({ ok: true }))
 
 app.route('/', webhookRoutes)
+app.route('/', apiRoutes)
 app.route('/', authRoutes)
 app.route('/', bookingDocRoutes)
 app.route('/', guestRoutes)
 app.route('/', staffRoutes)
 app.route('/', opsRoutes)
+app.route('/', propertyReviewLinkRoutes)
+app.route('/', bookingReviewRoutes)
+app.route('/', quotationArchiveRoutes)
 app.route('/', calculatorRoutes)
 app.route('/', staffRoomRoutes)
 app.route('/', rateSheetRoutes)
@@ -107,6 +116,7 @@ app.route('/', contactRoutes)
 app.route('/', confirmationRoutes)
 app.route('/', voucherRoutes)
 app.route('/', admin2Routes)
+app.route('/', integrationRoutes)
 app.route('/', publicRoutes)
 
 app.notFound((c) =>
@@ -120,7 +130,8 @@ app.notFound((c) =>
 
 app.onError(async (err, c) => {
   if (err instanceof HTTPException) return err.getResponse()
-  console.error('Unhandled error', c.req.method, c.req.path, err)
+  if (c.req.path.startsWith('/review-stay/')) console.error('Unhandled guest review error', c.req.method)
+  else console.error('Unhandled error', c.req.method, c.req.path, err)
   if (c.req.header('accept')?.includes('application/json')) return c.json({ error: 'Something went wrong' }, 500)
   const s = await getSettings(c.env).catch(() => null)
   return c.html(

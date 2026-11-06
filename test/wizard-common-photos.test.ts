@@ -52,6 +52,28 @@ function ui(f:ReturnType<typeof fixture>,id?:number) {
 
 const photo=(name:string)=>new File(['image'],name,{type:'image/jpeg'})
 describe('wizard common photos',()=>{
+  it.each(['image/avif','image/gif','image/bmp','image/apng'])('previews and uploads %s without the old JPG/PNG/WebP-only rejection',async type=>{
+    const f=fixture(),controller=ui(f,1)
+    try{
+      const file=new File(['image'],'common.'+type.split('/')[1],{type})
+      await controller.select([file]);await controller.settle()
+      expect(controller.thumbs.children).toHaveLength(1)
+      expect(controller.thumbs.children[0].children[2].textContent).toBe('Saved')
+      expect(f.put).toHaveBeenCalledTimes(1)
+      expect(f.put.mock.calls[0]).toBeDefined()
+    }finally{controller.close();f.db.close()}
+  })
+
+  it.each(['','application/octet-stream'])('uploads AVIF without a recognized browser MIME type (%s)',async type=>{
+    const f=fixture(),controller=ui(f,1)
+    try{
+      const header=new Uint8Array([0,0,0,20,102,116,121,112,97,118,105,102,0,0,0,0,97,118,105,102])
+      await controller.select([new File([header],'COMMON.AVIF',{type})]);await controller.settle()
+      expect(controller.thumbs.children).toHaveLength(1)
+      expect(controller.thumbs.children[0].children[2].textContent).toBe('Saved')
+      expect(f.put).toHaveBeenCalledTimes(1)
+    }finally{controller.close();f.db.close()}
+  })
   it('selection immediately previews multiple files, then persists thumbnails for navigation/reopening without duplicates',async()=>{
     const f=fixture(),controller=ui(f,1)
     try {

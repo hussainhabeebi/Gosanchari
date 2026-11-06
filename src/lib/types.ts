@@ -109,6 +109,12 @@ export interface PhotoRow {
   room_id: number | null
   media_type: 'image' | 'video'
   video_url: string | null
+  /** AI (Gemini) suggestions — see migration 0021. */
+  ai_category?: string | null
+  ai_caption?: string | null
+  ai_score?: number | null
+  auto_sort?: number
+  source_url?: string | null
 }
 
 export interface NearbyPlace {
@@ -167,6 +173,12 @@ export interface MessageRow {
 }
 
 export interface QuotationRow {
+  archived_at?: string | null
+  archived_by?: number | null
+  archive_reason?: string
+  archive_revision?: number
+  restored_at?: string | null
+  restored_by?: number | null
   /** Derived from persisted quotation-review audit events; not a booking status. */
   review_status?: 'none' | 'pending' | 'approved' | 'rejected'
   apply_gst: number
@@ -198,6 +210,8 @@ export interface QuotationRow {
 export interface QuoteOptionRow {
   /** Staff-reported funds only; never a verified payment receipt. */
   reported_advance: number
+  /** Optional reported date/method/reference; never payment verification. */
+  advance_details?: string
   id: number
   quotation_id: number
   property_id: number

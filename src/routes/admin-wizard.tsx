@@ -5,6 +5,7 @@
 // in the background (only where empty) for staff to check.
 
 import { Hono, type Context } from 'hono'
+import { PROPERTY_IMAGE_ACCEPT, PROPERTY_IMAGE_FORMATS, propertyImageType } from '../lib/property-images'
 import type { Child, FC } from 'hono/jsx'
 import { raw } from 'hono/html'
 import type { AppEnv } from '../env'
@@ -18,7 +19,7 @@ import { mediaUrl } from '../lib/integrations'
 import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { int, isDate, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg } from './helpers'
-import { afterPropertySave } from './admin-properties'
+import { afterPropertySave, AiImportBox, applyAiImport } from './admin-properties'
 import { commonPeakKey, overridePeakKey, parseWeekdays, type SeasonRate } from '../lib/pricing'
 import { peakStatements } from '../lib/wizard-peaks'
 
@@ -207,7 +208,8 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
   const video = photos.find((x) => x.video_url)
   return page(c, { title: p ? `Edit ${p.name}` : 'Add Property', area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={1} done={done} icon={I.home} title="Property Details" sub="Add the property details here. AI can fetch location info and nearby attractions.">
-      <form method="post" action={p ? `/admin/properties/${p.id}/setup/1` : '/admin/properties/new'} enctype="multipart/form-data" class="stack wiz-form">
+      {!p && <AiImportBox open wizard />}
+      <form method="post" action={p ? `/admin/properties/${p.id}/setup/1` : '/admin/properties/new'} enctype="multipart/form-data" class="stack wiz-form" id={p ? undefined : 'prop-form'}>
         <div class="wiz-2">
           <label class="wf"><span class="wl">Property Name <b>*</b></span><input name="name" value={p?.name ?? ''} required maxlength={100} placeholder="e.g. Elixir Woods Resort" /></label>
           <label class="wf"><span class="wl">Destination / Location <b>*</b></span><span class="with-ico">{I.pin}<input name="destination" value={p ? `${p.destination}, Kerala` : ''} required maxlength={80} placeholder="e.g. Munnar, Kerala" /></span></label>
@@ -236,9 +238,9 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
           <span class="muted small">Choose “Use as Thumbnail” on a saved image to set the public property cover. Add common photos and/or a YouTube/Drive video link. New-property photos are saved with Save & Continue.</span>
           <div class="wiz-2 media-row">
             <label class="drop">
-              <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple data-common-photo-input />
+              <input type="file" name="photos" accept={PROPERTY_IMAGE_ACCEPT} multiple data-common-photo-input />
               <span class="drop-ico">{I.image}</span>
-              <span><strong>Upload Photos</strong><small>Add property images<br />(JPG, PNG, WebP, AVIF - Max 10MB each)</small></span>
+              <span><strong>Upload Photos</strong><small>Add property images<br />(JPG, PNG, WebP, AVIF, GIF, BMP, APNG - Max 10MB each)</small></span>
             </label>
             <div>
               <span class="with-ico">{I.link}<input name="video" type="url" value={video?.video_url ?? ''} placeholder="Paste YouTube or Google Drive link (optional)" /></span>
@@ -296,26 +298,30 @@ async function saveStep1(c: Context<AppEnv>, existing: PropertyRow | null) {
     const had = await first(c.env, "SELECT 1 FROM property_photos WHERE property_id = ? AND video_url = ?", id, video)
     if (!had) await run(c.env, "INSERT INTO property_photos (property_id, r2_key, caption, sort, category, media_type, video_url) VALUES (?, '', NULL, 999, 'common', 'video', ?)", id, video)
   }
-  // Keep location/nearby enrichment, without generating property descriptions.
+  // New property: details "Import with AI" found beyond this step (address, dining, rooms, seasons, website photos).
+  const imported = existing ? '' : await applyAiImport(c, id, f)
+  // Keep location/nearby enrichment (it only fills what is still empty), without generating property descriptions.
   await enqueue(c.env, { type: 'enrich_property', propertyId: id })
   await afterPropertySave(c, id)
-  return { id }
+  return { id, imported }
 }
 
 wizardRoutes.post('/admin/properties/new', requirePerm('manage_properties'), async (c) => {
   const r = await saveStep1(c, null)
   if ('err' in r) return redirectMsg(c, '/admin/properties/new', { err: r.err })
+  if (r.imported) return redirectMsg(c, `/admin/properties/${r.id}/setup/2`, { ok: `Property created.${r.imported}` })
   return c.redirect(`/admin/properties/${r.id}/setup/2`, 303)
 })
 
-const IMAGE = /^image\/(jpeg|png|webp|avif)$/
 async function storePhotos(c: Context<AppEnv>, propertyId: number, files: File[], category: string, roomId: number | null) {
   let sort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', propertyId))?.m ?? 0
   const ids: number[] = []
   for (const f of files.slice(0, 20)) {
-    if (!IMAGE.test(f.type) || f.size > 10 * 1024 * 1024) continue
-    const key = `properties/${propertyId}/${category}/${crypto.randomUUID()}.${f.type === 'image/jpeg' ? 'jpg' : f.type.split('/')[1]}`
-    await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: f.type } })
+    if (f.size > 10 * 1024 * 1024) continue
+    const image = await propertyImageType(f)
+    if (!image) continue
+    const key = `properties/${propertyId}/${category}/${crypto.randomUUID()}.${image.extension}`
+    await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: image.contentType } })
     const pid = await insertId(c.env, "INSERT INTO property_photos (property_id, r2_key, sort, category, room_id, media_type) VALUES (?, ?, ?, ?, ?, 'image')", propertyId, key, ++sort, category, roomId)
     await enqueue(c.env, { type: 'photo_tags', photoId: pid })
     ids.push(pid)
@@ -344,14 +350,16 @@ wizardRoutes.post('/admin/properties/:id/common-photos', requirePerm('manage_pro
   const body = await c.req.parseBody()
   const file = body.photo
   const token = String(body.upload_key ?? '')
-  if (!(file instanceof File) || !file.size || !IMAGE.test(file.type) || file.size > 10 * 1024 * 1024) return c.json({ error: 'Choose a JPG, PNG, WebP or AVIF image up to 10 MB.' }, 400)
+  if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) return c.json({ error: `Choose ${PROPERTY_IMAGE_FORMATS} up to 10 MB. Convert HEIC/TIFF photos before uploading.` }, 400)
+  const image = await propertyImageType(file)
+  if (!image) return c.json({ error: `Choose ${PROPERTY_IMAGE_FORMATS}. Convert HEIC/TIFF photos before uploading.` }, 400)
   if (!/^[a-f0-9-]{36}$/i.test(token)) return c.json({ error: 'Invalid upload identifier.' }, 400)
-  const key = `properties/${p.id}/common/${token}.${file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1]}`
+  const key = `properties/${p.id}/common/${token}.${image.extension}`
   const find = () => first<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND r2_key = ? AND room_id IS NULL AND media_type = 'image'", p.id, key)
   try {
     let photo = await find()
     if (!photo) {
-      await c.env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: file.type } })
+      await c.env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: image.contentType } })
       const sort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', p.id))?.m ?? 0
       // Reusing an upload identifier after a lost response must not insert a second record.
       await run(c.env, "INSERT INTO property_photos (property_id,r2_key,sort,category,room_id,media_type) SELECT ?,?,?,'common',NULL,'image' WHERE NOT EXISTS (SELECT 1 FROM property_photos WHERE property_id = ? AND r2_key = ?)", p.id, key, sort + 1, p.id, key)
@@ -579,9 +587,9 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
             <button type="button" class="linklike add-new" data-add-managed-peak>{I.plus} Add New Peak Time</button>
           </div>
           <div class="peak-rows" data-managed-peaks="common"><div data-peak-entries>{(common.length ? common : [null]).map(x => <PeakEntry row={x} rooms={rooms} overrides={rows.filter(y => overridePeakKey(y))} />)}</div></div>
-          {/* Saved room-specific records remain untouched and visible for their original room. */}
+          {/* Only legacy room-specific charges belong here; managed overrides are edited above. */}
           {rooms.map(r => <div data-legacy-peak-room={r.id} hidden={r.id !== rooms[0].id}>
-            {rows.filter(x => x.room_id === r.id && x.supplement != null && !commonPeakKey(x)).map(x => <div class="wiz-4 peak-row">
+            {rows.filter(x => x.room_id === r.id && x.supplement != null && !commonPeakKey(x) && !overridePeakKey(x)).map(x => <div class="wiz-4 peak-row">
               <label class="wf"><span class="wl">From Date</span><input type="date" value={x.start_date} readonly /></label>
               <label class="wf"><span class="wl">To Date</span><input type="date" value={x.end_date} readonly /></label>
               <label class="wf"><span class="wl">Additional Charge (₹)</span><input type="number" value={x.supplement ?? ''} readonly /></label>
@@ -845,8 +853,8 @@ async function step6(c: Context<AppEnv>, p: PropertyRow) {
       <div class="wiz-2 img-pick">
         <label class="wf"><span class="wl">Select Room Category <b>*</b></span><select name={`ib${i}_room`}>{rooms.map((r) => <option value={r.id} selected={room?.id === r.id}>{r.name}</option>)}</select></label>
         <div class="add-photos">
-          <label class="btn btn-blue">{I.upload} Add Photos<input type="file" name={`ib${i}_files`} accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple hidden data-autosubmit /></label>
-          <small class="muted">Upload multiple photos (JPG, PNG, WebP, AVIF)<br />Max 10 MB per image</small>
+          <label class="btn btn-blue">{I.upload} Add Photos<input type="file" name={`ib${i}_files`} accept={PROPERTY_IMAGE_ACCEPT} multiple hidden data-autosubmit /></label>
+          <small class="muted">Upload multiple photos (JPG, PNG, WebP, AVIF, GIF, BMP, APNG)<br />Max 10 MB per image</small>
         </div>
       </div>
       {room && (
@@ -869,7 +877,7 @@ async function step6(c: Context<AppEnv>, p: PropertyRow) {
           <div class="tint-body stack">
             <div class="row wrap-row thumb-now">
               {thumb ? <img src={mediaUrl(thumb.r2_key, 300)} alt="Current thumbnail" /> : <span class="muted small">No thumbnail chosen — the website uses the best exterior photo automatically.</span>}
-              <label class="btn btn-blue">{I.upload} Upload thumbnail<input type="file" name="thumb_file" accept="image/jpeg,image/png,image/webp,image/avif,.avif" hidden data-autosubmit /></label>
+              <label class="btn btn-blue">{I.upload} Upload thumbnail<input type="file" name="thumb_file" accept={PROPERTY_IMAGE_ACCEPT} hidden data-autosubmit /></label>
             </div>
             {images.length > 0 && (
               <div class="thumb-pick" role="radiogroup" aria-label="Choose the thumbnail">
@@ -907,7 +915,7 @@ async function saveStep6(c: Context<AppEnv>, p: PropertyRow): Promise<{ err?: st
   let thumbChanged = false
   if (thumbFile instanceof File && thumbFile.size > 0) {
     const [id] = await storePhotos(c, p.id, [thumbFile], 'common', null)
-    if (!id) return { err: 'Thumbnail must be a JPG, PNG, WebP or AVIF image up to 10 MB.', stay: true }
+    if (!id) return { err: `Thumbnail must be ${PROPERTY_IMAGE_FORMATS} up to 10 MB.`, stay: true }
     await run(c.env, 'UPDATE properties SET thumbnail_photo_id = ? WHERE id = ?', id, p.id)
     thumbChanged = true
   } else if (body.thumbnail != null) {

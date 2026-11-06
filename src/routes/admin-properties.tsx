@@ -3,6 +3,7 @@
 // then (once saved) room categories, photos & videos by section, and tariff by season.
 
 import { Hono, type Context } from 'hono'
+import { PROPERTY_IMAGE_ACCEPT, propertyImageType } from '../lib/property-images'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Field, LeafletHead, Pill, Select } from '../views/components'
@@ -21,14 +22,63 @@ import { form, redirectMsg, type Form } from './helpers'
 import { destinations } from '../lib/properties'
 import { SEASON_KINDS, seasonKindLabel, weekendLabel, weekendNights, type SeasonRate } from '../lib/pricing'
 import { extractProperty, type ExtractedRoom, type ExtractedSeason } from '../lib/propextract'
+import { fetchImage } from '../lib/webimport'
 
 export const propertyEditorRoutes = new Hono<AppEnv>()
+
+/** Quick fill: files read in one run (brochure pages, rate-card photos, screenshots). */
+const MAX_QF_FILES = 10
 
 const SECTIONS: [string, string][] = [
   ['basics', 'Basics'], ['location', 'Location'], ['description', 'Description'], ['dining', 'Dining'], ['facilities', 'Facilities'],
   ['policies', 'Policies'], ['rates', 'Rates setup'], ['contact', 'Contact details'], ['nearby', 'Nearby'], ['seo', 'SEO'], ['remarks', 'Remarks'],
   ['rooms', 'Room categories'], ['media', 'Photos & videos'], ['tariff', 'Tariff & seasons'],
 ]
+
+/**
+ * "Import with AI" box: notes + files + resort website → fills the property form. Used on the full property editor and
+ * on step 1 of the Add Property wizard (`wizard`: details that step has no field for travel to the save as hidden JSON).
+ */
+export const AiImportBox = ({ open, wizard }: { open?: boolean; wizard?: boolean }) => (
+  <details class="card ai-box quick-fill" open={open}>
+    <summary><span class="ai-badge">AI</span> <strong>Import with AI — notes, files or the resort’s website</strong></summary>
+    <p class="muted small">Use any or all of these together: paste notes (owner's WhatsApp message, brochure text — English or Malayalam), attach files, or give the resort's own website link. AI reads them in one go and puts each detail into the right field below, plus room categories and seasonal rates. Fields you have already filled are kept. Nothing is saved until you check and press Save.</p>
+    <Field label="1. Paste notes"><textarea id="qf-text" rows={6} maxlength={12000} placeholder={'e.g. Misty Hills Resort, Chithirapuram, Munnar. 3 star resort built 2018. 12 rooms: 8 Deluxe Valley View (king bed, AC, balcony, kettle) ₹4,500 weekdays ₹5,500 weekends, 4 Family Suites for 4 guests ₹7,000. Christmas–New Year 20 Dec–5 Jan Deluxe 7,500, Suite 10,000, min 2 nights. Pool, parking, free Wi-Fi, restaurant (Kerala, North Indian) breakfast 7:30–10. Check-in 2 pm, check-out 11 am. No pets. 50% advance. 30% refund if cancelled 7 days before. Owner Joseph 98470 12345. 18 km from Mattupetty Dam…'}></textarea></Field>
+    <Field label="2. Attach files — brochure, fact sheet, rate card, photos or screenshots" hint={`PDF, Word (.docx), JPG / PNG / WebP — up to ${MAX_QF_FILES} files, 20 MB together. Photos and scanned PDFs need a Gemini key (Admin → Settings → AI).`}>
+      <input type="file" id="qf-doc" multiple accept=".pdf,.docx,.jpg,.jpeg,.png,.webp,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp,image/heic" />
+    </Field>
+    <Field label="3. Resort website link" hint="The resort's own website. Booking sites (Booking.com, MakeMyTrip, Agoda…) cannot be used. Rates on websites are often old — rooms and seasons found only there are not added unless you tick the box.">
+      <input type="url" id="qf-url" inputmode="url" placeholder="https://www.mistyhillsmunnar.com" maxlength={500} />
+    </Field>
+    <div class="row wrap-row">
+      <label class="check small"><input type="checkbox" id="qf-careful" value="1" /> Read carefully (slower; better for messy or scanned brochures — uses the Gemini “Read carefully” model)</label>
+      <label class="check small"><input type="checkbox" id="qf-overwrite" value="1" /> Also replace values I already filled</label>
+    </div>
+    <div class="row wrap-row">
+      <button type="button" class="btn btn-sm" data-ai-extract="/admin/ai/extract-property">Fill the form with AI</button>
+      <span class="muted small" id="qf-status" role="status" aria-live="polite"></span>
+    </div>
+    <p class="muted small">Privacy: what you give here is sent to the AI service (Google Gemini when a key is saved). Bank details are never copied into the form by AI.</p>
+    <div id="qf-extra" class="stack" hidden>
+      <div id="qf-extra-list" class="small"></div>
+      <label class="check"><input type="checkbox" name="ai_apply_extra" id="qf-apply-extra" value="1" form="prop-form" checked /> Also add these room categories and seasons when I save</label>
+    </div>
+    {/* Details with no field on this page (the wizard's first step) are carried to the save as JSON. */}
+    <input type="hidden" name="ai_fields" id="qf-fields" value="" form="prop-form" />
+    {wizard && <><input type="hidden" name="ai_rooms" id="qf-rooms" value="" form="prop-form" /><input type="hidden" name="ai_seasons" id="qf-seasons" value="" form="prop-form" /></>}
+    <div id="qf-photos" class="stack" hidden>
+      <h3>Photos found on the website</h3>
+      <p class="muted small">Tick the photos to add to this property's gallery when you save. AI sorts them into sections (pool, rooms, views…), writes the alt text and suggests a cover photo.</p>
+      <div id="qf-photo-grid" class="qf-photo-grid"></div>
+      <div class="row wrap-row">
+        <button type="button" class="btn btn-sm btn-outline" data-qf-photos-all>Select all</button>
+        <button type="button" class="btn btn-sm btn-outline" data-qf-photos-none>Select none</button>
+      </div>
+      <label class="check"><input type="checkbox" name="ai_photo_permission" id="qf-photo-permission" value="1" form="prop-form" /> I have the owner's permission to use these photos</label>
+      <input type="hidden" name="ai_photo_urls" id="qf-photo-urls" value="" form="prop-form" />
+    </div>
+  </details>
+)
 
 const Checks = ({ name, options, selected }: { name: string; options: [string, string][]; selected: string[] }) => (
   <div class="facility-grid">{options.map(([v, l]) => <label class="check"><input type="checkbox" name={name} value={v} checked={selected.includes(v)} /> {l}</label>)}</div>
@@ -132,7 +182,7 @@ const NewRoomBlock = ({ idx, showNet }: { idx: string; showNet: boolean }) => (
   <fieldset class="room-edit stack new-room" data-idx={idx}>
     <legend><strong>Room category</strong></legend>
     <RoomFields pf={`nr${idx}_`} optional showNet={showNet} />
-    <Field label="Photos of this room category" hint="JPG / PNG / WebP / AVIF, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple /></Field>
+    <Field label="Photos of this room category" hint="JPG / PNG / WebP / AVIF / GIF / BMP / APNG, up to 15 MB each."><input type="file" name={`nr${idx}_photos`} accept={PROPERTY_IMAGE_ACCEPT} multiple /></Field>
   </fieldset>
 )
 
@@ -158,6 +208,10 @@ function propertyForm(
   const isNew = !p.id
   const suggestedTags = [...new Set(media.filter((ph) => !ph.tags_confirmed).flatMap((ph) => parseJson<string[]>(ph.ai_tags, [])))].filter((t) => !fac.includes(t) && t in FACILITIES)
   const groups = groupSeasons(seasons)
+  // AI cover suggestion: the best-scored common image, shown when it is not already the thumbnail.
+  const aiCover = media.filter((m) => m.media_type === 'image' && m.r2_key && m.category !== 'room' && m.room_id == null && (m.ai_score ?? 0) >= 6)
+    .sort((a, b) => (b.ai_score ?? 0) - (a.ai_score ?? 0))[0]
+  const aiCoverId = aiCover && aiCover.id !== p.thumbnail_photo_id ? aiCover.id : null
   const byCat = Object.keys(PHOTO_CATEGORIES).map((k) => [k, media.filter((m) => m.category === k)] as const).filter(([, list]) => list.length)
   const roomOpts: [string | number, string][] = [['', '— room category —'], ...rooms.map((r) => [r.id, r.name] as [number, string])]
   const visible = SECTIONS.filter(([k]) => (showContact || k !== 'contact') && (!isNew || k !== 'tariff'))
@@ -176,20 +230,7 @@ function propertyForm(
       </nav>
       {isNew && <p class="flash">Fill in the details, room categories and photos, then save. Seasonal tariffs and videos can be added after the first save.</p>}
 
-      <details class="card ai-box quick-fill" open={isNew}>
-        <summary><span class="ai-badge">AI</span> <strong>Quick fill — paste all details in one paragraph</strong></summary>
-        <p class="muted small">Paste everything you have — owner's WhatsApp message, brochure text, your notes (English or Malayalam). AI puts each detail into the right field below, plus room categories and seasonal rates. Nothing is saved until you check and press Save.</p>
-        <textarea id="qf-text" rows={8} maxlength={12000} placeholder={'e.g. Misty Hills Resort, Chithirapuram, Munnar. 3 star resort built 2018. 12 rooms: 8 Deluxe Valley View (king bed, AC, balcony, kettle) ₹4,500 weekdays ₹5,500 weekends, 4 Family Suites for 4 guests ₹7,000. Christmas–New Year 20 Dec–5 Jan Deluxe 7,500, Suite 10,000, min 2 nights. Pool, parking, free Wi-Fi, restaurant (Kerala, North Indian) breakfast 7:30–10. Check-in 2 pm, check-out 11 am. No pets. 50% advance. 30% refund if cancelled 7 days before. Owner Joseph 98470 12345. 18 km from Mattupetty Dam…'}></textarea>
-        <Field label="Or attach a fact sheet / brochure (PDF or Word)"><input type="file" id="qf-doc" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" /></Field>
-        <div class="row wrap-row">
-          <button type="button" class="btn btn-sm" data-ai-extract="/admin/ai/extract-property">Fill the form with AI</button>
-          <span class="muted small" id="qf-status"></span>
-        </div>
-        <div id="qf-extra" class="stack" hidden>
-          <div id="qf-extra-list" class="small"></div>
-          <label class="check"><input type="checkbox" name="ai_apply_extra" value="1" form="prop-form" checked /> Also add these room categories and seasons when I save</label>
-        </div>
-      </details>
+      <AiImportBox open={isNew} />
 
       <form method="post" action={isNew ? '/admin/properties/new' : `/admin/properties/${p.id}`} class="stack-lg" id="prop-form" enctype={isNew ? 'multipart/form-data' : undefined}>
         <input type="hidden" name="ai_rooms" id="qf-rooms" value="" />
@@ -359,7 +400,7 @@ function propertyForm(
               <div class="upload-box stack">
                 <h3>Common photos</h3>
                 <Field label="Section"><Select name="new_photos_category" options={COMMON_SECTIONS} /></Field>
-                <Field label="Photos" hint="JPG / PNG / WebP / AVIF, up to 15 MB each."><input type="file" name="new_photos" accept="image/jpeg,image/png,image/webp,image/avif,.avif" multiple /></Field>
+                <Field label="Photos" hint="JPG / PNG / WebP / AVIF / GIF / BMP / APNG, up to 15 MB each."><input type="file" name="new_photos" accept={PROPERTY_IMAGE_ACCEPT} multiple /></Field>
               </div>
             </section>
           </>
@@ -411,14 +452,14 @@ function propertyForm(
                   ? <Field label="Room category"><Select name="room_id" options={roomOpts} required /></Field>
                   : <p class="muted small">Add a room category first (section above).</p>}
                 <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
-                <Field label="Photos or videos" hint="Photos up to 15 MB each (20 at a time). Videos MP4/WebM up to 90 MB."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,image/avif,.avif,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <Field label="Photos or videos" hint="Photos up to 15 MB each (20 at a time). Videos MP4/WebM up to 90 MB."><input type="file" name="files" accept={`${PROPERTY_IMAGE_ACCEPT},video/mp4,video/webm,video/quicktime`} multiple required /></Field>
                 <button class="btn btn-sm" disabled={!rooms.length}>Upload room photos</button>
               </form>
               <form method="post" action={`/admin/properties/${p.id}/media`} enctype="multipart/form-data" class="upload-box stack">
                 <h3>Common photos</h3>
                 <Field label="Section"><Select name="category" options={COMMON_SECTIONS} /></Field>
                 <Field label="Caption (optional)"><input name="caption" maxlength={120} /></Field>
-                <Field label="Photos or videos" hint="Common areas, exterior, pool, views, restaurant, activities."><input type="file" name="files" accept="image/jpeg,image/png,image/webp,image/avif,.avif,video/mp4,video/webm,video/quicktime" multiple required /></Field>
+                <Field label="Photos or videos" hint="Common areas, exterior, pool, views, restaurant, activities."><input type="file" name="files" accept={`${PROPERTY_IMAGE_ACCEPT},video/mp4,video/webm,video/quicktime`} multiple required /></Field>
                 <button class="btn btn-sm">Upload common photos</button>
               </form>
             </div>
@@ -438,7 +479,10 @@ function propertyForm(
                     <form method="post" action={`/admin/photos/${ph.id}`} class="photo-tile">
                       {ph.media_type === 'video'
                         ? ph.video_url ? <div class="video-thumb">▶ <a href={ph.video_url} target="_blank" rel="noopener">Video link</a></div> : <video src={mediaUrl(ph.r2_key)} preload="metadata" muted controls></video>
-                        : <img src={mediaUrl(ph.r2_key, 300)} alt="" loading="lazy" />}
+                        : <img src={mediaUrl(ph.r2_key, 300)} alt={ph.caption ?? ''} loading="lazy" />}
+                      {aiCoverId === ph.id && <div class="small"><span class="ai-badge sm">AI</span> Suggested cover photo</div>}
+                      {ph.ai_category && ph.ai_category !== ph.category && ph.ai_category in PHOTO_CATEGORIES && <div class="small"><span class="ai-badge sm">AI</span> Looks like: {PHOTO_CATEGORIES[ph.ai_category]}</div>}
+                      {!!ph.auto_sort && <div class="small muted">AI is sorting this photo…</div>}
                       {ph.room_id == null && ph.category !== 'room' && ph.media_type === 'image' && ph.r2_key && <button class="btn btn-sm btn-outline common-thumbnail-control" name="photo_id" value={ph.id} formaction={`/admin/properties/${p.id}/common-thumbnail`} formnovalidate data-select-common-thumbnail={ph.id} aria-pressed={ph.id === p.thumbnail_photo_id ? 'true' : 'false'} disabled={ph.id === p.thumbnail_photo_id}>{ph.id === p.thumbnail_photo_id ? 'Selected Thumbnail' : 'Use as Thumbnail'}</button>}
                       <Select name="category" value={ph.category} options={Object.entries(PHOTO_CATEGORIES)} />
                       {(ph.category === 'room' || ph.room_id) && <Select name="room_id" value={ph.room_id ?? ''} options={roomOpts} />}
@@ -650,6 +694,9 @@ propertyEditorRoutes.post('/admin/properties/new', requirePerm('manage_propertie
   const added = await addNewRooms(c, id, f)
   const extra = await applyExtracted(c, id, f)
   const photos = await uploadNewPropertyPhotos(c, id, added)
+  const web = await importWebPhotos(c, id, f)
+  photos.n += web.n
+  photos.skipped.push(...web.skipped)
   await afterPropertySave(c, id)
   await logActivity(c.env, c.get('user')!.id, 'property.created', 'property', id, { name: v.name, rooms: added.size, photos: photos.n })
   const parts = [added.size && `${added.size} room categor${added.size === 1 ? 'y' : 'ies'}`, photos.n && `${photos.n} photo${photos.n === 1 ? '' : 's'}`].filter(Boolean)
@@ -668,10 +715,12 @@ propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_propertie
   await run(c.env, 'UPDATE property_photos SET tags_confirmed = 1 WHERE property_id = ?', id)
   await run(c.env, 'INSERT OR IGNORE INTO destinations (name, slug) VALUES (?, ?)', v.destination, slugify(v.destination))
   const extra = await applyExtracted(c, id, f)
+  const web = await importWebPhotos(c, id, f)
   await afterPropertySave(c, id)
   const changed = cols.filter((k) => String((before as unknown as Record<string, unknown>)[k] ?? '') !== String((v as Record<string, unknown>)[k] ?? ''))
   await logActivity(c.env, c.get('user')!.id, 'property.updated', 'property', id, { changed })
-  return redirectMsg(c, `/admin/properties/${id}`, { ok: `Saved.${extra}` })
+  const webMsg = web.n ? ` Added ${web.n} photo${web.n === 1 ? '' : 's'} from the website — AI is sorting them into sections.` : ''
+  return redirectMsg(c, `/admin/properties/${id}`, web.skipped.length ? { ok: `Saved.${extra}${webMsg}`, err: `Some website photos could not be added: ${web.skipped.join(', ').slice(0, 200)}` } : { ok: `Saved.${extra}${webMsg}` })
 })
 
 // ---- Room categories ----
@@ -823,8 +872,84 @@ async function uploadNewPropertyPhotos(c: Context<AppEnv>, propertyId: number, r
   return { n, skipped }
 }
 
+/** Editor field names (as AI returns them) → the property columns they feed. Step-1 wizard fields are not here. */
+const AI_COLUMNS: [RegExp, string[]][] = [
+  [/^address$/, ['address']], [/^map_url$/, ['map_url', 'lat', 'lng']], [/^(lat|lng)$/, ['lat', 'lng']], [/^star_category$/, ['star_category']],
+  [/^built_year$/, ['built_year']], [/^how_to_reach$/, ['how_to_reach']], [/^good_to_know$/, ['good_to_know']], [/^description$/, ['description']],
+  [/^meal_plans$/, ['meal_plans']], [/^d_/, ['dining']], [/^pol_/, ['policies']], [/^con_/, ['contact', 'owner_name', 'owner_phone', 'owner_email']],
+  [/^checkin_time$/, ['checkin_time']], [/^checkout_time$/, ['checkout_time']], [/^id_required$/, ['id_required']],
+  [/^cancellation_policy$/, ['cancellation_policy']], [/^house_rules$/, ['house_rules']], [/^nearby$/, ['nearby']],
+  [/^pet_friendly$/, ['pet_friendly']], [/^family_friendly$/, ['family_friendly']], [/^internal_notes$/, ['internal_notes']],
+]
+
+/**
+ * Wizard step 1 of a NEW property: details "Import with AI" found that have no field on that step (address, dining,
+ * policies, contact…), plus its rooms, seasons and picked website photos. Returns a message part.
+ */
+export async function applyAiImport(c: Context<AppEnv>, propertyId: number, f: Form): Promise<string> {
+  const raw = parseJson<Record<string, unknown>>(f.ai_fields, {})
+  const fake = { __all: {} } as Form
+  for (const [k, v] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+    if (Array.isArray(v)) { fake.__all[k] = v.map(String); fake[k] = String(v[0] ?? '') } else if (typeof v === 'boolean') fake[k] = v ? '1' : ''
+    else if (typeof v === 'string' || typeof v === 'number') fake[k] = String(v)
+  }
+  const cols = new Set<string>()
+  for (const k of Object.keys(raw ?? {})) for (const [re, cs] of AI_COLUMNS) if (re.test(k)) cs.forEach((x) => cols.add(x))
+  const withContact = await canSeeContacts(c)
+  if (!withContact) ['contact', 'owner_name', 'owner_phone', 'owner_email'].forEach((x) => cols.delete(x))
+  let filled = 0
+  if (cols.size) {
+    const v = propertyValues(fake, withContact, await canSeeNet(c), null) as Record<string, unknown>
+    const set = [...cols].filter((k) => k in v)
+    if (set.length) {
+      await run(c.env, `UPDATE properties SET ${set.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...set.map((k) => v[k] as string | number | null), propertyId)
+      filled = Object.keys(raw).length
+      await logActivity(c.env, c.get('user')!.id, 'property.quick_fill', 'property', propertyId, { fields: Object.keys(raw).slice(0, 60) })
+    }
+  }
+  const extra = await applyExtracted(c, propertyId, f)
+  const web = await importWebPhotos(c, propertyId, f)
+  return [
+    filled ? ` AI also filled ${filled} other detail${filled === 1 ? '' : 's'} (address, dining, policies…) — check them on the full property editor.` : '',
+    extra,
+    web.n ? ` Added ${web.n} photo${web.n === 1 ? '' : 's'} from the website.` : '',
+    web.skipped.length ? ` Some website photos were not added: ${web.skipped.join(', ').slice(0, 160)}.` : '',
+  ].join('')
+}
+
+/** Website photos picked in "Import with AI": downloaded into R2 on save (only with the owner's-permission box ticked). */
+async function importWebPhotos(c: Context<AppEnv>, propertyId: number, f: Form): Promise<{ n: number; skipped: string[] }> {
+  const urls = parseJson<unknown[]>(f.ai_photo_urls, [])
+  const list = (Array.isArray(urls) ? urls : []).filter((u): u is string => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 20)
+  if (!list.length) return { n: 0, skipped: [] }
+  if (!f.ai_photo_permission) return { n: 0, skipped: ['not added — tick “I have the owner’s permission” to import website photos'] }
+  const maxSort = (await first<{ m: number }>(c.env, 'SELECT COALESCE(MAX(sort), 0) AS m FROM property_photos WHERE property_id = ?', propertyId))?.m ?? 0
+  const known = new Set((await all<{ source_url: string }>(c.env, 'SELECT source_url FROM property_photos WHERE property_id = ? AND source_url IS NOT NULL', propertyId)).map((r) => r.source_url))
+  let n = 0
+  const skipped: string[] = []
+  const short = (u: string) => decodeURIComponent(u.split('/').pop() ?? u).slice(0, 40)
+  // A few at a time: each image is held in memory until it is written to R2.
+  for (let i = 0; i < list.length; i += 4) {
+    await Promise.all(list.slice(i, i + 4).map(async (url) => {
+      if (known.has(url)) return
+      const img = await fetchImage(url)
+      if ('error' in img) { skipped.push(`${short(url)} (${img.error})`); return }
+      const key = `properties/${propertyId}/common/${crypto.randomUUID()}.${img.type.split('/')[1]}`
+      await c.env.MEDIA.put(key, img.body, { httpMetadata: { contentType: img.type } })
+      const pid = await insertId(
+        c.env,
+        "INSERT INTO property_photos (property_id, r2_key, sort, category, media_type, auto_sort, source_url) VALUES (?, ?, ?, 'common', 'image', 1, ?)",
+        propertyId, key, maxSort + list.indexOf(url) + 1, url,
+      )
+      await enqueue(c.env, { type: 'photo_tags', photoId: pid })
+      n++
+    }))
+  }
+  if (n) await logActivity(c.env, c.get('user')!.id, 'media.imported_from_website', 'property', propertyId, { count: n })
+  return { n, skipped }
+}
+
 // ---- Photos & videos ----
-const IMAGE_TYPES = /^image\/(jpeg|png|webp|avif)$/
 const VIDEO_TYPES = /^video\/(mp4|webm|quicktime)$/
 
 /** Save uploaded photos/videos to R2 and the gallery. Images get AI tag suggestions in the background. */
@@ -833,15 +958,16 @@ async function storeMedia(c: Context<AppEnv>, propertyId: number, files: File[],
   let n = 0
   const skipped: string[] = []
   for (const f of files.slice(0, 20)) {
-    const isImage = IMAGE_TYPES.test(f.type)
+    const image = f.size <= 15 * 1024 * 1024 ? await propertyImageType(f) : null
+    const isImage = !!image
     const isVideo = VIDEO_TYPES.test(f.type)
     if ((!isImage && !isVideo) || (isImage && f.size > 15 * 1024 * 1024) || (isVideo && f.size > 90 * 1024 * 1024)) {
       skipped.push(f.name)
       continue
     }
-    const ext = f.type === 'video/quicktime' ? 'mov' : f.type.split('/')[1]
+    const ext = image?.extension ?? (f.type === 'video/quicktime' ? 'mov' : f.type.split('/')[1])
     const key = `properties/${propertyId}/${category}/${crypto.randomUUID()}.${ext}`
-    await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: f.type } })
+    await c.env.MEDIA.put(key, f.stream(), { httpMetadata: { contentType: image?.contentType ?? f.type } })
     const pid = await insertId(
       c.env,
       'INSERT INTO property_photos (property_id, r2_key, caption, sort, category, room_id, media_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -973,11 +1099,13 @@ propertyEditorRoutes.post('/admin/ai/seo', requirePerm('manage_properties'), asy
 })
 
 propertyEditorRoutes.post('/admin/ai/extract-property', requirePerm('manage_properties'), async (c) => {
-  const f = await form(c)
-  const text = str(f.text, 12000)
-  const body = await c.req.parseBody()
-  const file = body.doc instanceof File && body.doc.size > 0 ? body.doc : null
-  if (text.length < 20 && !file) return c.json({ error: 'Paste a few lines about the property, or attach a PDF / Word file.' })
-  const doc = file ? { name: file.name, type: file.type, data: await file.arrayBuffer() } : null
-  return c.json(await extractProperty(c.env, text, doc))
+  const body = await c.req.parseBody({ all: true })
+  const one = (k: string) => { const v = body[k]; return typeof v === 'string' ? v : Array.isArray(v) && typeof v[0] === 'string' ? v[0] : '' }
+  const text = str(one('text'), 12000)
+  const url = str(one('url'), 500)
+  const files = (Array.isArray(body.doc) ? body.doc : [body.doc]).filter((f): f is File => f instanceof File && f.size > 0)
+  if (files.length > MAX_QF_FILES) return c.json({ error: `Please attach at most ${MAX_QF_FILES} files at a time.` })
+  if (text.length < 20 && !files.length && !url) return c.json({ error: 'Paste a few lines about the property, attach a file, or give the resort’s website link.' })
+  const docs = await Promise.all(files.map(async (f) => ({ name: f.name, type: f.type, data: await f.arrayBuffer() })))
+  return c.json(await extractProperty(c.env, { text: text.length >= 20 ? text : '', docs, url: url || undefined, careful: one('careful') === '1' }))
 })

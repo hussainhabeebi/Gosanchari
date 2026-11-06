@@ -44,10 +44,10 @@ describe('public AI discovery', () => {
       expect(hero).not.toContain('Prefer to choose')
       expect(html.slice(end)).toMatch(/^\s*<section class="wrap section popular-stays">/)
       expect(html).toContain('href="/#ai-search"')
-      expect(html).toContain('href="/#ai-insights"')
+      expect(html).not.toContain('href="/#ai-insights"')
     } finally { db.close() }
   })
-  it('keeps AI search and insights available below Popular Stays without the hero AI box', async () => {
+  it('keeps AI search below Popular Stays but removes the AI Insights panel', async () => {
     const { db, env, app } = fixture()
     try {
       db.exec("UPDATE properties SET review_summary='Quiet surroundings and welcoming hosts',rating_count=5 WHERE status='live'")
@@ -59,10 +59,15 @@ describe('public AI discovery', () => {
       expect(hero).not.toContain('ai-example-chips')
       expect(hero).not.toContain('manual-search')
       expect(html.indexOf('id="ai-search"')).toBeGreaterThan(html.indexOf('popular-stays'))
-      expect(html.indexOf('id="ai-insights"')).toBeGreaterThan(html.indexOf('popular-stays'))
+      expect(html).not.toContain('id="ai-insights"')
       expect(html).toContain('name="ai"')
-      expect(html).toContain('Quiet surroundings and welcoming hosts')
-      expect(html).toContain('AI-generated summaries of guest reviews')
+      expect(html).not.toContain('Quiet surroundings and welcoming hosts')
+      expect(html).not.toContain('AI-generated summaries of guest reviews')
+      const search = await app.request('http://localhost/search', {}, env)
+      expect(search.status).toBe(200)
+      const results = await search.text()
+      expect(results).not.toContain('ai-insights-panel')
+      expect(results).toContain('Describe your stay')
     } finally { db.close() }
   })
   it('redirects a natural language search with filters and without a second AI query', async () => {

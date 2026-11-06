@@ -27,6 +27,7 @@ export const AI_FEATURES = {
   ask_ai: 'Ask AI (business questions)',
   review_insights: 'Review problem alerts and reply drafts',
   description_writer: 'Property description writer',
+  resort_email: 'Resort email writer (drafts emails to resorts in Resort contacts)',
   property_extract: 'Property quick fill (paste details, AI fills the form)',
   rate_sheet: 'Read B2B rate sheets (PDF / Word) into room and season rates',
   staff_assistant: 'Staff AI assistant (find properties and exact prices for a client)',
@@ -65,7 +66,7 @@ export interface Settings {
     assistant_tone: string
     handoff_topics: string[]
     daily_limit: number
-    models: { small: string; large: string; embed: string; whisper: string; translate: string; vision: string; fallback: string; gemini: string }
+    models: { small: string; large: string; embed: string; whisper: string; translate: string; vision: string; fallback: string; gemini: string; gemini_pro: string }
     /** 'auto' = Gemini for text when an API key is saved, else Workers AI; 'workers' = always Workers AI. */
     provider: 'auto' | 'workers'
   }
@@ -125,6 +126,8 @@ export const DEFAULT_SETTINGS: Settings = {
       vision: '@cf/llava-hf/llava-1.5-7b-hf',
       fallback: '@cf/meta/llama-3.1-8b-instruct-fast',
       gemini: 'gemini-2.5-flash',
+      /** "Read carefully" in property quick fill: slower, better on messy scanned brochures. */
+      gemini_pro: 'gemini-2.5-pro',
     },
     provider: 'auto',
   },
@@ -175,8 +178,27 @@ export interface Content {
   faqs: Faq[]
   about: string
   policies: { privacy: string; cancellation: string; terms: string }
+  recommended_property_ids: number[]
   featured_review_ids: number[]
 }
+
+export const DEFAULT_ABOUT = `More Than a Stay. A Friend for Every Journey.
+
+At *Go Sanchari*, we believe every journey deserves to be special. With over 10 years of experience in the travel industry, we started with one mission: to help people enjoy quality stays at affordable prices, with trust and peace of mind.
+
+We personally check our properties and choose stays with good guest reviews. From families and couples to groups, we help everyone find the right stay for their budget, backed by booking confirmation and *24/7 customer support*.
+
+Our AI-powered website makes travel planning feel like talking to a friend. Share your ideas, ask questions, discuss your budget, and let us help you find a stay that suits your dreams.
+
+Today, we serve destinations like Munnar, Vagamon, Wayanad, Ooty, Kodaikanal, and Alappuzha. Tomorrow, wherever your dreams take you, we want to help you get there.
+
+*Our relationship doesn't end at checkout.* We want to be your family friend, your travel companion, and the helping hand behind your dream journeys.
+
+We don't just want to show you the way. We want to walk beside you, help you discover beautiful places, and make every journey memorable.
+
+Your Dreams. Your Journey. Our Happiness.
+
+*Go Sanchari — Your Travel Friend, Wherever You Go.*`
 
 export const DEFAULT_CONTENT: Content = {
   hero: {
@@ -195,8 +217,9 @@ export const DEFAULT_CONTENT: Content = {
     { icon: '📝', title: 'Free, no-obligation quotes', text: 'Send an enquiry — no payment needed until you confirm.' },
   ],
   faqs: [],
-  about: '',
+  about: DEFAULT_ABOUT,
   policies: { privacy: '', cancellation: '', terms: '' },
+  recommended_property_ids: [],
   featured_review_ids: [],
 }
 

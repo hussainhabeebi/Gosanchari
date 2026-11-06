@@ -1,9 +1,12 @@
-// "Quick fill with AI": staff paste everything they know about a property as one paragraph (notes, an owner's
-// WhatsApp message, a brochure), AI sorts it into the editor's fields. Nothing is saved until staff review and save.
+// "Quick fill with AI": staff give everything they have about a property — pasted notes (an owner's WhatsApp
+// message, brochure text), files (PDF, Word, photos / screenshots of a rate card) and/or the resort's website link —
+// and AI sorts it into the editor's fields. All sources are read together in one run, and every filled field says
+// where it came from. Nothing is saved until staff review and save.
 
 import type { Env } from '../env'
-import { aiEnabled, aiJson, geminiActive } from './ai'
-import { aiJsonFromDocument, type DocInput } from './docs'
+import { aiEnabled, aiJson, aiText, geminiActive } from './ai'
+import { aiJsonFromDocuments, type DocInput } from './docs'
+import { readWebsite, type WebImport } from './webimport'
 import { CONTACT_FIELDS, CUISINES, MENU_TYPES, POLICY_FIELDS, ROOM_AMENITIES, ROOM_VIEWS, STAY_TYPES, THEMES } from './catalog'
 import { FACILITIES, MEAL_PLANS } from './search'
 import { todayIST } from './util'
@@ -50,7 +53,8 @@ const FIELDS: Record<string, [Kind, string]> = {
   cancellation_policy: ['long', 'cancellation policy'],
   ...Object.fromEntries(POLICY_FIELDS.map(([k, label]) => [`pol_${k}`, ['text', label.toLowerCase()] as [Kind, string]])),
   house_rules: ['lines', 'other house rules'],
-  ...Object.fromEntries(CONTACT_FIELDS.map(([k, label]) => [`con_${k}`, [k === 'bank_details' ? 'long' : 'text', label.toLowerCase()] as [Kind, string]])),
+  // Bank details are never copied into the form by AI (privacy; staff type them in).
+  ...Object.fromEntries(CONTACT_FIELDS.filter(([k]) => k !== 'bank_details').map(([k, label]) => [`con_${k}`, ['text', label.toLowerCase()] as [Kind, string]])),
   nearby: ['lines', 'nearby places, each "Name | type | km | travel time"; type one of attraction, railway, airport, bus, hospital, atm, shopping, restaurant, beach, waterfall, viewpoint'],
   internal_notes: ['long', 'anything else that does not fit another field (internal remarks)'],
 }
@@ -76,11 +80,13 @@ const ROOM_KEYS: Record<string, [Kind, string]> = {
 }
 
 export interface ExtractedRoom { [k: string]: string | number | boolean | string[] }
-export interface ExtractedSeason { name: string; start_date: string; end_date: string; min_nights?: number; rates: Record<string, number> }
+export interface ExtractedSeason { name: string; start_date: string; end_date: string; min_nights?: number; rates: Record<string, number>; src?: string }
 export interface Extracted {
   fields: Record<string, string | boolean | string[]>
   rooms: ExtractedRoom[]
   seasons: ExtractedSeason[]
+  /** Field name → where it came from (only when more than one source was given, or set for all from the only one). */
+  sources?: Record<string, string>
 }
 
 function describe(spec: Record<string, [Kind, string]>) {
@@ -95,11 +101,19 @@ function describe(spec: Record<string, [Kind, string]>) {
 const RULES = `Rules: use ONLY facts in the notes, never invent. Leave out a key when the notes don't say.
 Rates are plain numbers in rupees (no symbols; "4.5k" = 4500). Translate Malayalam facts to English. Reply with JSON only, no explanation.`
 
+/** Where a fact came from. Notes are marked with "=== Source: … ===" headers when there is more than one. */
+export type Source = 'notes' | 'file' | 'website'
+export const SOURCE_LABEL: Record<Source, string> = { notes: 'your notes', file: 'file', website: 'website' }
+
+const srcRule = (sources: Source[], what: string) => sources.length > 1
+  ? `\nThe notes come from several sources (${sources.join(', ')}). When they disagree, prefer: file and notes over website for rates; website structured data for name, address and coordinates. ${what}`
+  : ''
+
 /** Prompt for the property's own fields (call 1 of 2). */
-export function fieldsPrompt(text: string) {
+export function fieldsPrompt(text: string, sources: Source[] = []) {
   return `Below are notes about a holiday property in Kerala, India. Sort the facts into one JSON object with these keys:
 ${describe(FIELDS)}
-${RULES}
+${RULES}${srcRule(sources, `Also add "_src": an object giving, for each key you filled, the source it came from (one of ${sources.join(', ')}).`)}
 
 Notes:
 """
@@ -108,19 +122,65 @@ ${text}
 }
 
 /** Prompt for room categories and seasonal rates (call 2 of 2). */
-export function roomsPrompt(text: string, today = todayIST()) {
+export function roomsPrompt(text: string, today = todayIST(), sources: Source[] = []) {
   return `Today is ${today}. Below are notes about a holiday property in Kerala, India. Find its room categories and seasonal rates.
 Reply as JSON: {"rooms": [...], "seasons": [...]}.
 "rooms": one object per room category with keys:
 ${describe(ROOM_KEYS)}
 "seasons": seasonal / peak / festival rates, each {"name": string, "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" (last night), "min_nights": number, "rates": {"<room category name exactly as in rooms>": rate}}.
 For dates without a year use the next upcoming occurrence. Use [] when there are none.
-${RULES}
+${RULES}${srcRule(sources, `Give every room and season a "src" key: the source its rates came from (one of ${sources.join(', ')}).`)}
 
 Notes:
 """
 ${text}
 """`
+}
+
+// ---- Gemini structured output: the same keys as the prompts, so Gemini cannot reply with broken or made-up keys ----
+type Schema = Record<string, unknown>
+function schemaOf(kind: Kind): Schema {
+  if (typeof kind === 'string') {
+    if (kind === 'num') return { type: 'NUMBER' }
+    if (kind === 'bool') return { type: 'BOOLEAN' }
+    if (kind === 'lines') return { type: 'ARRAY', items: { type: 'STRING' } }
+    return { type: 'STRING' }
+  }
+  if ('pick' in kind) return { type: 'STRING', enum: kind.pick }
+  return { type: 'ARRAY', items: { type: 'STRING', enum: kind.list } }
+}
+const objectSchema = (spec: Record<string, [Kind, string]>, extra: Schema = {}): Schema => ({
+  type: 'OBJECT',
+  properties: { ...Object.fromEntries(Object.entries(spec).map(([k, [kind]]) => [k, schemaOf(kind)])), ...extra },
+})
+
+export function fieldsSchema(sources: Source[] = []): Schema {
+  const src = sources.length > 1 ? { _src: objectSchema(Object.fromEntries(Object.keys(FIELDS).map((k) => [k, [{ pick: sources }, ''] as [Kind, string]]))) } : {}
+  return objectSchema(FIELDS, src)
+}
+
+export function roomsSchema(sources: Source[] = []): Schema {
+  const src: Schema = sources.length > 1 ? { src: { type: 'STRING', enum: sources } } : {}
+  return {
+    type: 'OBJECT',
+    properties: {
+      rooms: { type: 'ARRAY', items: objectSchema(ROOM_KEYS, src) },
+      seasons: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            name: { type: 'STRING' }, start_date: { type: 'STRING' }, end_date: { type: 'STRING' }, min_nights: { type: 'NUMBER' },
+            // Room names are free text, so rates come as a list and are turned back into a map in normalizeExtract.
+            rates: { type: 'ARRAY', items: { type: 'OBJECT', properties: { room: { type: 'STRING' }, rate: { type: 'NUMBER' } }, required: ['room', 'rate'] } },
+            ...src,
+          },
+          required: ['name', 'start_date', 'end_date', 'rates'],
+        },
+      },
+    },
+    required: ['rooms', 'seasons'],
+  }
 }
 
 /** Strip chat formatting (markdown, emoji, separators) so the model gets the facts in fewer tokens. */
@@ -226,60 +286,123 @@ function normalizeObject(spec: Record<string, [Kind, string]>, raw: unknown) {
 const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s))
 
 /** Turn whatever the model returned into safe values keyed by the editor's field names. */
-export function normalizeExtract(raw: unknown): Extracted {
+const SOURCES: Source[] = ['notes', 'file', 'website']
+const srcOf = (v: unknown) => (SOURCES as unknown[]).includes(v) ? (v as Source) : null
+
+export function normalizeExtract(raw: unknown, only?: Source): Extracted {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  const fields = normalizeObject(FIELDS, r.fields ?? r)
+  const rawFields = (r.fields ?? r) as Record<string, unknown>
+  const fields = normalizeObject(FIELDS, rawFields)
   const lat = parseFloat(String(fields.lat ?? ''))
   const lng = parseFloat(String(fields.lng ?? ''))
   if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) { delete fields.lat; delete fields.lng }
   if (typeof fields.map_url === 'string' && !/^https?:\/\//.test(fields.map_url)) delete fields.map_url
   const rooms = (Array.isArray(r.rooms) ? r.rooms : [])
-    .map((x) => normalizeObject(ROOM_KEYS, x))
+    .map((x) => {
+      const o = normalizeObject(ROOM_KEYS, x) as ExtractedRoom
+      const src = only ?? srcOf((x as Record<string, unknown> | null)?.src)
+      if (src) o.src = src
+      return o
+    })
     .filter((x) => typeof x.name === 'string' && x.name)
-    .slice(0, 20) as ExtractedRoom[]
+    .slice(0, 20)
   const seasons: ExtractedSeason[] = []
   for (const s of Array.isArray(r.seasons) ? (r.seasons as Record<string, unknown>[]).slice(0, 20) : []) {
     if (!s || typeof s !== 'object') continue
     const name = clean(s.name, 60)
     if (!name || !isDate(s.start_date) || !isDate(s.end_date) || s.end_date < s.start_date) continue
     const rates: Record<string, number> = {}
-    for (const [room, v] of Object.entries((s.rates && typeof s.rates === 'object' ? s.rates : {}) as Record<string, unknown>)) {
+    // Structured output gives [{room, rate}]; plain JSON mode gives {"room": rate}.
+    const rateMap = Array.isArray(s.rates)
+      ? Object.fromEntries((s.rates as Record<string, unknown>[]).filter((x) => x && typeof x === 'object').map((x) => [String(x.room ?? ''), x.rate]))
+      : (s.rates && typeof s.rates === 'object' ? s.rates : {})
+    for (const [room, v] of Object.entries(rateMap as Record<string, unknown>)) {
       const n = numOf(v)
       if (n && n > 0) rates[clean(room, 80)] = Math.round(n)
     }
     if (!Object.keys(rates).length) continue
     const mn = numOf(s.min_nights)
-    seasons.push({ name, start_date: s.start_date, end_date: s.end_date, ...(mn && mn > 0 ? { min_nights: Math.round(mn) } : {}), rates })
+    const src = only ?? srcOf(s.src)
+    seasons.push({ name, start_date: s.start_date, end_date: s.end_date, ...(mn && mn > 0 ? { min_nights: Math.round(mn) } : {}), rates, ...(src ? { src } : {}) })
   }
-  return { fields, rooms, seasons }
+  const sources: Record<string, string> = {}
+  const rawSrc = (rawFields && typeof rawFields === 'object' ? rawFields._src : null) as Record<string, unknown> | null
+  for (const k of Object.keys(fields)) {
+    const src = only ?? srcOf(rawSrc && typeof rawSrc === 'object' ? rawSrc[k] : null)
+    if (src) sources[k] = src
+  }
+  return { fields, rooms, seasons, ...(Object.keys(sources).length ? { sources } : {}) }
 }
 
-export type ExtractResult = (Extracted & { warning?: string }) | { error: string }
+export type ExtractResult = (Extracted & { warning?: string; website?: { url: string; pages: string[]; images: string[] } }) | { error: string }
 
-/** Two smaller AI calls in parallel (fields; rooms + seasons): faster, and less chance of a cut-off reply. */
-export async function extractProperty(env: Env, text: string, doc?: DocInput | null): Promise<ExtractResult> {
+export interface ExtractInput {
+  text?: string
+  docs?: DocInput[]
+  /** Resort website link (the resort's own site; booking sites are refused). */
+  url?: string
+  /** "Read carefully": the slower Gemini model (Settings → AI). */
+  careful?: boolean
+}
+
+/** Website notes for the AI. When the site draws its text with JavaScript (little text found), Gemini reads it itself. */
+async function websiteNotes(env: Env, web: WebImport, careful: boolean): Promise<string> {
+  if (web.textLength >= 400 || !(await geminiActive(env))) return web.notes
+  const read = await aiText(env, 'property_extract', {
+    size: 'large', careful, urlContext: true, maxTokens: 4000, temperature: 0,
+    prompt: `Open these pages of a holiday property's website and write down every fact about the property as plain notes: name, address, location, rooms (names, beds, guests, sizes, rates), facilities, dining, policies, check-in / check-out, contact numbers. Facts only, no opinions.\n${web.pages.join('\n')}`,
+  })
+  return read ? `${web.notes}\n\n--- Read by Gemini from the live pages ---\n${read}` : web.notes
+}
+
+/**
+ * All sources together in one run (pasted notes + files + website), as two smaller AI calls in parallel
+ * (fields; rooms + seasons): faster, and less chance of a cut-off reply.
+ */
+export async function extractProperty(env: Env, input: ExtractInput): Promise<ExtractResult> {
   if (!env.AI && !(await geminiActive(env))) return { error: 'No AI is connected. Add a Gemini API key in Admin → Settings → AI, or enable Workers AI.' }
   if (!(await aiEnabled(env, 'property_extract'))) return { error: 'Quick fill is switched off in Admin → AI settings.' }
-  const notes = tidyNotes(text)
+  const notes = tidyNotes(input.text ?? '')
+  const docs = input.docs ?? []
+  const careful = !!input.careful
+  let web: WebImport | null = null
+  if (input.url) {
+    const w = await readWebsite(input.url)
+    if ('error' in w) return { error: `Website: ${w.error}` }
+    web = w
+  }
+  const webText = web ? await websiteNotes(env, web, careful) : ''
+  const sources: Source[] = [...(notes ? ['notes' as const] : []), ...(docs.length ? ['file' as const] : []), ...(webText ? ['website' as const] : [])]
+  if (!sources.length) return { error: 'Paste a few lines about the property, attach a file, or give a website link.' }
+  const only = sources.length === 1 ? sources[0] : undefined
+  const multi = sources.length > 1
+  // With several sources each block is labelled, so the AI can say where each fact came from.
+  const combine = (fileNotes: string) => [
+    notes && (multi ? `=== Source: notes (typed by staff) ===\n${notes}` : notes),
+    fileNotes && (multi ? `=== Source: file (attached documents) ===\n${fileNotes}` : fileNotes),
+    webText && (multi ? `=== Source: website (${web!.url}) ===\n${webText}` : webText),
+  ].filter(Boolean).join('\n\n')
+  const fOpts = { size: 'large' as const, maxTokens: multi ? 3500 : 2500, careful, schema: fieldsSchema(sources) }
+  const rOpts = { size: 'large' as const, maxTokens: 2500, careful, schema: roomsSchema(sources) }
   let a: unknown, b: unknown
-  if (doc) {
-    const withPaste = (n: string) => (notes ? `${notes}\n\n${n}` : n)
+  if (docs.length) {
     const [ra, rb] = await Promise.all([
-      aiJsonFromDocument<unknown>(env, 'property_extract', doc, (n) => fieldsPrompt(withPaste(n)), { size: 'large', maxTokens: 2500 }),
-      aiJsonFromDocument<unknown>(env, 'property_extract', doc, (n) => roomsPrompt(withPaste(n)), { size: 'large', maxTokens: 2000 }),
+      aiJsonFromDocuments<unknown>(env, 'property_extract', docs, (n) => fieldsPrompt(combine(n), sources), fOpts),
+      aiJsonFromDocuments<unknown>(env, 'property_extract', docs, (n) => roomsPrompt(combine(n), todayIST(), sources), rOpts),
     ])
-    if (!ra.data && !rb.data) return { error: ra.error ?? rb.error ?? 'Could not read the document.' }
+    if (!ra.data && !rb.data) return { error: ra.error ?? rb.error ?? 'Could not read the files.' }
     a = ra.data
     b = rb.data
   } else {
+    const all = combine('')
     ;[a, b] = await Promise.all([
-      aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: fieldsPrompt(notes), maxTokens: 2500 }),
-      aiJson<unknown>(env, 'property_extract', { size: 'large', prompt: roomsPrompt(notes), maxTokens: 2000 }),
+      aiJson<unknown>(env, 'property_extract', { ...fOpts, prompt: fieldsPrompt(all, sources) }),
+      aiJson<unknown>(env, 'property_extract', { ...rOpts, prompt: roomsPrompt(all, todayIST(), sources) }),
     ])
   }
   if (!a && !b) return { error: 'The AI service did not answer (or the daily AI limit was reached). Please try again in a minute.' }
-  const r = normalizeExtract({ fields: a ?? {}, ...(b && typeof b === 'object' ? b : {}) })
+  const r = normalizeExtract({ fields: a ?? {}, ...(b && typeof b === 'object' ? b : {}) }, only)
   const warning = !a ? 'Room categories were read, but the other details could not be — please fill them by hand.'
     : !b ? 'Property details were read, but room categories and seasons could not be — add them by hand.' : undefined
-  return { ...r, ...(warning ? { warning } : {}) }
+  return { ...r, ...(warning ? { warning } : {}), ...(web ? { website: { url: web.url, pages: web.pages, images: web.images } } : {}) }
 }

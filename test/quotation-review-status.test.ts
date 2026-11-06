@@ -35,280 +35,242 @@ function fixture() {
   return { db, env, app, publicApp, as, url, pid, nonAcId, acId, qid, oid, form, read }
 }
 
-const quote=(f:ReturnType<typeof fixture>)=>f.db.prepare('SELECT * FROM quotations WHERE id=?').get(f.qid) as any;
-const title=(html:string)=>html.split('<h1>')[1]?.split('</h1>')[0]??'';
-const post=(f:ReturnType<typeof fixture>,app:any,path:string,body:any)=>app.request('http://localhost'+path,{method:'POST',body:new URLSearchParams(body)},f.env);
-const submit=(f:ReturnType<typeof fixture>)=>f.as(1,'sales').request(f.url+'/request-approval',{method:'POST',body:f.form()},f.env);
-const decide=(f:ReturnType<typeof fixture>,decision='approve',extra:Record<string,string>={})=>post(f,f.app,`/admin/quotes/${f.qid}/${decision}`,{reviewed_at:quote(f).updated_at,...extra});
-const counts=(f:ReturnType<typeof fixture>)=>['bookings','payments','booking_vouchers','quotation_confirmation_requests'].map(t=>f.db.prepare('SELECT count(*) n FROM '+t).get());
+const quote=(f:ReturnType<typeof fixture>)=>f.db.prepare('SELECT * FROM quotations WHERE id=?').get(f.qid) as any
+const post=(f:ReturnType<typeof fixture>,app:any,path:string,body:Record<string,string>|URLSearchParams={})=>app.request('http://localhost'+path,{method:'POST',body:body instanceof URLSearchParams?body:new URLSearchParams(body)},f.env)
+const financial=(f:ReturnType<typeof fixture>)=>JSON.stringify(['bookings','payments','booking_vouchers'].map(t=>f.db.prepare('SELECT * FROM '+t).all()))
+const legacy=(f:ReturnType<typeof fixture>,status:string,action='quote.discount_approved')=>{
+ f.db.prepare('UPDATE quotations SET status=? WHERE id=?').run(status,f.qid)
+ f.db.prepare("INSERT INTO activity_log(user_id,action,entity,entity_id,details) VALUES(1,?,'quotation',?,?)").run(action,String(f.qid),JSON.stringify({reason:'Historical decision',quotation_version:quote(f).updated_at}))
+}
+const advanceForm=(f:ReturnType<typeof fixture>,override:Record<string,string>={})=>{
+ const o=f.read();return {option_id:String(f.oid),advance:'1000',payment_date:'2020-01-01',payment_method:'upi',payment_reference:'TEST-UTR-123',previous_advance:String(o.reported_advance),previous_details:o.advance_details,previous_total:String(o.total),...override}
+}
+const request=(f:ReturnType<typeof fixture>,override:Record<string,string>={})=>({option_id:String(f.oid),submission_key:'single-approval-test-12345',guest_name:'Test Guest',guest_phone:'919999999999',resort_name:'Test Resort',resort_phone:'919888888888',location:'Munnar',kids_ages:'',advance:'1000',room_rent:'6000',remarks:'UAT only',...override})
+const prepare=(f:ReturnType<typeof fixture>)=>post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/advance`,advanceForm(f))
+const submit=(f:ReturnType<typeof fixture>,override:Record<string,string>={})=>post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/confirmation`,request(f,override))
+const requests=(f:ReturnType<typeof fixture>)=>f.db.prepare('SELECT * FROM quotation_confirmation_requests ORDER BY id').all() as any[]
 
-describe('persisted quotation review status',()=>{
- it('reproduces the legacy Draft transition but consistently displays Quotation Approved for Staff and Admin',async()=>{
+describe('single final booking approval workflow',()=>{
+ it('shows direct issue/payment actions and only one Admin approval stage',async()=>{
   const f=fixture();try{
-   const financial=counts(f);await submit(f);
-   for(const role of ['sales','admin']){const html=await(await f.as(1,role).request(f.url,{},f.env)).text();expect(title(html)).toContain('Pending Approval')}
-   const before=f.read();await decide(f);expect(quote(f).status).toBe('draft'); // legacy lifecycle, separate persisted review status
-   const event=f.db.prepare("SELECT * FROM activity_log WHERE action='quote.discount_approved' AND entity_id=?").get(String(f.qid)) as any;
-   expect(JSON.parse(event.details)).toMatchObject({status:'approved',quotation_version:quote(f).updated_at});
-   const actor=(f.db.prepare('SELECT name FROM users WHERE id=1').get() as any).name;
+   const html=await(await f.as(1,'sales').request(f.url,{},f.env)).text()
+   for(const text of ['Save Draft','Generate / Download Quotation','Share Quotation','Record Advance Payment','Request Booking Confirmation'])expect(html).toContain(text)
+   for(const text of ['Send to Approval','Approve quotation only','Reject quotation','Convert to booking'])expect(html).not.toContain(text)
    for(const role of ['sales','admin']){
-    const html=await(await f.as(1,role).request(f.url,{},f.env)).text();expect(title(html)).toContain('Quotation Approved');expect(title(html)).not.toContain('draft');expect(html).toContain('Quotation approval history');expect(html).toContain(actor);expect(html).not.toContain('BOOKING CONFIRMED');
-    const list=await(await f.as(1,role).request('http://localhost/'+(role==='admin'?'admin':'staff')+'/quotes?status='+(role==='admin'?'quotation_approved':'all'),{},f.env)).text();expect(list).toMatch(/GS-QT-4FTY2J[\s\S]*?Quotation Approved/);
+    const list=await(await f.as(1,role).request('http://localhost/'+(role==='admin'?'admin':'staff')+'/quotes',{},f.env)).text()
+    expect(list).toContain('GS-QT-4FTY2J');expect(list).not.toContain('status=pending_approval');expect(list).not.toContain('status=quotation_approved');expect(list).not.toContain('data-quotation-approve')
    }
-   const approved=await(await f.app.request('http://localhost/admin/quotes?status=quotation_approved',{},f.env)).text();expect(approved).toContain('GS-QT-4FTY2J');
-   const drafts=await(await f.app.request('http://localhost/admin/quotes?status=draft',{},f.env)).text();expect(drafts).not.toContain('GS-QT-4FTY2J');
-   const {discount_approved_by:old,...oldMoney}=before,{discount_approved_by:now,...newMoney}=f.read();expect(newMoney).toEqual(oldMoney);expect(counts(f)).toEqual(financial);
   }finally{f.db.close()}
- });
- it('preserves approval on Download and stale Save while keeping the saved advance/pricing unchanged',async()=>{
+ })
+ it('generates an unapproved quotation directly and publishes its customer link without messages, payments or booking holds',async()=>{
   const f=fixture();try{
-   const b=f.form();b.set(`advance_${f.oid}`,'2000');await f.as(1,'sales').request(f.url+'/request-approval',{method:'POST',body:b},f.env);await decide(f);
-   const before=JSON.stringify([quote(f),f.read()]);
-   const download=await f.as(1,'sales').request(f.url+'/download',{method:'POST',body:b},f.env);expect(download.headers.get('location')).toContain('/print?download=1');
-   b.set(`advance_${f.oid}`,'3000');const save=await f.as(1,'sales').request(f.url,{method:'POST',body:b},f.env);expect(decodeURIComponent(save.headers.get('location')??'')).toContain('Quotation');expect(JSON.stringify([quote(f),f.read()])).toBe(before);
-   const html=await(await f.as(1,'sales').request(f.url,{},f.env)).text();expect(title(html)).toContain('Quotation Approved');expect(html).toContain('Request Booking Confirmation');expect(html).toContain('Download');expect(html).toContain('Edit (reopen)');
-   expect((await f.as(1,'sales').request(f.url+'/recalculate',{method:'POST',body:b},f.env)).status).toBe(409);
+   const before=financial(f),blocked=f.db.prepare('SELECT COUNT(*) n FROM blocked_dates').get().n
+   const downloaded=await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/download`,f.form())
+   expect(downloaded.headers.get('location')).toBe(`/staff/quotes/${f.qid}/print?download=1`)
+   const printed=await(await f.as(1,'sales').request(f.url+'/print?download=1',{},f.env)).text()
+   expect(printed).toContain('Please note this is not a confirmation voucher');expect(printed).not.toContain('BOOKING CONFIRMED');expect(printed).not.toContain('QUOTATION APPROVED');expect(printed).toContain('data-auto-download="1"')
+   expect((await f.publicApp.request('http://localhost/q/ice-token',{},f.env)).status).toBe(404)
+   const shared=await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/share`,f.form())
+   expect(shared.headers.get('location')).not.toContain('err=');expect(quote(f).status).toBe('sent')
+   const customer=await f.publicApp.request('http://localhost/q/ice-token',{},f.env)
+   expect(customer.status).toBe(200);const publicHtml=await customer.text();expect(publicHtml).toContain('Standard AC');expect(publicHtml).not.toContain('B2B');expect(publicHtml).not.toContain('Staff Rate');expect(publicHtml).not.toContain('BOOKING CONFIRMED')
+   expect(financial(f)).toBe(before);expect(f.db.prepare('SELECT COUNT(*) n FROM blocked_dates').get().n).toBe(blocked);expect(requests(f)).toHaveLength(0)
+   expect(f.db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action='quote.approval_requested'").get().n).toBe(0)
   }finally{f.db.close()}
- });
- it('requires explicit reopen before editing and retains the old approval in history',async()=>{
-  const f=fixture();try{await submit(f);await decide(f);await f.as(1,'sales').request(f.url+'/reopen',{method:'POST'},f.env);
-   const html=await(await f.as(1,'sales').request(f.url,{},f.env)).text();expect(title(html)).toContain('draft');expect(title(html)).not.toContain('Quotation Approved');expect(html).toContain('Quotation Approved');expect(html).toContain('Save to Draft');
-   await submit(f);const pending=await(await f.app.request(f.url,{},f.env)).text();expect(title(pending)).toContain('Pending Approval');
-  }finally{f.db.close()}
- });
- it('records rejection reason, displays Rejected in detail/list, and supports revision and resubmission',async()=>{
-  const f=fixture();try{await submit(f);await decide(f,'reject',{reason:'Please correct the guest contact.'});expect(quote(f).status).toBe('changes_requested');
-   for(const role of ['sales','admin']){const html=await(await f.as(1,role).request(f.url,{},f.env)).text();expect(title(html)).toContain('Rejected');expect(html).toContain('Please correct the guest contact.');expect(html).toContain('Send to Approval')}
-   const list=await(await f.app.request('http://localhost/admin/quotes?status=quotation_rejected',{},f.env)).text();expect(list).toContain('GS-QT-4FTY2J');
-   await submit(f);expect(quote(f).status).toBe('pending_approval');await decide(f);const html=await(await f.app.request(f.url,{},f.env)).text();expect(title(html)).toContain('Quotation Approved');expect(html).toContain('Please correct the guest contact.');expect(html).toContain('Rejected');
-  }finally{f.db.close()}
- });
- it('rejects missing reasons, stale revisions, duplicate decisions and unauthorized reviewers without financial mutations',async()=>{
-  const f=fixture();try{await submit(f);const before=counts(f);const version=quote(f).updated_at;
-   await decide(f,'reject',{reason:'  '});expect(quote(f).status).toBe('pending_approval');
-   expect((await post(f,f.as(1,'sales'),`/admin/quotes/${f.qid}/approve`,{reviewed_at:version})).status).toBe(403);
-   expect((await post(f,f.as(1,'manager'),`/admin/quotes/${f.qid}/reject`,{reviewed_at:version,reason:'No'})).status).toBe(403);
-   await decide(f,'approve',{reviewed_at:'stale'});expect(quote(f).status).toBe('pending_approval');
-   await decide(f);await decide(f,'reject',{reviewed_at:version,reason:'Late decision'});await decide(f);
-   expect((f.db.prepare("SELECT count(*) n FROM activity_log WHERE action IN ('quote.discount_approved','quote.review_rejected') AND entity_id=?").get(String(f.qid)) as any).n).toBe(1);expect(counts(f)).toEqual(before);
-   expect((await f.as(2,'sales').request(f.url,{},f.env)).status).toBe(404);
-  }finally{f.db.close()}
- });
- it('restores existing legacy approvals from audit records without rewriting quotations',async()=>{
+ })
+ it.each(['draft','pending_approval','changes_requested','sent','viewed','expired','declined'])('keeps legacy %s quotations usable without preliminary review',async status=>{
   const f=fixture();try{
-   f.db.prepare("UPDATE quotations SET updated_at='2026-10-13T05:00:00Z' WHERE id=?").run(f.qid);
-   f.db.prepare("INSERT INTO activity_log(user_id,action,entity,entity_id,details,created_at) VALUES(1,'quote.discount_approved','quotation',?,'{}','2026-10-13T05:00:01Z')").run(String(f.qid));
-   const before=quote(f);const html=await(await f.as(1,'sales').request(f.url,{},f.env)).text();expect(title(html)).toContain('Quotation Approved');expect(quote(f)).toEqual(before);
-   f.db.prepare("UPDATE quotations SET updated_at='2026-10-13T05:00:02Z' WHERE id=?").run(f.qid);
-   const changed=await(await f.as(1,'sales').request(f.url,{},f.env)).text();expect(title(changed)).toContain('draft');expect(title(changed)).not.toContain('Quotation Approved');
+   legacy(f,status,status==='changes_requested'?'quote.review_rejected':'quote.discount_approved')
+   const before=JSON.stringify(f.db.prepare('SELECT * FROM activity_log').all()),saved=f.read()
+   const html=await(await f.as(1,'sales').request(f.url,{},f.env)).text();expect(html).toContain('Share Quotation');expect(html).toContain('Historical quotation approval history');expect(html).toContain('Historical decision')
+   const view=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(view).toContain('Please note this is not a confirmation voucher');expect(view).not.toContain('BOOKING CONFIRMED')
+   expect(f.read()).toEqual(saved);expect(JSON.stringify(f.db.prepare('SELECT * FROM activity_log').all())).toBe(before)
+   const result=await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/share`,f.form());expect(result.headers.get('location')).not.toContain('err=');expect(quote(f).status).toBe('sent')
+   expect(f.db.prepare('SELECT COUNT(*) n FROM activity_log WHERE details LIKE ?').get('%Historical decision%').n).toBe(1)
   }finally{f.db.close()}
- });
- it('keeps pending status on Download; explicit Save to Draft withdraws the review',async()=>{
-  const f=fixture();try{await submit(f);await f.as(1,'sales').request(f.url+'/download',{method:'POST',body:f.form()},f.env);expect(quote(f).status).toBe('pending_approval');
-   await f.as(1,'sales').request(f.url,{method:'POST',body:f.form()},f.env);expect(quote(f).status).toBe('draft');
-   const html=await(await f.app.request(f.url,{},f.env)).text();expect(title(html)).toContain('draft');expect(html).toContain('Saved to Draft; review must be submitted again.');
+ })
+ it('retired preliminary endpoints cannot mutate statuses, audit records or money',async()=>{
+  const f=fixture();try{
+   legacy(f,'pending_approval','quote.approval_requested')
+   const before=JSON.stringify(['quotations','quotation_options','activity_log','tasks'].map(t=>f.db.prepare('SELECT * FROM '+t).all()))
+   for(const path of [`/staff/quotes/${f.qid}/request-approval`,`/admin/quotes/${f.qid}/approve`,`/admin/quotes/${f.qid}/reject`])await post(f,f.app,path,{reviewed_at:quote(f).updated_at,reason:'Old browser form'})
+   expect(JSON.stringify(['quotations','quotation_options','activity_log','tasks'].map(t=>f.db.prepare('SELECT * FROM '+t).all()))).toBe(before)
   }finally{f.db.close()}
- });
- it('does not issue a confirmation voucher when only the quotation is approved',async()=>{
-  const f=fixture();try{await submit(f);await decide(f);const before=counts(f);
-   const html=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(html).toContain('<h2>QUOTATION APPROVED</h2>');expect(html).not.toContain('Please note this is not a confirmation voucher');expect(html).not.toContain('<h1>BOOKING CONFIRMED</h1>');expect(counts(f)).toEqual(before);
+ })
+ it('keeps missing rates and the Staff discount floor enforced for direct sharing',async()=>{
+  const f=fixture();try{
+   const before=financial(f),form=f.form();form.set(`discount_${f.oid}`,'999999')
+   expect((await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/share`,form)).headers.get('location')).toContain('err=');expect(quote(f).status).toBe('draft')
+   f.db.prepare('UPDATE rooms SET base_rate=0,staff_rate=NULL WHERE id=?').run(f.acId)
+   expect((await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/share`,f.form())).headers.get('location')).toContain('err=');expect(financial(f)).toBe(before)
   }finally{f.db.close()}
- });
- it('enforces CSRF on quotation review decisions',async()=>{
-  const f=fixture();try{await submit(f);const secured=new Hono<any>().use('*',async(c,next)=>{c.set('user',{id:1,role:'admin'});await next()}).use('*',csrf()).route('/',adminRoutes);
-   const r=await secured.request('http://localhost/admin/quotes/'+f.qid+'/approve',{method:'POST',headers:{Origin:'https://attacker.invalid'},body:new URLSearchParams({reviewed_at:quote(f).updated_at})},f.env);expect(r.status).toBe(403);expect(quote(f).status).toBe('pending_approval');
+ })
+ it('records payment metadata against one selected option, restores it and never creates verified payment records',async()=>{
+  const f=fixture();try{
+   const second=Number(f.db.prepare('INSERT INTO quotation_options(quotation_id,property_id,room_id,check_in,check_out,subtotal,total) SELECT quotation_id,property_id,room_id,check_in,check_out,subtotal,total FROM quotation_options WHERE id=?').run(f.oid).lastInsertRowid)
+   const before=financial(f);const response=await prepare(f);expect(response.headers.get('location')).not.toContain('err=')
+   expect(f.read().reported_advance).toBe(1000);expect(JSON.parse(f.read().advance_details)).toEqual({date:'2020-01-01',method:'upi',reference:'TEST-UTR-123'})
+   expect(f.db.prepare('SELECT reported_advance FROM quotation_options WHERE id=?').get(second).reported_advance).toBe(0)
+   const page=await(await f.as(1,'sales').request(f.url+'/advance?option='+f.oid,{},f.env)).text();expect(page).toContain('TEST-UTR-123');expect(page).toContain('₹5,300');expect(page).toContain('Staff-reported funds only');expect(page).not.toContain('name="payment_verified"')
+   expect(financial(f)).toBe(before)
   }finally{f.db.close()}
- });
-});
+ })
+ it.each([{advance:'-1'},{advance:'6301'},{advance:'1.5'},{payment_date:'2099-01-01'},{payment_date:'not-date'},{payment_date:'2026-02-31'},{payment_method:'verified'},{payment_reference:'x'.repeat(101)}])('rejects invalid reported-payment input %j',async invalid=>{
+  const f=fixture();try{const before=JSON.stringify(f.read());const response=await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/advance`,advanceForm(f,Object.fromEntries(Object.entries(invalid).filter((pair):pair is [string,string]=>typeof pair[1]==='string'))));expect(response.headers.get('location')).toContain('err=');expect(JSON.stringify(f.read())).toBe(before)}finally{f.db.close()}
+ })
+ it('clears reported funds safely and rejects stale edits or access by another staff member',async()=>{
+  const f=fixture();try{
+   const stale=advanceForm(f);await prepare(f)
+   expect((await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/advance`,stale)).headers.get('location')).toContain('err=')
+   expect((await post(f,f.as(2,'sales'),`/staff/quotes/${f.qid}/advance`,advanceForm(f))).status).toBe(404)
+   expect((await f.as(2,'sales').request(f.url+'/advance',{},f.env)).status).toBe(404)
+   await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/advance`,advanceForm(f,{advance:'0'}));expect(f.read().reported_advance).toBe(0);expect(f.read().advance_details).toBe('{}')
+  }finally{f.db.close()}
+ })
+ it('uses the selected accepted option without granting quotation edit or payment verification privileges',async()=>{
+  const f=fixture();try{
+   f.db.prepare("UPDATE quotations SET status='accepted',accepted_option_id=? WHERE id=?").run(f.oid,f.qid)
+   await prepare(f);expect(f.read().reported_advance).toBe(1000)
+   const page=await(await f.as(1,'sales').request(f.url+'/confirmation',{},f.env)).text();expect(page).toContain('TEST-UTR-123');expect(page).not.toContain('Approve quotation')
+   const before=JSON.stringify(f.read());await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}`,f.form());expect(JSON.stringify(f.read())).toBe(before)
+  }finally{f.db.close()}
+ })
+ it('requires recorded evidence; legacy pending quotation status does not prevent final submission',async()=>{
+  const f=fixture();try{
+   await submit(f);expect(requests(f)).toHaveLength(0)
+   await prepare(f);legacy(f,'pending_approval','quote.approval_requested')
+   await submit(f);expect(requests(f)).toHaveLength(1);expect(requests(f)[0].payment_verified).toBe(0)
+   const d=JSON.parse(requests(f)[0].details);expect(d.payment_details.reference).toBe('TEST-UTR-123');expect(d.balance).toBe(5300)
+   await submit(f);await submit(f,{submission_key:'another-submission-12345'});expect(requests(f)).toHaveLength(1)
+  }finally{f.db.close()}
+ })
+ it('requires one final Admin decision, both verifications, ownership and immutable approved snapshots',async()=>{
+  const f=fixture();try{
+   const before=financial(f);await prepare(f);await submit(f);const r=requests(f)[0],path=`/admin/booking-approvals/${r.id}/decision`,print=`http://localhost/staff/confirmation-requests/${r.id}/print`
+   expect((await f.as(1,'sales').request(print,{},f.env)).status).toBe(404)
+   const decision={decision:'approved',revision:'0',payment_verified:'1',availability_verified:'1',remarks:'Verified actual receipt and availability'}
+   expect((await post(f,f.as(1,'sales'),path,decision)).status).toBe(403)
+   for(const body of [{...decision,payment_verified:'0'},{...decision,availability_verified:'0'}]){await post(f,f.as(1,'admin'),path,body);expect(requests(f)[0].status).toBe('pending')}
+   await post(f,f.as(1,'admin'),path,decision);expect(requests(f)[0].status).toBe('approved')
+   const pdf=await(await f.as(1,'sales').request(print,{},f.env)).text();expect(pdf).toContain('BOOKING CONFIRMED');expect(pdf).not.toContain('not a confirmation voucher');expect(pdf).not.toContain('Staff Rate');expect(pdf).not.toContain('B2B')
+   expect((await f.as(2,'sales').request(print,{},f.env)).status).toBe(404)
+   await post(f,f.as(1,'admin'),path,decision);await submit(f,{submission_key:'post-approval-submit-12345'});expect(requests(f)).toHaveLength(1)
+   expect(f.db.prepare("SELECT COUNT(*) n FROM quotation_confirmation_audit WHERE status='approved'").get().n).toBe(1)
+   expect((await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/advance`,advanceForm(f))).headers.get('location')).toContain('err=')
+   await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}`,f.form());expect(await(await f.as(1,'sales').request(print,{},f.env)).text()).toBe(pdf)
+   expect(financial(f)).toBe(before)
+  }finally{f.db.close()}
+ })
+ it('rejects confirmation with a reason and permits a fresh corrected request without altering history',async()=>{
+  const f=fixture();try{
+   await prepare(f);await submit(f);const r=requests(f)[0]
+   await post(f,f.as(1,'admin'),`/admin/booking-approvals/${r.id}/decision`,{decision:'rejected',remarks:'Please correct payment evidence',revision:'0'})
+   expect(requests(f)[0].status).toBe('rejected');expect((await f.as(1,'sales').request(`http://localhost/staff/confirmation-requests/${r.id}/print`,{},f.env)).status).toBe(404)
+   await submit(f,{submission_key:'corrected-final-request-12345'});expect(requests(f)).toHaveLength(2)
+  }finally{f.db.close()}
+ })
+ it('blocks a stale confirmation after the quotation or reported advance changes',async()=>{
+  const f=fixture();try{await prepare(f);await submit(f);f.db.prepare("UPDATE quotations SET updated_at='2099-01-01T00:00:00Z' WHERE id=?").run(f.qid)
+   await post(f,f.as(1,'admin'),'/admin/booking-approvals/1/decision',{decision:'approved',payment_verified:'1',availability_verified:'1',revision:'0'});expect(requests(f)[0].status).toBe('pending')
+  }finally{f.db.close()}
+ })
+ it('does not allow old Convert to booking to bypass final verification',async()=>{
+  const f=fixture();try{const before=financial(f);await post(f,f.as(1,'admin'),`/staff/quotes/${f.qid}/convert`);expect(financial(f)).toBe(before)}finally{f.db.close()}
+ })
+ it('keeps remarks, saved payment amounts and current public PDF formatting',async()=>{
+  const f=fixture();try{f.db.prepare("UPDATE quotations SET message='Guest-facing remark',payment_terms='Existing custom terms' WHERE id=?").run(f.qid);const before=JSON.stringify(f.read());const html=await(await f.app.request(f.url+'/print',{},f.env)).text()
+   for(const text of ['Remarks','Guest-facing remark','Advance Received','Balance Payable','Payment Terms','Please note this is not a confirmation voucher'])expect(html).toContain(text)
+   for(const text of ['Valid till:','Selected-room amenities','QUOTATION APPROVED','BOOKING CONFIRMED','TEST-UTR'])expect(html).not.toContain(text)
+   expect(JSON.stringify(f.read())).toBe(before)
+  }finally{f.db.close()}
+ })
+ it('enforces existing authentication and CSRF boundaries',async()=>{
+  const f=fixture();try{
+   const anonymous=new Hono<any>().route('/',opsRoutes);expect((await anonymous.request(f.url+'/advance',{},f.env)).status).toBe(302)
+   const app=new Hono<any>().use('*',csrf()).route('/',opsRoutes).route('/',confirmationRoutes)
+   for(const path of [`/staff/quotes/${f.qid}/advance`,`/staff/quotes/${f.qid}/share`,'/admin/booking-approvals/1/decision'])expect((await app.request('http://localhost'+path,{method:'POST',headers:{origin:'https://evil.test'},body:new URLSearchParams({})},f.env)).status).toBe(403)
+  }finally{f.db.close()}
+ })
+})
 
-it('uses the same approved status on quotation links inside the enquiry workspace',async()=>{
+
+describe('single approval compatibility and race safeguards',()=>{
+ it('adds payment metadata without rewriting existing quotations, amounts or approval history',()=>{
+  const db=new DatabaseSync(':memory:');try{
+   for(const file of readdirSync('migrations').filter((f:string)=>f.endsWith('.sql')&&f<'0021').sort())db.exec(readFileSync('migrations/'+file,'utf8'))
+   db.exec(readFileSync('seed/seed.sql','utf8'))
+   const qid=Number(db.prepare("INSERT INTO quotations(code,token,staff_id,guest_name,status) VALUES('LEGACY','legacy',1,'Guest','pending_approval')").run().lastInsertRowid)
+   db.prepare('INSERT INTO quotation_options(quotation_id,property_id,room_id,check_in,check_out,subtotal,total,reported_advance) SELECT ?,property_id,id,?, ?,6000,6300,1000 FROM rooms LIMIT 1').run(qid,'2030-11-04','2030-11-06')
+   db.prepare("INSERT INTO activity_log(user_id,action,entity,entity_id,details) VALUES(1,'quote.discount_approved','quotation',?,'{}')").run(String(qid))
+   const before=JSON.stringify(['quotations','activity_log'].map(t=>db.prepare('SELECT * FROM '+t).all()))
+   const options=db.prepare('SELECT * FROM quotation_options').all() as any[]
+   db.exec(readFileSync('migrations/0021_quotation_advance_details.sql','utf8'))
+   expect(JSON.stringify(['quotations','activity_log'].map(t=>db.prepare('SELECT * FROM '+t).all()))).toBe(before)
+   const after=db.prepare('SELECT * FROM quotation_options').all() as any[]
+   expect(after.map(({advance_details,...row})=>row)).toEqual(options)
+   expect(after.every(row=>row.advance_details==='{}')).toBe(true)
+   expect(()=>db.prepare("UPDATE quotation_options SET advance_details='invalid'").run()).toThrow()
+  }finally{db.close()}
+ })
+ it('does not accept Staff verification flags or expose payment references to customers',async()=>{
+  const f=fixture();try{
+   await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/advance`,advanceForm(f,{payment_verified:'1',availability_verified:'1',status:'approved'}))
+   await submit(f,{payment_verified:'1',availability_verified:'1',status:'approved'})
+   expect(requests(f)[0]).toMatchObject({status:'pending',payment_verified:0,availability_verified:0})
+   expect(JSON.parse(requests(f)[0].details).payment_details).toEqual({date:'2020-01-01',method:'upi',reference:'TEST-UTR-123'})
+   f.db.prepare("UPDATE quotations SET status='sent' WHERE id=?").run(f.qid)
+   for(const html of [await(await f.publicApp.request('http://localhost/q/ice-token',{},f.env)).text(),await(await f.app.request(f.url+'/print',{},f.env)).text()]){
+    expect(html).not.toContain('TEST-UTR-123');expect(html).not.toContain('₹2,000');expect(html).not.toContain('B2B');expect(html).not.toContain('BOOKING CONFIRMED')
+   }
+  }finally{f.db.close()}
+ })
+ it('requires fresh evidence when the reported amount changes in the quotation form',async()=>{
+  const f=fixture();try{
+   await prepare(f)
+   const form=f.form([]);form.set(`rooms_${f.oid}`,'1');form.set(`adults_${f.oid}`,'2');form.set(`advance_${f.oid}`,'1200')
+   await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}`,form)
+   expect(f.read().reported_advance).toBe(1200);expect(f.read().advance_details).toBe('{}')
+   await submit(f,{advance:'1200'});expect(requests(f)).toHaveLength(0)
+  }finally{f.db.close()}
+ })
+ it('preserves historical confirmation requests lacking new metadata and their Admin-approved vouchers',async()=>{
+  const f=fixture();try{
+   await prepare(f);await submit(f)
+   const d=JSON.parse(requests(f)[0].details);delete d.payment_details;delete d.quotation_version
+   f.db.prepare('UPDATE quotation_confirmation_requests SET details=?,edited_by=1,edited_at=?,revision=1 WHERE id=1').run(JSON.stringify(d),'2020-01-01')
+   await post(f,f.as(1,'admin'),'/admin/booking-approvals/1/decision',{decision:'approved',payment_verified:'1',availability_verified:'1',revision:'1'})
+   expect(requests(f)[0].status).toBe('approved')
+   expect(await(await f.as(1,'sales').request('http://localhost/staff/confirmation-requests/1/print',{},f.env)).text()).toContain('BOOKING CONFIRMED')
+  }finally{f.db.close()}
+ })
+ it('deduplicates pending requests even when submitted by a second authorised reviewer',async()=>{
+  const f=fixture();try{await prepare(f);await submit(f)
+   await post(f,f.as(2,'admin'),`/staff/quotes/${f.qid}/confirmation`,request(f,{submission_key:'another-reviewer-request-123'}))
+   expect(requests(f)).toHaveLength(1);expect(requests(f)[0].requested_by).toBe(1)
+  }finally{f.db.close()}
+ })
+ it('rejects a source change occurring between the Admin check and the winning decision update',async()=>{
+  const f=fixture();try{
+   await prepare(f);await submit(f)
+   const original=f.env.DB.prepare.bind(f.env.DB)
+   f.env.DB.prepare=(sql:string)=>{
+    if(sql.startsWith('UPDATE quotation_confirmation_requests SET status='))f.db.prepare("UPDATE quotations SET updated_at='2099-01-01' WHERE id=?").run(f.qid)
+    return original(sql)
+   }
+   await post(f,f.as(1,'admin'),'/admin/booking-approvals/1/decision',{decision:'approved',payment_verified:'1',availability_verified:'1',revision:'0'})
+   expect(requests(f)[0].status).toBe('pending')
+   expect(f.db.prepare("SELECT COUNT(*) n FROM quotation_confirmation_audit WHERE status='approved'").get().n).toBe(0)
+  }finally{f.db.close()}
+ })
+})
+
+
+it('does not confirm a different alternative after the customer selected an option',async()=>{
  const f=fixture();try{
-  await submit(f);await decide(f);
-  const enquiry=Number(f.db.prepare("INSERT INTO enquiries(code,guest_name,phone,assigned_to) VALUES('REVIEW-ENQ','Guest','919999999999',1)").run().lastInsertRowid);
-  f.db.prepare('UPDATE quotations SET enquiry_id=? WHERE id=?').run(enquiry,f.qid);
-  const html=await(await f.as(1,'sales').request('http://localhost/staff/enquiries/'+enquiry,{},f.env)).text();
-  expect(html).toMatch(/GS-QT-4FTY2J<\/a> <span class="pill pill-live">Quotation Approved<\/span>/);
+  await prepare(f)
+  const second=Number(f.db.prepare('INSERT INTO quotation_options(quotation_id,property_id,room_id,check_in,check_out,adults,rooms_count,subtotal,taxes,total,reported_advance,advance_details) SELECT quotation_id,property_id,room_id,check_in,check_out,adults,rooms_count,subtotal,taxes,total,reported_advance,advance_details FROM quotation_options WHERE id=?').run(f.oid).lastInsertRowid)
+  f.db.prepare("UPDATE quotations SET status='accepted',accepted_option_id=? WHERE id=?").run(second,f.qid)
+  await submit(f);expect(requests(f)).toHaveLength(0)
+  await submit(f,{option_id:String(second)});expect(requests(f)).toHaveLength(1);expect(requests(f)[0].option_id).toBe(second)
  }finally{f.db.close()}
-});
-
-describe('quotation PDF versus official confirmation voucher',()=>{
- it.each(['','?download=1'])('keeps warnings only for unapproved quotations in print/download mode %s',async mode=>{
-  const f=fixture();try{
-   const print=async()=>await(await f.as(1,'sales').request(f.url+'/print'+mode,{},f.env)).text();
-   const draft=await print();expect(draft).toContain('Please note this is not a confirmation voucher');expect(draft).not.toContain('<h2>QUOTATION APPROVED</h2>');
-   await submit(f);const pending=await print();expect(pending).not.toContain('<h2>QUOTATION APPROVED</h2>');expect(pending).toContain('Please note this is not a confirmation voucher');
-   await decide(f);const approved=await print();expect(approved).toContain('<h2>QUOTATION APPROVED</h2>');expect(approved).not.toContain('Quotation approval only. Booking confirmation requires separate Admin verification.');
-   expect(approved).not.toContain('Please note this is not a confirmation voucher');expect(approved).not.toContain('Voucher not issued by this quotation');expect(approved).not.toContain('<div class="quote-notice">');expect(approved).not.toContain('<h2>BOOKING CONFIRMED</h2>');expect(approved).toContain('data-auto-download="'+(mode?'1':'0')+'"');expect(approved).not.toContain('data-file-prefix="Booking-Confirmed"');
-   await f.as(1,'sales').request(f.url+'/reopen',{method:'POST'},f.env);const reopened=await print();expect(reopened).not.toContain('<h2>QUOTATION APPROVED</h2>');expect(reopened).toContain('Please note this is not a confirmation voucher');
-  }finally{f.db.close()}
- });
- it('keeps rejected quotations unconfirmed and preserves the disclaimer',async()=>{
-  const f=fixture();try{await submit(f);await decide(f,'reject',{reason:'Review required'});const html=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(html).toContain('Please note this is not a confirmation voucher');expect(html).not.toContain('<h2>QUOTATION APPROVED</h2>');expect(html).not.toContain('<h2>BOOKING CONFIRMED</h2>')}finally{f.db.close()}
- });
- it('exposes the official downloadable voucher to its requester only after separate payment and availability verification',async()=>{
-  const f=fixture();try{
-   await submit(f);await decide(f);
-   const option=f.read(), original=JSON.stringify(option);
-   const request={option_id:String(f.oid),submission_key:'pdf-confirmation-flow-request-1',guest_name:'Guest',guest_phone:'9999999999',resort_name:'Ice Hills Resort',resort_phone:'9999999998',location:'Munnar',kids_ages:'',room_rent:String(option.subtotal-option.discount),advance:'10000'};
-   await post(f,f.as(1,'sales'),`/staff/quotes/${f.qid}/confirmation`,request);
-   const row=f.db.prepare('SELECT * FROM quotation_confirmation_requests WHERE quotation_id=?').get(f.qid) as any;expect(row.status).toBe('pending');
-   const voucher='http://localhost/staff/confirmation-requests/'+row.id+'/print';
-   expect((await f.as(1,'sales').request(voucher,{},f.env)).status).toBe(404);
-   const pending=await(await f.as(1,'sales').request(f.url+'/print',{},f.env)).text();expect(pending).toContain('<h2>QUOTATION APPROVED</h2>');expect(pending).not.toContain('Please note this is not a confirmation voucher');expect(pending).not.toContain('Voucher not issued by this quotation');
-   const path='/admin/booking-approvals/'+row.id+'/decision';
-   await post(f,f.as(1,'admin'),path,{revision:'0',decision:'approved',payment_verified:'1'});expect((await f.as(1,'sales').request(voucher,{},f.env)).status).toBe(404);
-   await post(f,f.as(1,'admin'),path,{revision:'0',decision:'approved',payment_verified:'1',availability_verified:'1'});
-   const response=await f.as(1,'sales').request(voucher,{},f.env), html=await response.text();expect(response.status).toBe(200);expect(response.headers.get('cache-control')).toBe('private, no-store');
-   for(const text of ['<h1>BOOKING CONFIRMED</h1>','Booking Status: Confirmed','data-download-quote','data-file-prefix="Booking-Confirmed"','/quotation-download.js','Advance Received','verified by Admin'])expect(html).toContain(text);
-   expect(html).not.toContain('Please note this is not a confirmation voucher');expect(html).not.toContain('Voucher not issued by this quotation');expect(html).not.toContain('QUOTATION APPROVED');
-   expect((await f.as(2,'sales').request(voucher,{},f.env)).status).toBe(404);
-   const staff=await(await f.as(1,'sales').request('http://localhost/staff/confirmation-requests/'+row.id,{},f.env)).text();expect(staff).toContain('Open approved voucher / Download PDF');
-   const print=await(await f.as(1,'sales').request(f.url+'/print?download=1',{},f.env)).text();expect(print).toContain('<h2>BOOKING CONFIRMED</h2>');expect(print).not.toContain('Please note this is not a confirmation voucher');expect(print).not.toContain('<h2>QUOTATION APPROVED</h2>');
-   expect(JSON.stringify(f.read())).toBe(original);
-  }finally{f.db.close()}
- });
-});
-
-describe('simplified Admin quotation list', () => {
- it('renders only three Admin review tabs and Add New Quote while preserving Staff tabs', async () => {
-  const f=fixture();try{
-   const html=await(await f.app.request('http://localhost/admin/quotes',{},f.env)).text();
-   const tabs=html.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
-   expect(tabs.match(/<a /g)).toHaveLength(3);
-   for(const [key,label] of [['pending_approval','Pending for Approval'],['quotation_approved','Approved Quote'],['quotation_rejected','Rejected Quotations']]){
-    expect(tabs).toContain(`href="/admin/quotes?status=${key}"`);expect(tabs).toContain(label);
-   }
-   expect(tabs).toContain('class="active">Pending for Approval');
-   for(const key of ['all','draft','sent','viewed','viewed3','accepted','changes_requested','expired','declined'])expect(tabs).not.toContain(`status=${key}"`);
-   expect(html).toContain('href="/staff/quotes/new">+ Add New Quote');
-   expect(html).not.toContain('Conversion by staff');
-   const staff=await(await f.as(1,'sales').request('http://localhost/staff/quotes',{},f.env)).text();
-   const staffTabs=staff.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
-   for(const key of ['all','draft','sent','viewed','viewed3','accepted','changes_requested','expired','declined'])expect(staffTabs).toContain(`status=${key}"`);
-   expect(staff).toContain('+ New quotation');expect(staff).not.toContain('+ Add New Quote');
-  }finally{f.db.close()}
- });
- it('uses persisted review outcomes, excludes ordinary drafts and keeps details and approval actions',async()=>{
-  const f=fixture();try{
-   const add=(code:string,status:string)=>Number(f.db.prepare("INSERT INTO quotations(code,token,staff_id,guest_name,valid_till,status) VALUES(?,?,1,?,'2030-12-31',?)").run(code,code+'-token',code,status).lastInsertRowid);
-   const pending=add('UI-PENDING','pending_approval'),approved=add('UI-APPROVED','draft'),rejected=add('UI-REJECTED','changes_requested'),sent=add('UI-APPROVED-SENT','sent');
-   for(const [id,action] of [[approved,'quote.discount_approved'],[rejected,'quote.review_rejected'],[sent,'quote.discount_approved']] as const){
-    const q=f.db.prepare('SELECT updated_at FROM quotations WHERE id=?').get(id) as any;
-    f.db.prepare("INSERT INTO activity_log(user_id,action,entity,entity_id,details) VALUES(1,?,'quotation',?,?)").run(action,String(id),JSON.stringify({quotation_version:q.updated_at,reason:'Test review reason'}));
-   }
-   const tables=['quotations','quotation_options','activity_log','bookings','payments','booking_vouchers','quotation_confirmation_requests'];
-   const snapshot=()=>JSON.stringify(tables.map(t=>f.db.prepare('SELECT * FROM '+t).all()));const before=snapshot();
-   for(const [filter,included,excluded] of [
-    ['pending_approval',['UI-PENDING'],['UI-APPROVED','UI-REJECTED','GS-QT-4FTY2J']],
-    ['quotation_approved',['UI-APPROVED','UI-APPROVED-SENT'],['UI-PENDING','UI-REJECTED','GS-QT-4FTY2J']],
-    ['quotation_rejected',['UI-REJECTED'],['UI-PENDING','UI-APPROVED','GS-QT-4FTY2J']],
-   ] as const){
-    const html=await(await f.app.request('http://localhost/admin/quotes?status='+filter,{},f.env)).text();
-    for(const code of included)expect(html).toContain(code);for(const code of excluded)expect(html).not.toContain(code);
-    expect(html).not.toContain('BOOKING CONFIRMED');
-    if(filter==='pending_approval'){
-     expect(html).toContain(`href="/staff/quotes/${pending}"`);
-     expect(html).toContain(`action="/admin/quotes/${pending}/approve"`);
-     expect(html.match(new RegExp(`href="/staff/quotes/${pending}">Edit`, 'g'))).toHaveLength(1);
-    }
-   }
-   expect(snapshot()).toBe(before);
-  }finally{f.db.close()}
- });
- it('defaults obsolete Admin filters to Pending without affecting Staff filtering or permissions',async()=>{
-  const f=fixture();try{
-   await submit(f);
-   for(const filter of ['all','draft','sent','viewed3','accepted','invalid']){
-    const html=await(await f.app.request('http://localhost/admin/quotes?status='+filter,{},f.env)).text();
-    expect(html).toContain('GS-QT-4FTY2J');expect(html).toContain('class="active">Pending for Approval');
-   }
-   const staff=await(await f.as(1,'sales').request('http://localhost/staff/quotes?status=draft',{},f.env)).text();
-   expect(staff).not.toContain('GS-QT-4FTY2J');expect(staff).toContain('class="active">Draft');
-   expect((await f.as(1,'sales').request('http://localhost/admin/quotes',{},f.env)).status).toBe(403);
-  }finally{f.db.close()}
- });
-});
-
-describe('Admin My Quotations only',()=>{
- it('shows Draft, Approved Quote, Rejected Quote and Create New Quote without changing All Quotations or Staff tabs',async()=>{
-  const f=fixture();try{
-   const html=await(await f.app.request('http://localhost/staff/quotes',{},f.env)).text();
-   const tabs=html.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
-   expect(tabs.match(/<a /g)).toHaveLength(3);
-   for(const [key,label] of [['draft','Draft'],['quotation_approved','Approved Quote'],['quotation_rejected','Rejected Quote']])expect(tabs).toContain(`href="/staff/quotes?status=${key}"`),expect(tabs).toContain(label);
-   expect(tabs).toContain('class="active">Draft');expect(html).toContain('href="/staff/quotes/new">+ Create New Quote');
-   for(const key of ['all','pending_approval','sent','viewed','viewed3','accepted','changes_requested','expired','declined'])expect(tabs).not.toContain(`status=${key}"`);
-   const all=await(await f.app.request('http://localhost/admin/quotes',{},f.env)).text();
-   expect(all).toContain('class="active">Pending for Approval');expect(all).toContain('Rejected Quotations');expect(all).toContain('+ Add New Quote');expect(all).not.toContain('+ Create New Quote');
-   for(const role of ['sales','manager','accounts']){
-    const response=await f.as(1,role).request('http://localhost/staff/quotes',{},f.env);
-    if(role==='accounts'){expect(response.status).toBe(403);continue}
-    const staff=await response.text();const staffTabs=staff.match(/<nav class="tabs">([\s\S]*?)<\/nav>/)![1];
-    for(const key of ['all','pending_approval','sent','viewed','accepted','changes_requested','expired','declined'])expect(staffTabs).toContain(`status=${key}"`);
-    expect(staff).toContain('+ New quotation');expect(staff).not.toContain('+ Create New Quote');
-   }
-   expect((await f.as(1,'guest').request('http://localhost/staff/quotes',{},f.env)).status).toBe(403);
-  }finally{f.db.close()}
- });
- it('filters ordinary drafts, audit-approved legacy drafts and rejected quotes without changing records',async()=>{
-  const f=fixture();try{
-   const tables=['quotations','quotation_options','activity_log','bookings','payments','booking_vouchers','quotation_confirmation_requests'];
-   const snapshot=()=>JSON.stringify(tables.map(t=>f.db.prepare('SELECT * FROM '+t).all()));
-   let html=await(await f.app.request('http://localhost/staff/quotes',{},f.env)).text();expect(html).toContain('GS-QT-4FTY2J');
-   await submit(f);html=await(await f.app.request('http://localhost/staff/quotes',{},f.env)).text();expect(html).not.toContain('GS-QT-4FTY2J');
-   await decide(f);expect(quote(f).status).toBe('draft');let before=snapshot();
-   html=await(await f.app.request('http://localhost/staff/quotes?status=draft',{},f.env)).text();expect(html).not.toContain('GS-QT-4FTY2J');
-   html=await(await f.app.request('http://localhost/staff/quotes?status=quotation_approved',{},f.env)).text();expect(html).toContain('GS-QT-4FTY2J');expect(html).toContain(`href="/staff/quotes/${f.qid}"`);expect(html).not.toContain('BOOKING CONFIRMED');expect(snapshot()).toBe(before);
-   await f.as(1,'sales').request(f.url+'/reopen',{method:'POST'},f.env);await submit(f);await decide(f,'reject',{reason:'Please review.'});before=snapshot();
-   html=await(await f.app.request('http://localhost/staff/quotes?status=quotation_rejected',{},f.env)).text();expect(html).toContain('GS-QT-4FTY2J');
-   for(const status of ['draft','quotation_approved']){
-    html=await(await f.app.request('http://localhost/staff/quotes?status='+status,{},f.env)).text();expect(html).not.toContain('GS-QT-4FTY2J');
-   }
-   expect(snapshot()).toBe(before);
-   const details=await(await f.app.request(f.url,{},f.env)).text();expect(details).toContain('Quotation approval history');expect(details).toContain('Please review.');
-  }finally{f.db.close()}
- });
- it('defaults removed Admin My Quotations filters to Draft while preserving Staff filter behavior',async()=>{
-  const f=fixture();try{
-   for(const status of ['all','pending_approval','sent','viewed','accepted','changes_requested','expired','declined','invalid']){
-    const html=await(await f.app.request('http://localhost/staff/quotes?status='+status,{},f.env)).text();expect(html).toContain('class="active">Draft');expect(html).toContain('GS-QT-4FTY2J');
-   }
-   const staff=await(await f.as(1,'sales').request('http://localhost/staff/quotes?status=sent',{},f.env)).text();expect(staff).toContain('class="active">Sent');expect(staff).not.toContain('GS-QT-4FTY2J');
-  }finally{f.db.close()}
- });
-});
-
-describe('customer quotation Print and PDF presentation',()=>{
- it('removes requested PDF fields, keeps dynamic saved amounts and places escaped guest remarks before the footer',async()=>{
-  const f=fixture();try{
-   f.db.prepare('UPDATE quotations SET message=?,payment_terms=? WHERE id=?').run('Arrival after 3 pm.\n<script>Guest remark</script>','Existing custom payment terms',f.qid);
-   f.db.prepare('UPDATE quotation_options SET subtotal=60000,taxes=1200,total=61200,reported_advance=20000 WHERE id=?').run(f.oid);
-   f.db.prepare('UPDATE properties SET facilities=? WHERE id=?').run('["pool","Custom property amenity"]',f.pid);
-   f.db.prepare('UPDATE rooms SET facilities=? WHERE id=?').run('["Custom room-only amenity"]',f.nonAcId);
-   const before=JSON.stringify([quote(f),f.read()]);
-   const print=await(await f.app.request(f.url+'/print',{},f.env)).text();
-   const download=await(await f.app.request(f.url+'/print?download=1',{},f.env)).text();
-   const content=(html:string)=>html.split('<main data-quote-export>')[1];
-   expect(content(print)).toBe(content(download));
-   for(const html of [print,download]){
-    for(const text of ['Valid till:','Selected-room amenities','Custom room-only amenity','(reported, not verified)','Payment reported by staff; not verified by Admin. This quotation does not confirm a booking.','Quotation approval only. Booking confirmation requires separate Admin verification.'])expect(html).not.toContain(text);
-    for(const text of ['Advance Received: ₹20,000','Balance Payable: ₹41,200','Total Amount: ₹61,200','Property amenities','Custom property amenity','Existing custom payment terms','Balance amount to be paid at the hotel at check-in time.','<h3>Remarks</h3>','Arrival after 3 pm.','&lt;script&gt;Guest remark&lt;/script&gt;'])expect(html).toContain(text);
-    expect(html.indexOf('<section class="quote-remarks">')).toBeLessThan(html.indexOf('<footer class="quote-footer">'));
-    expect(html.indexOf('<section class="quote-remarks">')).toBeGreaterThan(html.indexOf('Payment Terms &amp; Conditions'));
-    expect(html).toContain('Please note this is not a confirmation voucher');expect(html).not.toContain('BOOKING CONFIRMED');
-   }
-   expect(JSON.stringify([quote(f),f.read()])).toBe(before);
-   const screen=await(await f.app.request(f.url,{},f.env)).text();expect(screen).toContain('Advance is reported, not verified.');
-  }finally{f.db.close()}
- });
- it('keeps a clean blank Remarks section and quotation-approved heading without producing a booking confirmation',async()=>{
-  const f=fixture();try{
-   const financial=counts(f);await submit(f);await decide(f);f.db.prepare("UPDATE quotations SET message='' WHERE id=?").run(f.qid);
-   const html=await(await f.app.request(f.url+'/print',{},f.env)).text();
-   expect(html).toContain('<h2>QUOTATION APPROVED</h2>');expect(html).not.toContain('BOOKING CONFIRMED');
-   expect(html).not.toContain('Quotation approval only. Booking confirmation requires separate Admin verification.');
-   expect(html).toContain('<section class="quote-remarks"><h3>Remarks</h3><p>—</p></section>');
-   expect(counts(f)).toEqual(financial);
-  }finally{f.db.close()}
- });
-});
+})
