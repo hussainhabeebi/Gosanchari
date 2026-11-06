@@ -62,5 +62,5 @@ export interface SessionUser {
 
 export type AppEnv = {
   Bindings: Env
-  Variables: { user: SessionUser | null; sessionToken: string | null }
+  Variables: { secureHeadersNonce?: string; user: SessionUser | null; sessionToken: string | null }
 }

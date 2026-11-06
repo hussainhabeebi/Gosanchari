@@ -1,3 +1,5 @@
+import { getCookie, deleteCookie } from 'hono/cookie'
+import { metaPixelScript } from '../lib/meta-pixel'
 import { analyticsPage } from '../lib/analytics'
 import { publicCanonical } from '../lib/seo'
 import type { Child, FC } from 'hono/jsx'
@@ -14,6 +16,8 @@ export type Area = 'public' | 'guest' | 'staff' | 'admin'
 
 export interface PageOpts {
   title: string
+  pixelNonce?: string
+  metaConversion?: 'Lead' | 'BookNow'
   journey?: JourneyTheme
   embedded?: boolean
   hideJourneyBanner?: boolean
@@ -396,6 +400,7 @@ export const Layout: FC<LayoutProps> = (p) => {
           )}
           <link rel="stylesheet" href={assetUrl(p.assetVersion ?? 'dev', '/app.css')} />
           {p.turnstileSiteKey && <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
+          {area === 'public' && !p.embedded && !(p.user && isStaff(p.user.role)) && <script nonce={p.pixelNonce}>{raw(metaPixelScript(p.settings.meta_pixel, p.metaConversion))}</script>}
           {p.head}
         </head>
         <body class={`area-${area}${p.embedded ? ' embedded-stay' : ''} journey-${p.journey?.mood ?? 'discovery'}${p.hero && !dash ? ` has-hero hero-text-${p.moodPhoto ? 'dark' : MOODS[p.hero.mood].text}` : ''}`}>
@@ -469,6 +474,9 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
   const photoKey = opts.hero ? (await getContent(c.env)).mood_photos?.[opts.hero.mood] : null
   const moodPhoto = photoKey ? mediaUrl(photoKey, 1800, settings.images_transform) : null
   const area = opts.area ?? 'public'
+  const conversion = getCookie(c, 'meta_conversion')
+  if (conversion) deleteCookie(c, 'meta_conversion', { path: c.req.path })
+  const metaConversion = conversion === 'Lead' || conversion === 'BookNow' ? conversion : undefined
   const bell = perms?.manage_enquiries && (area === 'staff' || area === 'admin')
     ? (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM enquiries WHERE status = 'new'").first<{ n: number }>().catch(() => null))?.n ?? 0
     : 0
@@ -479,7 +487,7 @@ export async function page(c: Context<AppEnv>, opts: PageOpts, body: Child, stat
     noindex: opts.noindex, embedded: opts.embedded || c.req.query('preview') === '1', status,
   })
   return c.html(
-    <Layout analyticsPath={analyticsPath} {...opts} canonical={opts.canonical ?? (area === 'public' && !opts.noindex ? publicCanonical(c.env.SITE_URL, c.req.path) : undefined)} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} assetVersion={assetVersion(c.env)} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
+    <Layout analyticsPath={analyticsPath} {...opts} pixelNonce={c.get('secureHeadersNonce')} metaConversion={metaConversion} canonical={opts.canonical ?? (area === 'public' && !opts.noindex ? publicCanonical(c.env.SITE_URL, c.req.path) : undefined)} nav={publicNav(c.req.path)} journey={journeyTheme(c.req.path, opts.area)} embedded={c.req.query('preview') === '1'} user={user} settings={settings} perms={perms} flash={flash} turnstileSiteKey={c.env.TURNSTILE_SITE_KEY} assetVersion={assetVersion(c.env)} siteUrl={c.env.SITE_URL} moodPhoto={moodPhoto} bell={bell}>
       {body}
     </Layout>,
     status as 200,

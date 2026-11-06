@@ -167,7 +167,7 @@ describe('property-only guest review links',()=>{
   it('preserves existing records when upgrading 0025 and enforces nullable unique invitations without affecting old reviews',()=>{
     const db=new DatabaseSync(':memory:');try{
       db.exec('PRAGMA foreign_keys=ON')
-      const files=readdirSync('migrations').filter((s:string)=>s.endsWith('.sql')).sort()
+      const files=readdirSync('migrations').filter((s:string)=>s.endsWith('.sql')&&s<='0026_property_review_links.sql').sort()
       expect(new Set(files.map((s:string)=>s.split('_')[0])).size).toBe(files.length)
       expect(files.at(-1)).toBe('0026_property_review_links.sql')
       for(const file of files.slice(0,-1))db.exec(readFileSync('migrations/'+file,'utf8'))

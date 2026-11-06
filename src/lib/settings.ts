@@ -50,6 +50,7 @@ export interface Settings {
     logo_key: string | null
     social: { instagram?: string; facebook?: string; youtube?: string }
   }
+  meta_pixel: { enabled: boolean; pixel_id: string; lead: boolean; book_now: boolean }
   tax_slabs: TaxSlab[]
   booking: {
     hold_minutes: number // how long an unconfirmed (pending) booking keeps its rooms
@@ -87,6 +88,7 @@ export const DEFAULT_SETTINGS: Settings = {
     logo_key: null,
     social: { instagram: 'https://www.instagram.com/gosanchari.official' },
   },
+  meta_pixel: { enabled: true, pixel_id: '1373267341618684', lead: true, book_now: true },
   tax_slabs: DEFAULT_TAX_SLABS,
   booking: { hold_minutes: 1440, quote_validity_days: 3 },
   whatsapp_templates: {
