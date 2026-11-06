@@ -87,7 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
     logo_key: null,
     social: { instagram: 'https://www.instagram.com/gosanchari.official' },
   },
-  meta_pixel: { enabled: false, pixel_id: '', lead: true, book_now: true },
+  meta_pixel: { enabled: true, pixel_id: '1373267341618684', lead: true, book_now: true },
   tax_slabs: DEFAULT_TAX_SLABS,
   booking: { hold_minutes: 1440, quote_validity_days: 3 },
   whatsapp_templates: {
