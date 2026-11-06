@@ -14,7 +14,7 @@ import { nightlyRate, type SeasonRate, SEASON_KINDS, seasonKindLabel, weekdaysLa
 import type { PropertyRow, RoomRow } from '../lib/types'
 import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShort, nowIso, parseJson, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
-import { renderBookings, renderQuotes } from './staff-ops'
+import { bookingFilters, renderBookings, renderQuotes } from './staff-ops'
 import { renderGuests, renderInbox } from './staff'
 import { destinations, reindexKb } from '../lib/properties'
 import { daysLeft, EXPIRY_WINDOW_DAYS, expiryText, rateExpiryAlerts } from '../lib/rate-expiry'
@@ -491,19 +491,19 @@ adminRoutes.post('/admin/quotes/:id/reject',requirePerm('approve_discounts'),c=>
 adminRoutes.get('/admin/bookings', requirePerm('approve_cancellations'), (c) => renderBookings(c, true))
 
 adminRoutes.get('/admin/bookings/export', requirePerm('export_data'), async (c) => {
-  const from = isDate(c.req.query('from')) ? c.req.query('from')! : '0000-01-01'
-  const to = isDate(c.req.query('to')) ? c.req.query('to')! : '9999-12-31'
+  // Same filters as the All bookings page, so the file matches what the admin sees.
+  const f = bookingFilters(c, true)
   const rows = await all<Record<string, unknown>>(
     c.env,
     `SELECT b.code, b.created_at, p.name AS property, r.name AS room, b.check_in, b.check_out, b.nights, b.adults, b.children, b.rooms_count,
        b.guest_name, b.guest_phone, b.guest_email, b.subtotal, b.discount, b.extra_charges, b.taxes, b.total, b.amount_paid, b.coupon_code,
        b.status, b.payment_status, b.source, s.name AS staff
      FROM bookings b JOIN properties p ON p.id = b.property_id JOIN rooms r ON r.id = b.room_id LEFT JOIN users s ON s.id = b.staff_id
-     WHERE b.check_in >= ? AND b.check_in <= ? ${int(c.req.query('property')) ? 'AND b.property_id = ' + int(c.req.query('property')) : ''} ORDER BY b.check_in`,
-    from, to,
+     ${f.sql} ORDER BY b.check_in`,
+    ...f.binds,
   )
   await logActivity(c.env, c.get('user')!.id, 'export.bookings', 'booking', null, { rows: rows.length })
-  return new Response('﻿' + toCsv(rows), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="bookings-${todayIST()}.csv"` } })
+  return new Response('\ufeff' + toCsv(rows), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="bookings-${todayIST()}.csv"` } })
 })
 
 adminRoutes.post('/admin/bookings/:id/reject-request', requirePerm('approve_cancellations'), async (c) => {

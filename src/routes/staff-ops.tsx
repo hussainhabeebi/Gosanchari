@@ -10,7 +10,7 @@ import { HTTPException } from 'hono/http-exception'
 import { addons as readAddons, ADDON_PER, chosenAddons, contact as readContact, extrasLabel, guestsText, STAY_TYPES, stayTypeLabel, type ChosenAddon } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
-import { AiNote, Empty, Field, Pager, Pill, Select, Table, Tabs } from '../views/components'
+import { AiNote, Empty, Field, Pager, Pill, Select, Stat, Table, Tabs } from '../views/components'
 import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
 import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
@@ -1059,42 +1059,65 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
 opsRoutes.get('/staff/quotes', requirePerm('manage_quotes'), (c) => renderQuotes(c, false))
 
 // ---------- 25. Bookings ----------
-export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
-  const tab = c.req.query('tab') ?? (admin ? 'all' : 'upcoming')
+/** A booking whose voucher an admin approved is a confirmed booking. */
+const VOUCHER_APPROVED_SQL = "b.status != 'cancelled' AND EXISTS (SELECT 1 FROM booking_vouchers v WHERE v.booking_id = b.id AND v.status = 'approved')"
+const isMonth = (v: string | undefined): v is string => !!v && /^\d{4}-(0[1-9]|1[0-2])$/.test(v)
+
+/** Filters shared by the bookings list and its CSV export. Staff only ever see bookings they made. */
+export function bookingFilters(c: Context<AppEnv>, admin: boolean) {
+  const u = c.get('user')!
+  const tab = c.req.query('tab') ?? 'confirmed'
   const q = str(c.req.query('q'), 60)
-  const pg = pageNum(c)
   const today = todayIST()
   const where: string[] = []
   const binds: (string | number)[] = []
+  if (!admin) { where.push('b.staff_id = ?'); binds.push(u.id) }
+  if (tab === 'confirmed') where.push(VOUCHER_APPROVED_SQL)
   if (tab === 'upcoming') { where.push("b.status IN ('confirmed','pending') AND b.check_in > ?"); binds.push(today) }
   if (tab === 'today') { where.push("b.status IN ('confirmed','checked_in') AND b.check_in = ?"); binds.push(today) }
   if (tab === 'in_stay') where.push("b.status = 'checked_in'")
   if (tab === 'completed') where.push("b.status = 'completed'")
   if (tab === 'cancelled') where.push("b.status = 'cancelled' AND b.amount_paid > 0")
   if (tab === 'requests') where.push("b.change_status = 'requested'")
-  if (q) { where.push('(b.guest_name LIKE ? OR b.guest_phone LIKE ? OR b.code LIKE ?)'); binds.push(`%${q}%`, `%${q}%`, `%${q}%`) }
-  // Admin filters
-  const fp = int(c.req.query('property')); if (fp) { where.push('b.property_id = ?'); binds.push(fp) }
-  const fs = int(c.req.query('staff')); if (fs) { where.push('b.staff_id = ?'); binds.push(fs) }
-  const fsrc = c.req.query('source'); if (fsrc) { where.push('b.source = ?'); binds.push(fsrc) }
-  const from = c.req.query('from'); if (isDate(from)) { where.push('b.check_in >= ?'); binds.push(from) }
-  const to = c.req.query('to'); if (isDate(to)) { where.push('b.check_in <= ?'); binds.push(to) }
   if (tab === 'all') where.push("NOT (b.status = 'cancelled' AND b.amount_paid = 0)")
-  const rows = await all<BookingRow & { property_name: string; staff_name: string | null }>(
-    c.env,
-    `SELECT b.*, p.name AS property_name, s.name AS staff_name FROM bookings b JOIN properties p ON p.id = b.property_id LEFT JOIN users s ON s.id = b.staff_id
-     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${tab === 'completed' || tab === 'cancelled' ? 'b.check_in DESC' : 'b.check_in ASC'} LIMIT 51 OFFSET ?`,
-    ...binds, (pg - 1) * 50,
-  )
+  if (q) { where.push('(b.guest_name LIKE ? OR b.guest_phone LIKE ? OR b.code LIKE ?)'); binds.push(`%${q}%`, `%${q}%`, `%${q}%`) }
+  const fp = admin ? int(c.req.query('property')) : 0; if (fp) { where.push('b.property_id = ?'); binds.push(fp) }
+  const fs = admin ? int(c.req.query('staff')) : 0; if (fs) { where.push('b.staff_id = ?'); binds.push(fs) }
+  const fsrc = admin ? c.req.query('source') : undefined; if (fsrc) { where.push('b.source = ?'); binds.push(fsrc) }
+  // Dates filter on check-in. A month overrides the from/to range.
+  const month = isMonth(c.req.query('month')) ? c.req.query('month')! : ''
+  const from = month ? `${month}-01` : isDate(c.req.query('from')) ? c.req.query('from')! : ''
+  const to = month ? `${month}-31` : isDate(c.req.query('to')) ? c.req.query('to')! : ''
+  if (from) { where.push('b.check_in >= ?'); binds.push(from) }
+  if (to) { where.push('b.check_in <= ?'); binds.push(to) }
+  return { tab, q, fp, fs, fsrc, month, from: month ? '' : from, to: month ? '' : to, sql: where.length ? 'WHERE ' + where.join(' AND ') : '', binds }
+}
+
+export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
+  const f = bookingFilters(c, admin)
+  const { tab, q, fp, fs, fsrc } = f
+  const pg = pageNum(c)
+  const today = todayIST()
+  const [rows, sum] = await Promise.all([
+    all<BookingRow & { property_name: string; staff_name: string | null }>(
+      c.env,
+      `SELECT b.*, p.name AS property_name, s.name AS staff_name FROM bookings b JOIN properties p ON p.id = b.property_id LEFT JOIN users s ON s.id = b.staff_id
+       ${f.sql} ORDER BY ${tab === 'completed' || tab === 'cancelled' ? 'b.check_in DESC' : 'b.check_in ASC'} LIMIT 51 OFFSET ?`,
+      ...f.binds, (pg - 1) * 50,
+    ),
+    first<{ n: number; total: number; paid: number }>(c.env, `SELECT COUNT(*) AS n, COALESCE(SUM(b.total),0) AS total, COALESCE(SUM(b.amount_paid),0) AS paid FROM bookings b ${f.sql}`, ...f.binds),
+  ])
   const base = admin ? '/admin/bookings' : '/staff/bookings'
   const props = admin ? await all<{ id: number; name: string }>(c.env, 'SELECT id, name FROM properties ORDER BY name') : []
   const staff = admin ? await all<{ id: number; name: string }>(c.env, "SELECT id, name FROM users WHERE role != 'guest' ORDER BY name") : []
   const qs = new URL(c.req.url).searchParams
   qs.delete('page')
-  return page(c, { title: admin ? 'All bookings' : 'Bookings', area: admin ? 'admin' : 'staff', active: admin ? 'all-bookings' : 'bookings' }, (
+  const title = admin ? 'All bookings' : 'My bookings'
+  return page(c, { title, area: admin ? 'admin' : 'staff', active: admin ? 'all-bookings' : 'bookings' }, (
     <div class="stack-lg">
-      <div class="row-between"><h1>{admin ? 'All bookings' : 'Bookings'}</h1>{admin && <a class="btn btn-sm btn-outline" href={`/admin/bookings/export?${qs}`}>Export to Excel (CSV)</a>}</div>
-      <Tabs base={base} active={tab} items={[...(admin ? [['all', 'All'] as [string, string]] : []), ['upcoming', 'Upcoming'], ['today', "Today's check-ins"], ['in_stay', 'In stay'], ['completed', 'Completed'], ['cancelled', 'Cancelled'], ['requests', 'Change requests']]} />
+      <div class="row-between"><h1>{title}</h1>{admin && <a class="btn btn-sm btn-outline" href={`/admin/bookings/export?${qs}`}>Export to Excel (CSV)</a>}</div>
+      <Tabs base={base} active={tab} items={[['confirmed', 'Confirmed'], ...(admin ? [['all', 'All'] as [string, string]] : []), ['upcoming', 'Upcoming'], ['today', "Today's check-ins"], ['in_stay', 'In stay'], ['completed', 'Completed'], ['cancelled', 'Cancelled'], ['requests', 'Change requests']]} />
+      {tab === 'confirmed' && <p class="small muted">Bookings whose voucher was approved{admin ? '' : ' that you made'}.</p>}
       <form method="get" class="row filters-inline wrap-row">
         <input type="hidden" name="tab" value={tab} />
         <input name="q" value={q} placeholder="Guest name, phone or booking ID" />
@@ -1103,19 +1126,31 @@ export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
             <Select name="property" value={fp || ''} options={[['', 'Any property'], ...props.map((p) => [p.id, p.name] as [number, string])]} />
             <Select name="staff" value={fs || ''} options={[['', 'Any staff'], ...staff.map((p) => [p.id, p.name] as [number, string])]} />
             <Select name="source" value={fsrc ?? ''} options={[['', 'Any source'], ['website', 'Website'], ['quotation', 'Quotation'], ['staff', 'Staff']]} />
-            <input type="date" name="from" value={from ?? ''} /><input type="date" name="to" value={to ?? ''} />
           </>
         )}
+        <label class="small">Check-in month <input type="month" name="month" value={f.month} /></label>
+        <label class="small">or from <input type="date" name="from" value={f.from} /></label>
+        <label class="small">to <input type="date" name="to" value={f.to} /></label>
         <button class="btn btn-sm">Search</button>
+        {(f.month || f.from || f.to || q || fp || fs || fsrc) && <a class="btn btn-sm btn-outline" href={`${base}?tab=${tab}`}>Clear</a>}
       </form>
-      <Table head={['Booking', 'Guest', 'Property', 'Dates', 'Total', 'Status', ...(admin ? ['Staff', 'Source'] : []), 'Actions']}>
+      <div class="stats" data-booking-totals>
+        <Stat label="Bookings" value={sum?.n ?? 0} />
+        <Stat label="Total booking value" value={money(sum?.total ?? 0)} />
+        <Stat label="Total amount paid" value={money(sum?.paid ?? 0)} />
+        <Stat label="Balance due" value={money((sum?.total ?? 0) - (sum?.paid ?? 0))} />
+      </div>
+      <Table head={['Booking', 'Guest name', 'Contact', 'Resort', 'Check-in', 'Check-out', 'Total', 'Paid', 'Status', ...(admin ? ['Staff', 'Source'] : []), 'Actions']}>
         {rows.slice(0, 50).map((b) => (
           <tr>
             <td><a href={`/staff/bookings/${b.id}`}>{b.code}</a>{b.change_status === 'requested' && <span class="pill pill-urgent">request</span>}</td>
-            <td>{b.guest_name}<div class="muted small">{b.guest_phone}</div></td>
+            <td>{b.guest_name}</td>
+            <td class="nowrap"><a href={`tel:${b.guest_phone}`}>{b.guest_phone}</a></td>
             <td>{b.property_name}</td>
-            <td class="nowrap">{fmtShortDate(b.check_in)} → {fmtShortDate(b.check_out)}</td>
-            <td>{money(b.total)}<div class="muted small">paid {money(b.amount_paid)}</div></td>
+            <td class="nowrap">{fmtShortDate(b.check_in)}</td>
+            <td class="nowrap">{fmtShortDate(b.check_out)}</td>
+            <td>{money(b.total)}</td>
+            <td>{money(b.amount_paid)}</td>
             <td><Pill s={b.status} /> <Pill s={b.payment_status} /></td>
             {admin && <td>{b.staff_name ?? '—'}</td>}
             {admin && <td>{b.source}</td>}
