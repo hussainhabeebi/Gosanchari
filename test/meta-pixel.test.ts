@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { metaPixelScript } from '../src/lib/meta-pixel'
+import { DEFAULT_SETTINGS } from '../src/lib/settings'
 const config = { enabled: true, pixel_id: '123456789012345', lead: true, book_now: true }
 describe('Meta Pixel', () => {
   it('does not load when disabled, empty or an ID contains script injection', () => {
@@ -16,5 +17,11 @@ describe('Meta Pixel', () => {
     expect(metaPixelScript(config, 'BookNow')).toContain("fbq('trackCustom','BookNow')")
     expect(metaPixelScript({ ...config, lead: false }, 'Lead')).not.toContain("fbq('track','Lead')")
     expect(metaPixelScript({ ...config, book_now: false }, 'BookNow')).not.toContain("fbq('trackCustom','BookNow')")
+  })
+  it('ships with the Go Sanchari pixel enabled for PageView and Lead', () => {
+    const script = metaPixelScript(DEFAULT_SETTINGS.meta_pixel, 'Lead')
+    expect(script).toContain("fbq('init','1373267341618684')")
+    expect(script).toContain("fbq('track','PageView')")
+    expect(script).toContain("fbq('track','Lead')")
   })
 })
