@@ -1059,8 +1059,24 @@ export async function renderQuotes(c: Context<AppEnv>, admin: boolean) {
 opsRoutes.get('/staff/quotes', requirePerm('manage_quotes'), (c) => renderQuotes(c, false))
 
 // ---------- 25. Bookings ----------
-/** A booking whose voucher an admin approved is a confirmed booking. */
-const VOUCHER_APPROVED_SQL = "b.status != 'cancelled' AND EXISTS (SELECT 1 FROM booking_vouchers v WHERE v.booking_id = b.id AND v.status = 'approved')"
+/** Confirmed stays: bookings whose voucher an admin approved, plus quotation confirmation requests an admin
+ *  approved in Booking Approvals (those issue the voucher without creating a booking row). A quotation that also
+ *  has a voucher-approved booking is listed once, as the booking. Both halves expose the same columns. */
+const CONFIRMED_STAYS_SQL = `(
+  SELECT bk.id, 'booking' AS kind, bk.code, bk.guest_name, bk.guest_phone, bk.property_id, p.name AS property_name, bk.check_in, bk.check_out,
+    bk.total, bk.amount_paid, bk.status, bk.payment_status, bk.source, bk.staff_id, bk.change_status
+  FROM bookings bk JOIN properties p ON p.id = bk.property_id
+  WHERE bk.status != 'cancelled' AND EXISTS (SELECT 1 FROM booking_vouchers v WHERE v.booking_id = bk.id AND v.status = 'approved')
+  UNION ALL
+  SELECT r.id, 'request' AS kind, r.code, json_extract(r.details,'$.guest_name'), json_extract(r.details,'$.guest_phone'), o.property_id,
+    json_extract(r.details,'$.resort_name'), json_extract(r.details,'$.check_in'), json_extract(r.details,'$.check_out'),
+    json_extract(r.details,'$.total'), json_extract(r.details,'$.paid'), 'confirmed',
+    CASE WHEN json_extract(r.details,'$.paid') >= json_extract(r.details,'$.total') THEN 'paid' ELSE 'partial' END, 'quotation', r.requested_by, NULL
+  FROM quotation_confirmation_requests r JOIN quotation_options o ON o.id = r.option_id
+  WHERE r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM bookings bk JOIN booking_vouchers v ON v.booking_id = bk.id AND v.status = 'approved'
+    WHERE bk.quotation_id = r.quotation_id AND bk.status != 'cancelled')
+)`
+const ALL_BOOKINGS_SQL = "(SELECT bk.*, 'booking' AS kind, p.name AS property_name FROM bookings bk JOIN properties p ON p.id = bk.property_id)"
 const isMonth = (v: string | undefined): v is string => !!v && /^\d{4}-(0[1-9]|1[0-2])$/.test(v)
 
 /** Filters shared by the bookings list and its CSV export. Staff only ever see bookings they made. */
@@ -1072,7 +1088,6 @@ export function bookingFilters(c: Context<AppEnv>, admin: boolean) {
   const where: string[] = []
   const binds: (string | number)[] = []
   if (!admin) { where.push('b.staff_id = ?'); binds.push(u.id) }
-  if (tab === 'confirmed') where.push(VOUCHER_APPROVED_SQL)
   if (tab === 'upcoming') { where.push("b.status IN ('confirmed','pending') AND b.check_in > ?"); binds.push(today) }
   if (tab === 'today') { where.push("b.status IN ('confirmed','checked_in') AND b.check_in = ?"); binds.push(today) }
   if (tab === 'in_stay') where.push("b.status = 'checked_in'")
@@ -1090,7 +1105,7 @@ export function bookingFilters(c: Context<AppEnv>, admin: boolean) {
   const to = month ? `${month}-31` : isDate(c.req.query('to')) ? c.req.query('to')! : ''
   if (from) { where.push('b.check_in >= ?'); binds.push(from) }
   if (to) { where.push('b.check_in <= ?'); binds.push(to) }
-  return { tab, q, fp, fs, fsrc, month, from: month ? '' : from, to: month ? '' : to, sql: where.length ? 'WHERE ' + where.join(' AND ') : '', binds }
+  return { tab, q, fp, fs, fsrc, month, from: month ? '' : from, to: month ? '' : to, source: tab === 'confirmed' ? CONFIRMED_STAYS_SQL : ALL_BOOKINGS_SQL, sql: where.length ? 'WHERE ' + where.join(' AND ') : '', binds }
 }
 
 export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
@@ -1099,13 +1114,13 @@ export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
   const pg = pageNum(c)
   const today = todayIST()
   const [rows, sum] = await Promise.all([
-    all<BookingRow & { property_name: string; staff_name: string | null }>(
+    all<Pick<BookingRow, 'id' | 'code' | 'guest_name' | 'guest_phone' | 'check_in' | 'check_out' | 'total' | 'amount_paid' | 'status' | 'payment_status' | 'source' | 'change_status'> & { kind: 'booking' | 'request'; property_name: string; staff_name: string | null }>(
       c.env,
-      `SELECT b.*, p.name AS property_name, s.name AS staff_name FROM bookings b JOIN properties p ON p.id = b.property_id LEFT JOIN users s ON s.id = b.staff_id
+      `SELECT b.*, s.name AS staff_name FROM ${f.source} b LEFT JOIN users s ON s.id = b.staff_id
        ${f.sql} ORDER BY ${tab === 'completed' || tab === 'cancelled' ? 'b.check_in DESC' : 'b.check_in ASC'} LIMIT 51 OFFSET ?`,
       ...f.binds, (pg - 1) * 50,
     ),
-    first<{ n: number; total: number; paid: number }>(c.env, `SELECT COUNT(*) AS n, COALESCE(SUM(b.total),0) AS total, COALESCE(SUM(b.amount_paid),0) AS paid FROM bookings b ${f.sql}`, ...f.binds),
+    first<{ n: number; total: number; paid: number }>(c.env, `SELECT COUNT(*) AS n, COALESCE(SUM(b.total),0) AS total, COALESCE(SUM(b.amount_paid),0) AS paid FROM ${f.source} b ${f.sql}`, ...f.binds),
   ])
   const base = admin ? '/admin/bookings' : '/staff/bookings'
   const props = admin ? await all<{ id: number; name: string }>(c.env, 'SELECT id, name FROM properties ORDER BY name') : []
@@ -1117,7 +1132,7 @@ export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
     <div class="stack-lg">
       <div class="row-between"><h1>{title}</h1>{admin && <a class="btn btn-sm btn-outline" href={`/admin/bookings/export?${qs}`}>Export to Excel (CSV)</a>}</div>
       <Tabs base={base} active={tab} items={[['confirmed', 'Confirmed'], ...(admin ? [['all', 'All'] as [string, string]] : []), ['upcoming', 'Upcoming'], ['today', "Today's check-ins"], ['in_stay', 'In stay'], ['completed', 'Completed'], ['cancelled', 'Cancelled'], ['requests', 'Change requests']]} />
-      {tab === 'confirmed' && <p class="small muted">Bookings whose voucher was approved{admin ? '' : ' that you made'}.</p>}
+      {tab === 'confirmed' && <p class="small muted">Bookings{admin ? '' : ' you made'} whose voucher an admin approved, in Booking Approvals or Voucher approvals.</p>}
       <form method="get" class="row filters-inline wrap-row">
         <input type="hidden" name="tab" value={tab} />
         <input name="q" value={q} placeholder="Guest name, phone or booking ID" />
@@ -1141,9 +1156,11 @@ export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
         <Stat label="Balance due" value={money((sum?.total ?? 0) - (sum?.paid ?? 0))} />
       </div>
       <Table head={['Booking', 'Guest name', 'Contact', 'Resort', 'Check-in', 'Check-out', 'Total', 'Paid', 'Status', ...(admin ? ['Staff', 'Source'] : []), 'Actions']}>
-        {rows.slice(0, 50).map((b) => (
+        {rows.slice(0, 50).map((b) => {
+          const href = b.kind === 'request' ? `/staff/confirmation-requests/${b.id}` : `/staff/bookings/${b.id}`
+          return (
           <tr>
-            <td><a href={`/staff/bookings/${b.id}`}>{b.code}</a>{b.change_status === 'requested' && <span class="pill pill-urgent">request</span>}</td>
+            <td><a href={href}>{b.code}</a>{b.change_status === 'requested' && <span class="pill pill-urgent">request</span>}</td>
             <td>{b.guest_name}</td>
             <td class="nowrap"><a href={`tel:${b.guest_phone}`}>{b.guest_phone}</a></td>
             <td>{b.property_name}</td>
@@ -1155,13 +1172,14 @@ export async function renderBookings(c: Context<AppEnv>, admin: boolean) {
             {admin && <td>{b.staff_name ?? '—'}</td>}
             {admin && <td>{b.source}</td>}
             <td class="nowrap">
-              <a class="btn btn-sm" href={`/staff/bookings/${b.id}`}>View</a>
-              {b.status === 'confirmed' && b.check_in <= today && <form method="post" action={`/staff/bookings/${b.id}/checkin`} class="inline"><button class="btn btn-sm btn-outline">Checked in</button></form>}
-              {b.status === 'confirmed' && b.check_in > today && <form method="post" action={`/staff/bookings/${b.id}/whatsapp?kind=reminder`} class="inline"><button class="btn btn-sm btn-outline">Reminder</button></form>}
-              {b.amount_paid < b.total && b.status !== 'cancelled' && <a class="btn btn-sm btn-outline" href={`/staff/bookings/${b.id}#payment`}>Record payment</a>}
+              <a class="btn btn-sm" href={href}>View</a>
+              {b.kind === 'booking' && b.status === 'confirmed' && b.check_in <= today && <form method="post" action={`/staff/bookings/${b.id}/checkin`} class="inline"><button class="btn btn-sm btn-outline">Checked in</button></form>}
+              {b.kind === 'booking' && b.status === 'confirmed' && b.check_in > today && <form method="post" action={`/staff/bookings/${b.id}/whatsapp?kind=reminder`} class="inline"><button class="btn btn-sm btn-outline">Reminder</button></form>}
+              {b.kind === 'booking' && b.amount_paid < b.total && b.status !== 'cancelled' && <a class="btn btn-sm btn-outline" href={`/staff/bookings/${b.id}#payment`}>Record payment</a>}
             </td>
           </tr>
-        ))}
+          )
+        })}
       </Table>
       {rows.length === 0 && <Empty>No bookings here.</Empty>}
       <Pager page={pg} hasMore={rows.length > 50} base={`${base}?${qs}`} />

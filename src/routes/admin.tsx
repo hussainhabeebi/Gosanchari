@@ -493,9 +493,11 @@ adminRoutes.get('/admin/bookings', requirePerm('approve_cancellations'), (c) => 
 adminRoutes.get('/admin/bookings/export', requirePerm('export_data'), async (c) => {
   // Same filters as the All bookings page, so the file matches what the admin sees.
   const f = bookingFilters(c, true)
-  const rows = await all<Record<string, unknown>>(
-    c.env,
-    `SELECT b.code, b.created_at, p.name AS property, r.name AS room, b.check_in, b.check_out, b.nights, b.adults, b.children, b.rooms_count,
+  const rows = await all<Record<string, unknown>>(c.env, f.tab === 'confirmed'
+    ? `SELECT b.code, b.guest_name, b.guest_phone, b.property_name AS resort, b.check_in, b.check_out, b.total, b.amount_paid, b.total - b.amount_paid AS balance,
+         b.status, b.payment_status, b.source, s.name AS staff
+       FROM ${f.source} b LEFT JOIN users s ON s.id = b.staff_id ${f.sql} ORDER BY b.check_in`
+    : `SELECT b.code, b.created_at, p.name AS property, r.name AS room, b.check_in, b.check_out, b.nights, b.adults, b.children, b.rooms_count,
        b.guest_name, b.guest_phone, b.guest_email, b.subtotal, b.discount, b.extra_charges, b.taxes, b.total, b.amount_paid, b.coupon_code,
        b.status, b.payment_status, b.source, s.name AS staff
      FROM bookings b JOIN properties p ON p.id = b.property_id JOIN rooms r ON r.id = b.room_id LEFT JOIN users s ON s.id = b.staff_id
