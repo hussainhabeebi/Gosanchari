@@ -1,7 +1,7 @@
 // @ts-expect-error Node-only local configuration fixture.
 import {readFileSync} from 'node:fs'
 // @ts-expect-error Production CLI module, tested with injected IO and no real processes.
-import {deployProduction,PRODUCTION_D1_ID} from '../scripts/deploy.mjs'
+import {checkOnly,deployMode,deployProduction,PRODUCTION_D1_ID} from '../scripts/deploy.mjs'
 import {describe,it,expect} from 'vitest'
 const config=readFileSync('wrangler.toml','utf8'),kvId='1234567890abcdef1234567890abcdef'
 function fixture(change:{config?:string;info?:any;kv?:any;migration?:number;deploy?:number}={}) {
@@ -30,5 +30,18 @@ describe('production deployment: existing resources only',()=>{
  })
  it('does not retry a failed deployment or run any provisioning/seeding commands',()=>{
   const f=fixture({deploy:1});expect(f.start).toThrow(/No retry/);expect(f.calls.filter(c=>c[0]==='deploy')).toHaveLength(1);expect(f.writes.at(-1)).toBe(config);expect(f.calls.flat()).not.toContain('create');expect(f.calls.flat()).not.toContain('execute')
+ })
+})
+
+describe('pull-request builds never touch production',()=>{
+ it('runs the production rollout only for main in Workers Builds, or outside Workers Builds',()=>{
+  expect(deployMode({WORKERS_CI:'1',WORKERS_CI_BRANCH:'main'})).toBe('production')
+  expect(deployMode({})).toBe('production')
+  for(const branch of ['feature/data-entry-b2b-rates','claude/x','Main','',undefined])expect(deployMode({WORKERS_CI:'1',WORKERS_CI_BRANCH:branch})).toBe('check')
+ })
+ it('a branch check only bundles: no D1, KV, migration or real deploy call',()=>{
+  const calls:string[][]=[];checkOnly({run:(a:string[])=>{calls.push(a);return {status:0}},log:()=>{},branch:'feature/x'})
+  expect(calls).toEqual([['deploy','--dry-run']])
+  expect(()=>checkOnly({run:()=>({status:1}),log:()=>{},branch:'feature/x'})).toThrow(/bundle check failed/)
  })
 })
