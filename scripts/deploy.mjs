@@ -5,24 +5,6 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 export const PRODUCTION_D1_ID = '04eb5123-059a-45fb-ae10-6541ad1ae92a'
-export const PRODUCTION_BRANCH = 'main'
-
-/**
- * Cloudflare Workers Builds runs the same deploy command for every branch and sets WORKERS_CI=1 and
- * WORKERS_CI_BRANCH. Only the production branch may touch production: any other CI branch (a pull request)
- * gets a dry-run bundle check that makes no remote calls, so it can never run migrations or publish.
- * Outside Workers Builds (WORKERS_CI unset) the script behaves as before.
- */
-export function deployMode(env) {
-  if (env.WORKERS_CI !== '1' && env.WORKERS_CI !== 'true') return 'production'
-  return env.WORKERS_CI_BRANCH === PRODUCTION_BRANCH ? 'production' : 'check'
-}
-
-/** Pull-request builds: bundle the Worker with every binding, upload nothing. */
-export function checkOnly({ run, log = console.log, branch }) {
-  log(`▶ Branch "${branch || 'unknown'}" is not ${PRODUCTION_BRANCH}: checking the Worker bundle only (no migrations, no deploy)`)
-  if (run(['deploy', '--dry-run']).status !== 0) throw new Error('Worker bundle check failed.')
-}
 const DB = 'gosanchari'
 const KV_TITLE = 'gosanchari-kv'
 const CONFIG = 'wrangler.toml'
@@ -99,12 +81,10 @@ export function deployProduction({ run, read, write, log = console.log }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length > 2) throw new Error('Production deployment does not accept configuration or environment overrides.')
-    const run = (args, quiet = false) => spawnSync('npx', ['wrangler', ...args], {
-      stdio: quiet ? 'pipe' : 'inherit', encoding: 'utf8', env: { ...process.env, CI: '1' },
-    })
-    if (deployMode(process.env) === 'check') checkOnly({ run, branch: process.env.WORKERS_CI_BRANCH })
-    else deployProduction({
-      run,
+    deployProduction({
+      run: (args, quiet = false) => spawnSync('npx', ['wrangler', ...args], {
+        stdio: quiet ? 'pipe' : 'inherit', encoding: 'utf8', env: { ...process.env, CI: '1' },
+      }),
       read: path => readFileSync(path, 'utf8'),
       write: (path, text) => writeFileSync(path, text),
     })
