@@ -1,5 +1,8 @@
 // Roles and permissions. Defaults live here; admins can override them from Staff & roles
 // (stored in settings under "role_permissions").
+//
+// The stored role value 'accounts' is shown as "Data Entry". The value is kept so existing users, sessions,
+// saved permission overrides and history keep working without a data migration.
 
 export type Role = 'guest' | 'admin' | 'manager' | 'sales' | 'accounts'
 export const STAFF_ROLES: Role[] = ['admin', 'manager', 'sales', 'accounts']
@@ -29,6 +32,9 @@ export interface Permissions {
   export_data: boolean
   ask_ai: boolean
   view_activity: boolean
+  view_b2b_rates: boolean
+  create_b2b_rates: boolean
+  edit_b2b_rates: boolean
 }
 
 export type PermissionKey = keyof Permissions
@@ -58,6 +64,9 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   export_data: 'Export data',
   ask_ai: 'Use Ask AI (business questions)',
   view_activity: 'See the activity log',
+  view_b2b_rates: 'B2B rates page: view B2B / net rates and the property details needed to enter them',
+  create_b2b_rates: 'B2B rates page: enter new B2B rates (fill in blank rates)',
+  edit_b2b_rates: 'B2B rates page: change or clear existing B2B rates',
 }
 
 const none: Permissions = {
@@ -85,6 +94,9 @@ const none: Permissions = {
   export_data: false,
   ask_ai: false,
   view_activity: false,
+  view_b2b_rates: false,
+  create_b2b_rates: false,
+  edit_b2b_rates: false,
 }
 
 export const DEFAULT_PERMISSIONS: Record<Role, Permissions> = {
@@ -126,6 +138,9 @@ export const DEFAULT_PERMISSIONS: Record<Role, Permissions> = {
     approve_refunds: true,
     view_reports: true,
     export_data: true,
+    view_b2b_rates: true,
+    create_b2b_rates: true,
+    edit_b2b_rates: true,
   },
 }
 
@@ -144,5 +159,5 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Admin',
   manager: 'Manager',
   sales: 'Sales staff',
-  accounts: 'Accounts',
+  accounts: 'Data Entry',
 }

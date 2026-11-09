@@ -46,7 +46,7 @@ Phone-OTP login shows the code on screen when WhatsApp isn't configured (develop
 | Admin | admin@gosanchari.com |
 | Manager | manager@gosanchari.com |
 | Sales | priya@gosanchari.com, arjun@gosanchari.com |
-| Accounts | accounts@gosanchari.com |
+| Data Entry (stored role `accounts`) | accounts@gosanchari.com |
 
 Guests log in with any phone number (OTP). Demo quote link: `/q/demo-quote-token-1234567890`.
 
@@ -192,6 +192,6 @@ Ask AI safety:
 | Admin | Everything |
 | Manager | Everything except staff management and settings; 15% discount limit |
 | Sales | Enquiries, quotes and bookings; no net rates; 5% discount limit |
-| Accounts | Payments, refunds, reports |
+| Data Entry (stored role `accounts`, formerly Accounts) | B2B rates page (view, enter, edit), plus the former Accounts access: payments, refunds, reports |
 
-Admins can change these defaults in *Admin → Staff & roles*. Discounts above a staff member's limit wait for approval in *All quotations*. Cancellations and date changes by staff without the approval permission become requests. Price changes, discounts, cancellations, refunds, deletions, exports, logins and settings changes go to the activity log.
+Admins can change these defaults in *Admin → Staff & roles*, including the three B2B rate permissions (view, enter new, change existing) used by *Properties → B2B rates*. Give every staff member their own login there; never share the admin login. Discounts above a staff member's limit wait for approval in *All quotations*. Cancellations and date changes by staff without the approval permission become requests. Price changes, discounts, cancellations, refunds, deletions, exports, logins and settings changes go to the activity log.

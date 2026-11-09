@@ -66,11 +66,11 @@ admin2Routes.get('/admin/staff', requirePerm('manage_staff'), async (c) => {
         <div class="row">
           <Field label="Name"><input name="name" required /></Field>
           <Field label="Mobile (for login code & alerts)"><input name="phone" inputmode="tel" /></Field>
-          <Field label="Email"><input type="email" name="email" /></Field>
+          <Field label="Email (their login)"><input type="email" name="email" /></Field>
         </div>
         <div class="row">
           <Field label="Role"><Select name="role" value="sales" options={STAFF_ROLES.map((r) => [r, ROLE_LABELS[r]])} /></Field>
-          <Field label="Password (optional; they can log in with a phone code)"><input type="password" name="password" minlength={8} autocomplete="new-password" /></Field>
+          <Field label="Password (8+ characters; give each person their own — never share the admin login)"><input type="password" name="password" minlength={8} maxlength={128} autocomplete="new-password" /></Field>
         </div>
         <button class="btn">Add staff</button>
       </form>
@@ -101,17 +101,24 @@ admin2Routes.post('/admin/staff', requirePerm('manage_staff'), async (c) => {
   const phone = normalizePhone(f.phone)
   const email = str(f.email, 120).toLowerCase() || null
   if (!str(f.name) || (!phone && !email)) return redirectMsg(c, '/admin/staff', { err: 'Name and a phone or email are required.' })
+  if ((str(f.phone) && (!phone || !/^\+[1-9]\d{7,14}$/.test(phone))) || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return redirectMsg(c, '/admin/staff', { err: 'Enter a valid phone number and email address.' })
+  if (f.password && (f.password.length < 8 || f.password.length > 128)) return redirectMsg(c, '/admin/staff', { err: 'Password must contain 8–128 characters.' })
   const role = (STAFF_ROLES as string[]).includes(f.role) ? (f.role as Role) : 'sales'
-  const existing = await first<{ id: number; role: string }>(c.env, 'SELECT id, role FROM users WHERE (phone = ? AND ? IS NOT NULL) OR (email = ? AND ? IS NOT NULL)', phone, phone, email, email)
+  // Only an admin can create another admin.
+  if (role === 'admin' && c.get('user')!.role !== 'admin') return redirectMsg(c, '/admin/staff', { err: 'Only an admin can add another admin.' })
+  const existing = await first<{ id: number; role: string }>(c.env, 'SELECT id, role FROM users WHERE (phone = ? AND ? IS NOT NULL) OR (lower(email) = ? AND ? IS NOT NULL)', phone, phone, email, email)
+  // Each staff member has their own login. Never re-use or re-role another staff member's account from here.
+  if (existing && existing.role !== 'guest') return redirectMsg(c, '/admin/staff', { err: 'That phone or email already belongs to a staff account. Use a different one, or edit that account.' })
+  const passwordHash = f.password ? await hashPassword(f.password) : null
   let id: number
   if (existing) {
-    await run(c.env, 'UPDATE users SET role = ?, name = ?, active = 1 WHERE id = ?', role, str(f.name, 80), existing.id)
+    await run(c.env, 'UPDATE users SET role = ?, name = ?, active = 1, password_hash = COALESCE(?, password_hash), session_version = session_version + 1 WHERE id = ?', role, str(f.name, 80), passwordHash, existing.id)
     id = existing.id
   } else {
-    id = await insertId(c.env, 'INSERT INTO users (role, name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)', role, str(f.name, 80), phone, email, f.password && f.password.length >= 8 ? await hashPassword(f.password) : null)
+    id = await insertId(c.env, 'INSERT INTO users (role, name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)', role, str(f.name, 80), phone, email, passwordHash)
   }
-  await logActivity(c.env, c.get('user')!.id, 'staff.added', 'user', id, { role })
-  return redirectMsg(c, '/admin/staff', { ok: existing ? 'Existing account promoted to staff.' : 'Staff member added.' })
+  await logActivity(c.env, c.get('user')!.id, 'staff.added', 'user', id, { role, promoted_guest: !!existing, password_set: !!passwordHash })
+  return redirectMsg(c, '/admin/staff', { ok: existing ? 'Existing guest account promoted to staff.' : 'Staff member added.' })
 })
 
 admin2Routes.post('/admin/staff/permissions', requirePerm('manage_staff'), async (c) => {
