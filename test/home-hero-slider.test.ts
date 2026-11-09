@@ -22,10 +22,11 @@ function fixture(reduce = false) {
 describe('homepage uploaded hero banners', () => {
   it('contains three optimized complete banners and keeps existing search fields', () => {
     const route = readFileSync('src/routes/public.tsx', 'utf8') as string
-    for (const name of ['romance', 'direct-offer', 'tea-valley']) {
+    for (const name of ['romance', 'direct-offer', 'kids-trip']) {
       expect(route).toContain(`home-hero-${name}.webp`)
       expect(statSync(`public/design/home-hero-${name}.webp`).size).toBeLessThan(350000)
     }
+    expect(route).not.toContain('Diwali')
     expect(route).toContain('aria-roledescription="carousel"')
     expect(route).toContain('width="1774" height="887"')
     expect(route).toContain("fetchpriority={index === 0 ? 'high' : 'low'}")

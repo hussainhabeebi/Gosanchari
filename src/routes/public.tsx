@@ -67,7 +67,7 @@ publicRoutes.get('/', async (c) => {
             {[
               { image: 'home-hero-romance.webp', text: 'Go Sanchari — We Create Destinations for Romance' },
               { image: 'home-hero-direct-offer.webp', text: 'Book Now and Get 5% Direct Off in All Bookings' },
-              { image: 'home-hero-tea-valley.webp', text: 'Book Your Rooms Before Diwali Rush' },
+              { image: 'home-hero-kids-trip.webp', text: 'Plan a Trip for Your Kids and Get 5% Instant Discount on November 14' },
             ].map((slide, index) => <div class={`home-hero-slide${index === 0 ? ' is-active' : ''}`} data-hero-slide aria-hidden={index !== 0} role="group" aria-roledescription="slide" aria-label={`${index + 1} of 3`}>
               <img src={`/design/${slide.image}`} alt={slide.text} width="1774" height="887" loading={index === 0 ? 'eager' : 'lazy'} fetchpriority={index === 0 ? 'high' : 'low'} decoding="async" />
             </div>)}
