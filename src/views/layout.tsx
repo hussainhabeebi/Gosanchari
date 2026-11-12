@@ -28,7 +28,13 @@ export interface PageOpts {
   head?: Child
   noindex?: boolean
   image?: string
+  /** Alt text for the share image (og:image:alt). */
+  imageAlt?: string
   canonical?: string
+  /** Open Graph type; 'article' adds article:published_time / modified_time. */
+  ogType?: 'website' | 'article'
+  articlePublished?: string
+  articleModified?: string
   /** Mood hero at the top of the page (public / guest pages). */
   hero?: Omit<HeroProps, 'photo' | 'children'> & { slot?: Child }
   /** Which top-menu item to underline. */
@@ -187,6 +193,7 @@ const NAV_GROUPS: NavGroup[] = [
   ] },
   { label: 'Website Settings', icon: 'gear', items: [
     { key: 'content', href: '/admin/content', label: 'Website content', perm: 'manage_content' },
+    { key: 'blog', href: '/admin/blog', label: 'Blog', perm: 'manage_blog' },
     { key: 'settings', href: '/admin/settings', label: 'Settings', perm: 'manage_settings' },
     { key: 'integrations', href: '/admin/integrations', label: 'API & integrations', perm: 'manage_settings' },
     { key: 'staff', href: '/admin/staff', label: 'Staff & roles', perm: 'manage_staff' },
@@ -371,7 +378,8 @@ const SideNav: FC<{ area: Area; active?: string; perms: Permissions | null; user
 export const Layout: FC<LayoutProps> = (p) => {
   const area = p.area ?? 'public'
   const dash = area !== 'public' && p.user
-  const fullTitle = p.title === p.settings.business.name ? p.title : `${p.title} · ${p.settings.business.name}`
+  // Custom meta titles that already name the business ("… | Go Sanchari") are not suffixed a second time.
+  const fullTitle = p.title.toLowerCase().includes(p.settings.business.name.toLowerCase()) ? p.title : `${p.title} · ${p.settings.business.name}`
   return (
     <>
       {raw('<!doctype html>')}
@@ -386,7 +394,12 @@ export const Layout: FC<LayoutProps> = (p) => {
           {p.canonical && <link rel="canonical" href={p.canonical} />}
           <meta property="og:title" content={fullTitle} />
           {p.description && <meta property="og:description" content={p.description} />}
+          <meta property="og:type" content={p.ogType ?? 'website'} />
+          {p.canonical && <meta property="og:url" content={p.canonical} />}
           <meta property="og:image" content={p.image ?? `${p.siteUrl}/brand/og.jpg`} />
+          {p.image && p.imageAlt && <meta property="og:image:alt" content={p.imageAlt} />}
+          {p.ogType === 'article' && p.articlePublished && <meta property="article:published_time" content={p.articlePublished} />}
+          {p.ogType === 'article' && p.articleModified && <meta property="article:modified_time" content={p.articleModified} />}
           <meta property="og:site_name" content={p.settings.business.name} />
           <meta name="twitter:card" content="summary_large_image" />
           <meta name="theme-color" content="#0f5e57" />

@@ -35,6 +35,7 @@ export interface Permissions {
   view_b2b_rates: boolean
   create_b2b_rates: boolean
   edit_b2b_rates: boolean
+  manage_blog: boolean
 }
 
 export type PermissionKey = keyof Permissions
@@ -67,6 +68,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   view_b2b_rates: 'B2B rates page: view B2B / net rates and the property details needed to enter them',
   create_b2b_rates: 'B2B rates page: enter new B2B rates (fill in blank rates)',
   edit_b2b_rates: 'B2B rates page: change or clear existing B2B rates',
+  manage_blog: 'Write, publish, unpublish and delete blog posts',
 }
 
 const none: Permissions = {
@@ -97,6 +99,7 @@ const none: Permissions = {
   view_b2b_rates: false,
   create_b2b_rates: false,
   edit_b2b_rates: false,
+  manage_blog: false,
 }
 
 export const DEFAULT_PERMISSIONS: Record<Role, Permissions> = {
