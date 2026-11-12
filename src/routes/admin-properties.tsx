@@ -23,6 +23,7 @@ import { destinations } from '../lib/properties'
 import { SEASON_KINDS, seasonKindLabel, weekendLabel, weekendNights, type SeasonRate } from '../lib/pricing'
 import { extractProperty, type ExtractedRoom, type ExtractedSeason } from '../lib/propextract'
 import { fetchImage } from '../lib/webimport'
+import { ALT_TEXT_MAX, DESCRIPTION_MAX, FaqEditor, descriptionError, faqsFromForm, readFaqs } from '../lib/property-seo'
 
 export const propertyEditorRoutes = new Hono<AppEnv>()
 
@@ -217,7 +218,7 @@ function propertyForm(
   const visible = SECTIONS.filter(([k]) => (showContact || k !== 'contact') && (!isNew || k !== 'tariff'))
   const num = (k: string) => visible.findIndex(([x]) => x === k) + 1
 
-  return page(c, { title: isNew ? 'Add property' : `Edit ${p.name}`, area: 'admin', active: 'properties', head: <LeafletHead /> }, (
+  return page(c, { title: isNew ? 'Add property' : `Edit ${p.name}`, area: 'admin', active: 'properties', head: <><LeafletHead /><script src="/content-editor.js" defer /></> }, (
     <div class="stack-lg prop-editor">
       <a href="/admin/properties" class="small">← Properties</a>
       <div class="row-between">
@@ -270,7 +271,8 @@ function propertyForm(
             <textarea id="desc-points" rows={3} placeholder="e.g. 3 bedrooms, tea estate views, home-cooked Kerala food, 20 min from Munnar town"></textarea>
             <button type="button" class="btn btn-sm" data-ai-desc="/admin/ai/description">Write in English & Malayalam</button>
           </details>
-          <Field label="Description (English)"><textarea name="description" id="desc-en" rows={6}>{p.description ?? ''}</textarea></Field>
+          <Field label="Property Description (public)" hint={`Shown on the property page as “About this property”. Up to ${DESCRIPTION_MAX.toLocaleString('en-IN')} characters.`}><textarea name="public_description" rows={6} maxlength={DESCRIPTION_MAX}>{p.public_description ?? ''}</textarea></Field>
+          <Field label="Description (English)" hint="Internal: not shown on the website."><textarea name="description" id="desc-en" rows={6}>{p.description ?? ''}</textarea></Field>
           <Field label="Description (Malayalam)"><textarea name="description_ml" id="desc-ml" rows={5}>{p.description_ml ?? ''}</textarea></Field>
           <Field label="Good to know (shown to guests)" hint="Honest notes: steep road, no lift, limited mobile signal, etc."><textarea name="good_to_know" rows={2}>{p.good_to_know ?? ''}</textarea></Field>
         </section>
@@ -378,6 +380,7 @@ function propertyForm(
           <div class="row-between"><h2>{num('seo')}. SEO</h2><button type="button" class="btn btn-sm btn-outline" data-ai-seo="/admin/ai/seo"><span class="ai-badge sm">AI</span> Suggest</button></div>
           <Field label="Page title"><input name="seo_title" id="seo-title" value={p.seo_title ?? ''} maxlength={70} /></Field>
           <Field label="Meta description"><textarea name="seo_description" id="seo-desc" rows={2} maxlength={170}>{p.seo_description ?? ''}</textarea></Field>
+          <FaqEditor faqs={readFaqs(p.faqs)} />
         </section>
 
         <section class="card stack internal" id="remarks">
@@ -487,6 +490,7 @@ function propertyForm(
                       <Select name="category" value={ph.category} options={Object.entries(PHOTO_CATEGORIES)} />
                       {(ph.category === 'room' || ph.room_id) && <Select name="room_id" value={ph.room_id ?? ''} options={roomOpts} />}
                       <input name="caption" value={ph.caption ?? ''} placeholder="Caption" />
+                      {ph.media_type === 'image' && <input name="alt_text" value={ph.alt_text ?? ''} placeholder="Alt text (SEO, optional)" maxlength={ALT_TEXT_MAX} aria-label="Alt text" />}
                       <div class="row"><input type="number" name="sort" value={ph.sort} class="w-sm" title="Order" /><button class="btn btn-sm btn-outline">Save</button><button class="btn btn-sm btn-danger" name="delete" value="1">Delete</button></div>
                       {parseJson<string[]>(ph.ai_tags, []).length > 0 && <div class="small"><span class="ai-badge sm">AI</span> {parseJson<string[]>(ph.ai_tags, []).map((t) => FACILITIES[t] ?? t).join(', ')}</div>}
                     </form>
@@ -709,7 +713,14 @@ propertyEditorRoutes.post('/admin/properties/:id', requirePerm('manage_propertie
   const before = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE id = ?', id)
   if (!before) return c.notFound()
   const f = await form(c)
-  const v = propertyValues(f, await canSeeContacts(c), await canSeeNet(c), before)
+  const descErr = 'public_description' in f ? descriptionError(f.public_description, before.public_description) : null
+  if (descErr) return redirectMsg(c, `/admin/properties/${id}#description`, { err: descErr })
+  const faqs = faqsFromForm(f.__all)
+  if ('err' in faqs) return redirectMsg(c, `/admin/properties/${id}#seo`, { err: faqs.err })
+  const v: ReturnType<typeof propertyValues> & { faqs?: string; public_description?: string } = propertyValues(f, await canSeeContacts(c), await canSeeNet(c), before)
+  if ('public_description' in f) v.public_description = f.public_description.replace(/\r\n/g, '\n').trim()
+  // The FAQ rows live in the SEO section; a form without that section leaves stored FAQs unchanged.
+  if ('seo_title' in f) v.faqs = JSON.stringify(faqs.faqs)
   const cols = Object.keys(v)
   await run(c.env, `UPDATE properties SET ${cols.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...(Object.values(v) as (string | number | null)[]), nowIso(), id)
   await run(c.env, 'UPDATE property_photos SET tags_confirmed = 1 WHERE property_id = ?', id)
@@ -1019,6 +1030,7 @@ propertyEditorRoutes.post('/admin/photos/:id', requirePerm('manage_properties'),
   } else {
     const category = f.category in PHOTO_CATEGORIES ? f.category : ph.category
     await run(c.env, 'UPDATE property_photos SET caption = ?, sort = ?, category = ?, room_id = ? WHERE id = ?', str(f.caption, 120) || null, int(f.sort), category, category === 'room' ? int(f.room_id) || ph.room_id : null, ph.id)
+    if ('alt_text' in f) await run(c.env, 'UPDATE property_photos SET alt_text = ? WHERE id = ?', str(f.alt_text, ALT_TEXT_MAX) || null, ph.id)
   }
   await afterPropertySave(c, ph.property_id)
   return c.redirect(`/admin/properties/${ph.property_id}#media`, 303)

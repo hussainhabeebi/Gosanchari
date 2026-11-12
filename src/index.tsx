@@ -33,6 +33,8 @@ import { webhookRoutes } from './routes/webhooks'
 import { apiRoutes } from './routes/api'
 import { integrationRoutes } from './routes/admin-integrations'
 import { b2bRateRoutes } from './routes/b2b-rates'
+import { blogRoutes } from './routes/blog'
+import { adminBlogRoutes } from './routes/admin-blog'
 import { handleQueue } from './jobs/queue'
 import { handleScheduled } from './jobs/cron'
 import { getSettings } from './lib/settings'
@@ -110,6 +112,8 @@ app.route('/', calculatorRoutes)
 app.route('/', staffRoomRoutes)
 app.route('/', rateSheetRoutes)
 app.route('/', b2bRateRoutes)
+app.route('/', blogRoutes)
+app.route('/', adminBlogRoutes)
 app.route('/', assistantRoutes)
 app.route('/', wizardRoutes)
 app.route('/', propertyEditorRoutes)

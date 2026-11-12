@@ -1,5 +1,6 @@
 import { setCookie } from 'hono/cookie'
 import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
+import { faqSchema, photoAlt, readFaqs } from '../lib/property-seo'
 import { PolicyContent } from '../views/policy-content'
 import { AboutContent } from '../views/about-content'
 import { DEFAULT_ABOUT } from '../lib/settings'
@@ -370,6 +371,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const meals = parseJson<string[]>(p.meal_plans, [])
   const nearby = parseJson<NearbyPlace[]>(p.nearby, [])
   const highlights = parseJson<string[]>(p.highlights, [])
+  const faqs = readFaqs(p.faqs)
   const checkIn = isDate(c.req.query('checkIn')) ? c.req.query('checkIn')! : ''
   const checkOut = isDate(c.req.query('checkOut')) ? c.req.query('checkOut')! : ''
   const guests = int(c.req.query('guests'), 2)
@@ -395,12 +397,12 @@ publicRoutes.get('/stay/:slug', async (c) => {
       {p.status !== 'live' && <div class="flash flash-err">Preview — this property is {p.status} and not visible to guests.</div>}
       {preview ? <div class="gallery stay-preview-gallery" data-gallery data-preview-gallery>
         <div class="preview-gallery-stage">
-          <button type="button" class="preview-gallery-open" data-gallery-open aria-label="Open property photo viewer"><img data-gallery-main src={mediaUrl(gallery[0].r2_key, 1200, settings.images_transform)} alt={gallery[0].caption ?? p.name} /></button>
+          <button type="button" class="preview-gallery-open" data-gallery-open aria-label="Open property photo viewer"><img data-gallery-main src={mediaUrl(gallery[0].r2_key, 1200, settings.images_transform)} alt={photoAlt(gallery[0], p.name)} /></button>
           {photos.length > 1 && <><button type="button" class="preview-gallery-arrow previous" data-gallery-step="-1" aria-label="Previous property photo">‹</button><button type="button" class="preview-gallery-arrow next" data-gallery-step="1" aria-label="Next property photo">›</button></>}
           <span class="preview-gallery-counter" data-gallery-counter aria-live="polite">1 / {gallery.length}</span>
         </div>
         <div class="preview-gallery-thumbnails" aria-label="Property photos">
-          {gallery.map((ph, i) => <button type="button" data-gallery-index={i} data-image={mediaUrl(ph.r2_key, 1200, settings.images_transform)} data-caption={ph.caption ?? p.name} aria-label={`Show photo ${i + 1}`} aria-pressed={i === 0 ? 'true' : 'false'}><img src={mediaUrl(ph.r2_key, 200, settings.images_transform)} alt={ph.caption ?? p.name} loading="lazy" /></button>)}
+          {gallery.map((ph, i) => <button type="button" data-gallery-index={i} data-image={mediaUrl(ph.r2_key, 1200, settings.images_transform)} data-caption={ph.caption ?? p.name} aria-label={`Show photo ${i + 1}`} aria-pressed={i === 0 ? 'true' : 'false'}><img src={mediaUrl(ph.r2_key, 200, settings.images_transform)} alt={photoAlt(ph, p.name)} loading="lazy" /></button>)}
         </div>
         {gallery.map(ph => <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} data-full hidden></a>)}
         {photos.length > 1 && <a class="small" href="#photos">See all {photos.length} photos</a>}
@@ -408,7 +410,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
       <div class="gallery" data-gallery>
         {gallery.slice(0, 5).map((ph, i) => (
           <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} class={`g-item g-${i}`} data-full>
-            <img src={mediaUrl(ph.r2_key, i === 0 ? 1200 : 600, settings.images_transform)} alt={ph.caption ?? p.name} loading={i ? 'lazy' : 'eager'} />
+            <img src={mediaUrl(ph.r2_key, i === 0 ? 1200 : 600, settings.images_transform)} alt={photoAlt(ph, p.name)} loading={i ? 'lazy' : 'eager'} />
           </a>
         ))}
         {gallery.slice(5).map((ph) => <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} data-full hidden></a>)}
@@ -429,6 +431,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
             <h2>About this property</h2>
             {p.review_summary && <AiNote label="AI Insights · Guest review summary">{p.review_summary}</AiNote>}
             {highlights.length > 0 && <ul class="highlights">{highlights.map((h) => <li>{h}</li>)}</ul>}
+            {p.public_description?.trim() && <div class="property-description pre-line">{p.public_description.trim()}</div>}
             {p.built_year && (
               <dl class="info-list">
                 <dt>Built / renovated</dt><dd>{p.built_year}</dd>
@@ -447,7 +450,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                   <div class="room card">
                     <div class="grow">
                       <h3>{r.name}</h3>
-                      {rp.length > 0 && <div class="room-photos" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 300, settings.images_transform)} alt={m.caption ?? r.name} loading="lazy" /></a>)}</div>}
+                      {rp.length > 0 && <div class="room-photos" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 300, settings.images_transform)} alt={photoAlt(m, r.name)} loading="lazy" /></a>)}</div>}
                       {preview && meals.length > 0 && <p class="small">Meal plans: {meals.map(m => MEAL_PLANS[m] ?? m).join(' · ')}</p>}
                       <div class="room-meta">
                         <span>👥 {(r.base_guests ?? r.capacity) < r.capacity ? `Rate for ${r.base_guests} guests · up to ${r.capacity}` : `Up to ${r.capacity} guests`}{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
@@ -483,7 +486,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                 <div class="media-group" id={`ph-${k}`}>
                   <h3>{PHOTO_CATEGORIES[k]}</h3>
                   <div class="media-strip" data-gallery>
-                    {list.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 400, settings.images_transform)} alt={m.caption ?? PHOTO_CATEGORIES[k]} loading="lazy" /></a>)}
+                    {list.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 400, settings.images_transform)} alt={photoAlt(m, `${p.name} — ${PHOTO_CATEGORIES[k]}`)} loading="lazy" /></a>)}
                   </div>
                 </div>
               ))}
@@ -559,6 +562,13 @@ publicRoutes.get('/stay/:slug', async (c) => {
               </>
             )}
           </section>
+
+          {faqs.length > 0 && (
+            <section class="section-sm" id="faqs">
+              <h2>Frequently asked questions</h2>
+              {faqs.map((f) => <details class="faq"><summary>{f.q}</summary><p class="pre-line">{f.a}</p></details>)}
+            </section>
+          )}
 
           <section class="section-sm" id="ask">
             <h2>Ask about this property</h2>
@@ -646,6 +656,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         <a class="btn" href="#book">Enquire</a>
       </div>
       {jsonScript('ld', ld, 'application/ld+json')}
+      {faqs.length > 0 && jsonScript('ld-faq', faqSchema(faqs), 'application/ld+json')}
     </div>
   ))
 })
@@ -1088,7 +1099,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         </div>
       </div>
       {photos.length > 0
-        ? <div class="room-gallery" data-gallery>{photos.map((m) => <a href={mediaUrl(m.r2_key, 1600, t)} data-full><img src={mediaUrl(m.r2_key, 800, t)} alt={m.caption ?? r.name} loading="lazy" />{m.caption && <span class="cap">{m.caption}</span>}</a>)}</div>
+        ? <div class="room-gallery" data-gallery>{photos.map((m) => <a href={mediaUrl(m.r2_key, 1600, t)} data-full><img src={mediaUrl(m.r2_key, 800, t)} alt={photoAlt(m, r.name)} loading="lazy" />{m.caption && <span class="cap">{m.caption}</span>}</a>)}</div>
         : <p class="muted">Photos of this room are coming soon.</p>}
       <div class="card stack">
         <div class="room-meta">

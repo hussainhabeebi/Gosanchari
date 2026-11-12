@@ -4,6 +4,7 @@ import type { AppEnv } from '../env'
 import { getContent, type Settings } from './settings'
 import type { PropertyRow } from './types'
 import { parseJson } from './util'
+import { sitemapPosts } from './blog'
 
 const clean = (value: string) => value.replace(/\s+/g, ' ').trim()
 const metadataPages = new Set(['/', '/search', '/offers', '/about', '/contact', '/enquiry', '/help', '/policies/privacy', '/policies/cancellation', '/policies/terms'])
@@ -41,11 +42,12 @@ export function robotsText(site: string): string {
 }
 
 export async function publicSitemap(c: Context<AppEnv>) {
-  const [props, content] = await Promise.all([
+  const [props, content, posts] = await Promise.all([
     c.env.DB.prepare("SELECT slug FROM properties WHERE status = 'live' ORDER BY slug").all<{ slug: string }>(),
     getContent(c.env),
+    sitemapPosts(c.env),
   ])
-  const paths = ['/', '/search', '/offers', '/about', '/contact', '/enquiry']
+  const paths = ['/', '/search', '/offers', '/about', '/contact', '/enquiry', '/blog']
   // Do not promote the default, unapproved policy placeholder into the sitemap.
   for (const kind of ['privacy', 'cancellation', 'terms'] as const) {
     const policy = content.policies[kind]?.trim()
@@ -53,5 +55,7 @@ export async function publicSitemap(c: Context<AppEnv>) {
   }
   paths.push(...props.results.filter(p => !!p.slug).map(p => `/stay/${encodeURIComponent(p.slug)}`))
   const urls = [...new Set(paths.map(path => new URL(path, c.env.SITE_URL).href))]
-  return c.body(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(url => `<url><loc>${escapeXml(url)}</loc></url>`).join('')}</urlset>`, 200, { 'content-type': 'application/xml; charset=utf-8' })
+  // Published blog posts only (drafts, unpublished and scheduled posts are left out), with their last change.
+  const blog = posts.map(p => `<url><loc>${escapeXml(new URL(`/blog/${p.slug}`, c.env.SITE_URL).href)}</loc><lastmod>${escapeXml(p.updated_at.slice(0, 10))}</lastmod></url>`)
+  return c.body(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(url => `<url><loc>${escapeXml(url)}</loc></url>`).join('')}${blog.join('')}</urlset>`, 200, { 'content-type': 'application/xml; charset=utf-8' })
 }

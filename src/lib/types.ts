@@ -39,6 +39,10 @@ export interface PropertyRow {
   last_minute_note: string
   seo_title: string | null
   seo_description: string | null
+  /** Staff-written description shown on the stay page (migration 0028). The older `description` is never public. */
+  public_description?: string
+  /** JSON array of {"q","a"} shown on the stay page (migration 0028). */
+  faqs?: string
   status: 'draft' | 'live' | 'hidden'
   featured: number
   rating_avg: number
@@ -109,6 +113,8 @@ export interface PhotoRow {
   room_id: number | null
   media_type: 'image' | 'video'
   video_url: string | null
+  /** Optional SEO alt text (migration 0028); falls back to caption, then the property name. */
+  alt_text?: string | null
   /** AI (Gemini) suggestions — see migration 0021. */
   ai_category?: string | null
   ai_caption?: string | null

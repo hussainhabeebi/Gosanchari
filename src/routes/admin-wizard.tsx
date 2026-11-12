@@ -18,6 +18,7 @@ import { addItem, allRows, KINDS, listFor, removeItem, restoreItem, type Kind } 
 import { mediaUrl } from '../lib/integrations'
 import type { PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { int, isDate, parseJson, slugify, str } from '../lib/util'
+import { ALT_TEXT_MAX, DESCRIPTION_MAX, FaqEditor, META_DESCRIPTION_MAX, META_TITLE_MAX, descriptionError, faqsFromForm, readFaqs } from '../lib/property-seo'
 import { form, redirectMsg } from './helpers'
 import { afterPropertySave, AiImportBox, applyAiImport } from './admin-properties'
 import { commonPeakKey, overridePeakKey, parseWeekdays, type SeasonRate } from '../lib/pricing'
@@ -206,7 +207,8 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
   // Keep previously saved options available even if taxonomy later hides them.
   for (const k of selectedThemes) if (!themes.some(([key]) => key === k)) themes.push([k, THEMES[k] ?? k])
   const video = photos.find((x) => x.video_url)
-  return page(c, { title: p ? `Edit ${p.name}` : 'Add Property', area: 'admin', active: 'prop_new' }, (
+  const dupTitle = p?.seo_title ? (await first<{ name: string }>(c.env, 'SELECT name FROM properties WHERE id != ? AND lower(seo_title) = lower(?) LIMIT 1', p.id, p.seo_title))?.name : undefined
+  return page(c, { title: p ? `Edit ${p.name}` : 'Add Property', area: 'admin', active: 'prop_new', head: <script src="/content-editor.js" defer /> }, (
     <Shell p={p} step={1} done={done} icon={I.home} title="Property Details" sub="Add the property details here. AI can fetch location info and nearby attractions.">
       {!p && <AiImportBox open wizard />}
       <form method="post" action={p ? `/admin/properties/${p.id}/setup/1` : '/admin/properties/new'} enctype="multipart/form-data" class="stack wiz-form" id={p ? undefined : 'prop-form'}>
@@ -233,6 +235,22 @@ async function step1(c: Context<AppEnv>, p: PropertyRow | null) {
         <label class="wf"><span class="wl">Short Highlights about Property (3-4 points) <b>*</b></span>
           <textarea name="highlights" rows={3} maxlength={300} required placeholder="Enter key highlights (e.g. scenic location, private pool, family friendly, etc.)">{parseJson<string[]>(p?.highlights, []).join('\n')}</textarea><Counter max={300} />
         </label>
+        <label class="wf"><span class="wl">Property Description <span class="muted small">(optional — shown on the property page as “About this property”)</span></span>
+          <textarea name="public_description" rows={6} maxlength={DESCRIPTION_MAX} placeholder="Describe the property, its setting, rooms and experiences for guests">{p?.public_description ?? ''}</textarea><Counter max={DESCRIPTION_MAX} />
+        </label>
+        <details class="wf seo-details" open={!!(p?.seo_title || p?.seo_description || readFaqs(p?.faqs).length)}>
+          <summary><span class="wl">SEO Details</span> <span class="muted small">(optional — page title, meta description and FAQs for search engines)</span></summary>
+          <div class="stack">
+            <label class="wf"><span class="wl">Meta Title</span>
+              <input name="seo_title" value={p?.seo_title ?? ''} maxlength={META_TITLE_MAX} placeholder={p ? `${p.name}, ${p.destination}` : 'Leave blank to use “Property name, Destination”'} /><Counter max={META_TITLE_MAX} />
+              {dupTitle && <small class="error">Another property already uses this meta title ({dupTitle}). Use a unique title for each property.</small>}
+            </label>
+            <label class="wf"><span class="wl">Meta Description</span>
+              <textarea name="seo_description" rows={2} maxlength={META_DESCRIPTION_MAX} placeholder="Leave blank to use the name, destination and highlights">{p?.seo_description ?? ''}</textarea><Counter max={META_DESCRIPTION_MAX} />
+            </label>
+            <FaqEditor faqs={readFaqs(p?.faqs)} />
+          </div>
+        </details>
         <div class="wf common-photos" data-common-photos data-common-thumbnail data-thumbnail-url={p ? `/admin/properties/${p.id}/common-thumbnail` : undefined} data-upload-url={p ? `/admin/properties/${p.id}/common-photos` : undefined}>
           <span class="wl">Common Photos & Video Link</span>
           <span class="muted small">Choose “Use as Thumbnail” on a saved image to set the public property cover. Add common photos and/or a YouTube/Drive video link. New-property photos are saved with Save & Continue.</span>
@@ -277,7 +295,22 @@ async function saveStep1(c: Context<AppEnv>, existing: PropertyRow | null) {
   const themes = [...new Set(f.__all.best_for ?? [])].filter((x) => x in THEMES || parseJson<string[]>(existing?.themes, []).includes(x))
   if (!themes.length) return { err: 'Select at least one Best For option.' }
   const highlights = str(f.highlights, 300).split(/\n|•|;/).map((x) => x.trim().replace(/^[-*]\s*/, '')).filter(Boolean).slice(0, 6)
-  const v = { name, destination, stay_type: type, type: legacyType(type), themes: JSON.stringify(themes), highlights: JSON.stringify(highlights), facilities: JSON.stringify(facilities) }
+  // Description and SEO Details are only on step 1; older forms without them leave the stored values unchanged.
+  const seo: Record<string, string | null> = {}
+  if ('public_description' in f) {
+    const description = f.public_description.replace(/\r\n/g, '\n').trim()
+    const err = descriptionError(description, existing?.public_description)
+    if (err) return { err }
+    seo.public_description = description
+  }
+  if ('seo_title' in f) seo.seo_title = str(f.seo_title, META_TITLE_MAX) || null
+  if ('seo_description' in f) seo.seo_description = str(f.seo_description, META_DESCRIPTION_MAX) || null
+  if ('faq_q' in f || 'faq_a' in f || 'seo_title' in f) {
+    const faqs = faqsFromForm(f.__all)
+    if ('err' in faqs) return { err: faqs.err }
+    seo.faqs = JSON.stringify(faqs.faqs)
+  }
+  const v = { name, destination, stay_type: type, type: legacyType(type), themes: JSON.stringify(themes), highlights: JSON.stringify(highlights), facilities: JSON.stringify(facilities), ...seo }
   let id: number
   if (existing) {
     id = existing.id
@@ -889,6 +922,20 @@ async function step6(c: Context<AppEnv>, p: PropertyRow) {
         </div>
         <div id="img-blocks" class="stack">{blocks.map((r, i) => <Block i={String(i)} room={r} />)}</div>
         <template id="img-block-tpl"><Block i="__I__" /></template>
+        {images.length > 0 && (
+          <details class="tint tint-blue" id="alt-text" open={images.some((x) => x.alt_text)}>
+            <summary class="tint-head">{I.image}<div><h3>Image Alt Text (SEO, optional)</h3><small class="muted">Describe what each photo shows, for search engines and screen readers. Blank uses the caption or the property name.</small></div></summary>
+            <div class="tint-body alt-text-grid">
+              {images.map((x) => (
+                <label class="alt-text-item">
+                  <img src={mediaUrl(x.r2_key, 200)} alt="" loading="lazy" />
+                  <span class="small muted">{x.room_id ? rooms.find((r) => r.id === x.room_id)?.name ?? 'Room' : 'Common'}</span>
+                  <input name={`alt_${x.id}`} value={x.alt_text ?? ''} maxlength={ALT_TEXT_MAX} placeholder={`e.g. ${p.name} swimming pool at sunset`} aria-label={`Alt text for photo ${x.id}`} />
+                </label>
+              ))}
+            </div>
+          </details>
+        )}
         <div class="wiz-nav">
           <button type="button" class="btn btn-soft" data-add-block="img">{I.plus} Add Next Category</button>
           <span class="row"><a class="btn btn-outline" href={`/admin/properties/${p.id}/setup/5`}>← Previous</a><button class="btn btn-go" name="go" value="1">Save & Continue →</button></span>
@@ -900,6 +947,21 @@ async function step6(c: Context<AppEnv>, p: PropertyRow) {
 
 async function saveStep6(c: Context<AppEnv>, p: PropertyRow): Promise<{ err?: string; stay?: boolean }> {
   const body = await c.req.parseBody({ all: true })
+  // Alt text for saved images (only rows of this property, only when changed).
+  const altKeys = Object.keys(body).filter((k) => /^alt_\d+$/.test(k))
+  if (altKeys.length) {
+    const current = await all<{ id: number; alt_text: string | null }>(c.env, "SELECT id, alt_text FROM property_photos WHERE property_id = ? AND media_type = 'image'", p.id)
+    let changed = 0
+    for (const row of current) {
+      const key = `alt_${row.id}`
+      if (!(key in body)) continue
+      const next = str(String(body[key] ?? ''), ALT_TEXT_MAX) || null
+      if (next === (row.alt_text ?? null)) continue
+      await run(c.env, 'UPDATE property_photos SET alt_text = ? WHERE id = ? AND property_id = ?', next, row.id, p.id)
+      changed++
+    }
+    if (changed) await logActivity(c.env, c.get('user')!.id, 'property.alt_text', 'property', p.id, { photos: changed })
+  }
   const del = int(String(body.del_photo ?? ''))
   if (del) {
     const ph = await first<PhotoRow>(c.env, 'SELECT * FROM property_photos WHERE id = ? AND property_id = ?', del, p.id)
