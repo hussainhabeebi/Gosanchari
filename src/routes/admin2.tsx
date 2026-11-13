@@ -80,7 +80,7 @@ admin2Routes.get('/admin/staff', requirePerm('manage_staff'), async (c) => {
         <Table head={['Permission', ...editable.map((r) => ROLE_LABELS[r])]}>
           {keys.map((k) => (
             <tr>
-              <td>{PERMISSION_LABELS[k]}</td>
+              <td>{PERMISSION_LABELS[k]}<input type="hidden" name="perm_shown" value={k} /></td>
               {editable.map((r) => (
                 <td>{k === 'max_discount_pct'
                   ? <input type="number" name={`${r}.${k}`} value={effective(r)[k]} min="0" max="100" class="w-sm" />
@@ -123,10 +123,15 @@ admin2Routes.post('/admin/staff', requirePerm('manage_staff'), async (c) => {
 
 admin2Routes.post('/admin/staff/permissions', requirePerm('manage_staff'), async (c) => {
   const f = await form(c)
+  // Only the permissions that were on the submitted page are changed. A page opened before a new permission
+  // existed must not switch that permission off; everything not shown keeps its saved value or default.
+  const shown = new Set(f.__all.perm_shown ?? [])
+  if (!shown.size) return redirectMsg(c, '/admin/staff', { err: 'This page is out of date. Reload it and save the permissions again.' })
+  const saved = (await getSettings(c.env)).role_permissions
   const out: Partial<Record<Role, Partial<Permissions>>> = {}
   for (const r of ['manager', 'sales', 'accounts'] as Role[]) {
-    const p: Partial<Permissions> = {}
-    for (const k of Object.keys(PERMISSION_LABELS) as PermissionKey[]) {
+    const p: Partial<Permissions> = { ...(saved[r] ?? {}) }
+    for (const k of (Object.keys(PERMISSION_LABELS) as PermissionKey[]).filter((k) => shown.has(k))) {
       if (k === 'max_discount_pct') p.max_discount_pct = Math.max(0, Math.min(100, parseFloat(f[`${r}.${k}`]) || 0))
       else (p as Record<string, boolean>)[k] = f[`${r}.${k}`] === '1'
     }

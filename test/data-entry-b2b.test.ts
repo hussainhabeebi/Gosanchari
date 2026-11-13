@@ -44,11 +44,13 @@ function fixture() {
   }
   const pending: Promise<unknown>[] = []
   const ctx: any = { waitUntil(p: Promise<unknown>) { pending.push(p) }, passThroughOnException() {} }
-  const req = async (path: string, init: { method?: string; body?: Record<string, string>; cookie?: string; origin?: string | null } = {}) => {
+  const req = async (path: string, init: { method?: string; body?: Record<string, string | string[]>; cookie?: string; origin?: string | null } = {}) => {
     const headers: Record<string, string> = {}
     if (init.cookie) headers.cookie = init.cookie
     if (init.method === 'POST' && init.origin !== null) headers.Origin = init.origin ?? ORIGIN
-    const r = await app.request(ORIGIN + path, { method: init.method ?? 'GET', headers, body: init.body ? new URLSearchParams(init.body) : undefined }, env, ctx)
+    const params = new URLSearchParams()
+    for (const [k, v] of Object.entries(init.body ?? {})) for (const x of [v].flat()) params.append(k, x)
+    const r = await app.request(ORIGIN + path, { method: init.method ?? 'GET', headers, body: init.body ? params : undefined }, env, ctx)
     await Promise.all(pending.splice(0))
     return r
   }
@@ -119,7 +121,7 @@ describe('Individual Data Entry logins', () => {
 
     // Login, then logout.
     const first = await f.login('rahul@example.test', 'Start-pass-1')
-    expect(first.location).toBe('/admin/payments')
+    expect(first.location).toBe('/admin/b2b-rates') // Data Entry lands on B2B rates
     expect((await f.req('/admin/b2b-rates', { cookie: first.cookie })).status).toBe(200)
     await f.req('/logout', { method: 'POST', cookie: first.cookie })
     expect((await f.req('/admin/b2b-rates', { cookie: first.cookie })).status).toBe(302)
@@ -233,7 +235,7 @@ describe('B2B rates page', () => {
     expect(f.msg(await f.req(`/admin/b2b-rates/${f.pid}/rates`, { method: 'POST', cookie: entry.cookie, body: { [`room_${f.r1}_net_rate`]: '6100' } }))).toContain('1 B2B rate(s) saved.')
     // No view: page, menu and writes are all denied.
     f.setPerms({ accounts: { ...DEFAULT_PERMISSIONS.accounts, view_b2b_rates: false } })
-    expect((await f.req('/admin/b2b-rates', { cookie: entry.cookie })).status).toBe(403)
+    expect((await f.req('/admin/b2b-rates', { cookie: entry.cookie })).headers.get('location')).toBe('/admin/payments') // list redirects, no data
     expect((await f.req(`/admin/b2b-rates/${f.pid}`, { cookie: entry.cookie })).status).toBe(403)
     expect((await f.req(`/admin/b2b-rates/${f.pid}/rates`, { method: 'POST', cookie: entry.cookie, body: { [`room_${f.r1}_net_rate`]: '1' } })).status).toBe(403)
     expect(await (await f.req('/staff/profile', { cookie: entry.cookie })).text()).not.toContain('href="/admin/b2b-rates"')
@@ -266,7 +268,8 @@ describe('Admin controls the Data Entry B2B permissions from Staff & roles', () 
     const staffPage = await (await f.req('/admin/staff', { cookie: admin.cookie })).text()
     for (const k of ['view_b2b_rates', 'create_b2b_rates', 'edit_b2b_rates']) expect(staffPage).toContain(`name="accounts.${k}" value="1" checked`)
     // Re-submit the form as shown, with Data Entry's edit permission unticked.
-    const body: Record<string, string> = {}
+    const body: Record<string, string | string[]> = {}
+    body.perm_shown = [...staffPage.matchAll(/<input type="hidden" name="perm_shown" value="([^"]+)"/g)].map((m) => m[1])
     for (const m of staffPage.matchAll(/<input type="checkbox" name="([^"]+)" value="1" checked=""/g)) body[m[1]] = '1'
     for (const m of staffPage.matchAll(/<input type="number" name="([^"]+)" value="([^"]*)"/g)) body[m[1]] = m[2]
     delete body['accounts.edit_b2b_rates']
@@ -277,6 +280,37 @@ describe('Admin controls the Data Entry B2B permissions from Staff & roles', () 
     expect(saved.manager).toMatchObject({ ...DEFAULT_PERMISSIONS.manager })
     expect(saved.sales).toMatchObject({ ...DEFAULT_PERMISSIONS.sales })
     expect(saved.accounts).toMatchObject({ ...DEFAULT_PERMISSIONS.accounts, edit_b2b_rates: false })
+  })
+})
+
+describe('Saving Staff & roles never switches off permissions the page did not show', () => {
+  it('a page opened before a permission existed leaves that permission as it was', async () => {
+    const f = fixture()
+    const admin = await f.staffUser('admin', 'boss@example.test')
+    const entry = await f.staffUser('accounts', 'entry@example.test')
+    // An older page: every permission except the three B2B ones, Data Entry's boxes as they were.
+    const body: Record<string, string | string[]> = {
+      perm_shown: Object.keys(DEFAULT_PERMISSIONS.accounts).filter((k) => !k.includes('b2b')),
+      'accounts.manage_payments': '1', 'accounts.view_reports': '1', 'manager.max_discount_pct': '15', 'sales.max_discount_pct': '5', 'accounts.max_discount_pct': '0',
+    }
+    expect(f.msg(await f.req('/admin/staff/permissions', { method: 'POST', cookie: admin.cookie, body }))).toContain('Permissions saved.')
+    const saved = JSON.parse((f.db.prepare("SELECT value FROM settings WHERE key='role_permissions'").get() as any).value)
+    expect(saved.accounts).not.toHaveProperty('view_b2b_rates')
+    expect(saved.accounts).toMatchObject({ manage_payments: true, export_data: false })
+    expect((await f.req(`/admin/b2b-rates/${f.pid}`, { cookie: entry.cookie })).status).toBe(200)
+    // A form with no list of shown permissions at all (very old page) is refused, not applied.
+    expect(f.msg(await f.req('/admin/staff/permissions', { method: 'POST', cookie: admin.cookie, body: { 'accounts.manage_payments': '1' } }))).toContain('out of date')
+    expect((await f.req(`/admin/b2b-rates/${f.pid}`, { cookie: entry.cookie })).status).toBe(200)
+  })
+
+  it('a Data Entry user whose B2B access is off is sent to Payments instead of an error after login', async () => {
+    const f = fixture()
+    const entry = await f.staffUser('accounts', 'entry@example.test')
+    f.setPerms({ accounts: { ...DEFAULT_PERMISSIONS.accounts, view_b2b_rates: false } })
+    const r = await f.req('/admin/b2b-rates', { cookie: entry.cookie })
+    expect(r.status).toBe(302)
+    expect(r.headers.get('location')).toBe('/admin/payments')
+    expect((await f.req(`/admin/b2b-rates/${f.pid}`, { cookie: entry.cookie })).status).toBe(403)
   })
 })
 

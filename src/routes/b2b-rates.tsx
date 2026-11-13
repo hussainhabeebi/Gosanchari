@@ -91,6 +91,15 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const nights = (v: string | null) => (v ?? '').split(',').map((x) => WEEKDAYS[parseInt(x, 10)]).filter(Boolean).join(', ')
 
 // ---------- List ----------
+// Data Entry staff land here after login; without the B2B permission, go to the next useful page instead of a 403.
+b2bRateRoutes.get('/admin/b2b-rates', async (c, next) => {
+  const u = c.get('user')
+  if (u?.role === 'accounts') {
+    const pm = await permissionsFor(c.env, u.role)
+    if (!pm.view_b2b_rates) return c.redirect(pm.manage_payments ? '/admin/payments' : '/staff', 302)
+  }
+  await next()
+})
 b2bRateRoutes.get('/admin/b2b-rates', requirePerm('view_b2b_rates'), async (c) => {
   const q = str(c.req.query('q'), 80)
   const rows = await all<{ id: number; name: string; destination: string; status: string; b2b_valid_from: string | null; b2b_valid_to: string | null; room_count: number; with_rate: number }>(

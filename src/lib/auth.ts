@@ -166,6 +166,7 @@ export async function rateLimit(env: Env, key: string, limit: number, windowSec:
 export function homeFor(role: Role): string {
   if (role === 'guest') return '/my'
   if (role === 'admin' || role === 'manager') return '/admin'
-  if (role === 'accounts') return '/admin/payments'
+  // Data Entry's main job is B2B rate entry; /admin/b2b-rates sends them on if an admin has turned that off.
+  if (role === 'accounts') return '/admin/b2b-rates'
   return '/staff'
 }
