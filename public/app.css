@@ -16,6 +16,10 @@
 .rich-area blockquote, .blog-content blockquote { border-left:4px solid var(--brand, #0f5e57); margin:12px 0; padding:4px 14px; color:#475569; }
 .blog-admin-thumb { width:200px; height:auto; border-radius:8px; }
 
+/* Property cards and stay page: rooms and guest capacity */
+.capacity-facts { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:.85rem; color:var(--ink, #1e293b); margin:6px 0 2px; }
+.capacity-facts > span { white-space:nowrap; }
+
 /* Public blog */
 .wrap.blog-list-page, .wrap.blog-post-page { padding-left:16px; padding-right:16px; }
 .breadcrumbs { margin-bottom:12px; }

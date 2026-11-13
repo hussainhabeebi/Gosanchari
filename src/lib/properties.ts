@@ -15,6 +15,8 @@ SELECT p.id, p.slug, p.name, COALESCE(p.stay_type, p.type) AS type, p.destinatio
        p.lat, p.lng, p.featured, p.pet_friendly, p.family_friendly, p.created_at,
        (SELECT MIN(base_rate) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS from_price,
        (SELECT COALESCE(SUM(capacity * units), 0) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS max_guests,
+       (SELECT COALESCE(SUM(units), 0) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS total_rooms,
+       (SELECT MIN(COALESCE(base_guests, capacity)) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS min_guests,
        ${COVER_PHOTO_SQL} AS photo
 FROM properties p`
 

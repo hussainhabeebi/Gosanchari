@@ -317,6 +317,10 @@ export interface PropertyCard {
   meal_plans: string
   from_price: number
   max_guests: number
+  /** Rooms across all active room categories (sum of units). */
+  total_rooms?: number
+  /** Guests included in the smallest room's rate (base guests, else its capacity). */
+  min_guests?: number | null
   photo: string | null
   lat: number | null
   lng: number | null

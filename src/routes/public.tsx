@@ -15,7 +15,7 @@ import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
-import { AiNote, AmenityList, Empty, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
+import { AiNote, AmenityList, CapacityFacts, Empty, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
 import { cardsByIds, closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
@@ -423,6 +423,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         <div class="prop-main">
           <div class="property-summary">
             <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
+            <CapacityFacts class="mt-sm" rooms={rooms.reduce((n, r) => n + (r.units ?? 1), 0)} min={rooms.length ? Math.min(...rooms.map((r) => r.base_guests || r.capacity)) : null} max={rooms.reduce((n, r) => n + r.capacity * (r.units ?? 1), 0)} />
             {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
             <ShareButtons url={shareUrl} title={`${p.name}, ${p.destination}`} />
           </div>

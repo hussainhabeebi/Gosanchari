@@ -51,6 +51,19 @@ export const AmenityList: FC<{ items: string[]; label: string; labels?: Record<s
   </ul>
 ) : null
 
+/** "9 rooms · 2–30 guests": total rooms, the smallest booking (one room's included guests) and everyone the property can host. */
+export const CapacityFacts: FC<{ rooms: number; min?: number | null; max: number; class?: string }> = ({ rooms, min, max, class: cls }) => {
+  if (!(rooms > 0) || !(max > 0)) return null
+  const range = min && min > 0 && min < max ? `${min}–${max}` : `Up to ${max}`
+  const roomsText = `${rooms} room${rooms === 1 ? '' : 's'}`, guestsText = `${range} guest${max === 1 ? '' : 's'}`
+  return (
+    <div class={`capacity-facts ${cls ?? ''}`} aria-label={`${roomsText}, ${guestsText}`} title="Rooms across all categories · guests from one room up to the whole property">
+      <span><span aria-hidden="true">🛏️</span> <strong>{rooms}</strong> room{rooms === 1 ? '' : 's'}</span>
+      <span><span aria-hidden="true">👥</span> <strong>{range}</strong> guest{max === 1 ? '' : 's'}</span>
+    </div>
+  )
+}
+
 export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean; reasons?: string[] }> = ({ p, saved, qs, transform, reasons }) => {
   const fac = parseJson<string[]>(p.facilities, []).slice(0, 3)
   const price = p.stay_price ?? p.from_price
@@ -69,6 +82,7 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
           <Stars value={p.rating_avg} count={p.rating_count} />
         </div>
         <div class="muted small">📍 {p.destination}</div>
+        <CapacityFacts rooms={p.total_rooms ?? 0} min={p.min_guests} max={p.max_guests} />
         {reasons && reasons.length > 0
           ? <div class="match-why small">{reasons.map((r) => <span>✓ {r}</span>)}</div>
           : <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
