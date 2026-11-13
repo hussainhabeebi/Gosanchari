@@ -20,13 +20,15 @@ function fixture(reduce = false) {
 }
 
 describe('homepage uploaded hero banners', () => {
-  it('contains three optimized complete banners and keeps existing search fields', () => {
+  it('contains the two optimized complete banners and keeps existing search fields', () => {
     const route = readFileSync('src/routes/public.tsx', 'utf8') as string
-    for (const name of ['romance', 'direct-offer', 'kids-trip']) {
+    for (const name of ['premium-stay', 'blissful-moments']) {
       expect(route).toContain(`home-hero-${name}.webp`)
       expect(statSync(`public/design/home-hero-${name}.webp`).size).toBeLessThan(350000)
     }
     expect(route).not.toContain('Diwali')
+    for (const old of ['romance', 'direct-offer', 'kids-trip', 'tea-valley']) expect(route).not.toContain(`home-hero-${old}.webp`)
+    expect(route).toContain('of ${HOME_SLIDES.length}')
     expect(route).toContain('aria-roledescription="carousel"')
     expect(route).toContain('width="1774" height="887"')
     expect(route).toContain("fetchpriority={index === 0 ? 'high' : 'low'}")
