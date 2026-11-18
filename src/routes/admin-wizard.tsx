@@ -178,8 +178,15 @@ const Nav: FC<{ p: PropertyRow | null; step: number; next?: string }> = ({ p, st
 )
 
 /** Checkbox tiles with icons + "+ Add New …" (adds to the shared list). */
+const SEARCH_LABEL: Partial<Record<Kind, string>> = { amenity: 'Search amenities', facility: 'Search facilities & activities' }
 const Tiles: FC<{ name: string; kind: Kind; items: [string, string][]; selected: string[]; addLabel: string }> = ({ name, kind, items, selected, addLabel }) => (
-  <div class="tiles-wrap">
+  <div class="tiles-wrap" data-tiles-wrap>
+    {/* Search before adding, so staff find an existing item instead of creating a duplicate (public/content-editor.js). */}
+    <div class="tiles-search" hidden data-tiles-search-row>
+      <input type="search" placeholder={`${SEARCH_LABEL[kind] ?? 'Search'}…`} aria-label={SEARCH_LABEL[kind] ?? 'Search'} autocomplete="off" data-tiles-search />
+      <span class="small muted" aria-live="polite" data-tiles-count></span>
+    </div>
+    <p class="small muted" hidden data-tiles-empty>No match. Check the spelling, or use “{addLabel}” below to add it.</p>
     <div class="tiles" data-tiles={name}>
       {items.map(([k, l]) => (
         <label class="tile"><input type="checkbox" name={name} value={k} checked={selected.includes(k)} /><span class="tile-ico">{iconFor(k)}</span><span>{l}</span></label>
@@ -456,7 +463,7 @@ async function step2(c: Context<AppEnv>, p: PropertyRow) {
     listFor(c.env, 'amenity'), listFor(c.env, 'room_category'),
   ])
   const done = await progress(c, p)
-  return page(c, { title: `Rooms · ${p.name}`, area: 'admin', active: 'prop_new' }, (
+  return page(c, { title: `Rooms · ${p.name}`, area: 'admin', active: 'prop_new', head: <script src="/content-editor.js" defer /> }, (
     <Shell p={p} step={2} done={done} icon={I.bed} title="Room Categories" sub="Add different room types available at the property. You can add multiple room categories.">
       <form method="post" action={`/admin/properties/${p.id}/setup/2`} class="stack wiz-form">
         <datalist id="room-cats">{cats.map(([, l]) => <option value={l} />)}</datalist>

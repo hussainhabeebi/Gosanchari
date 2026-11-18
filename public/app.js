@@ -698,8 +698,20 @@ function gsPublicComparisonRate(value) {
     var t = e.target.closest ? e.target.closest('[data-add-kind]') : null
     if (!t) return
     e.preventDefault()
-    var label = prompt('Name of the new item')
+    // Start from what was typed in the search box, and offer an existing near-match before adding a new item.
+    var tw = t.closest('.tiles-wrap'), search = tw ? $('[data-tiles-search]', tw) : null
+    var label = prompt('Name of the new item', search ? search.value.trim() : '')
     if (!label) return
+    if (tw) {
+      var n = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '') }, want = n(label), same = null
+      $$('.tiles > .tile', tw).forEach(function (tile) {
+        var l = n($$('span', tile).pop().textContent)
+        if (!same && l && want && (l === want || (want.length >= 4 && (l.indexOf(want) !== -1 || want.indexOf(l) !== -1)))) same = tile
+      })
+      if (same && confirm('“' + $$('span', same).pop().textContent + '” already exists. Select it instead of adding a new one?')) {
+        var box = $('input', same); box.checked = true; same.hidden = false; same.scrollIntoView({ block: 'center' }); return
+      }
+    }
     var fd = new FormData(); fd.append('kind', t.dataset.addKind); fd.append('label', label)
     fetch('/admin/taxonomy/add', { method: 'POST', body: fd, credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) { return r.json() }).then(function (r) {
       if (r.error) return alert(r.error)
@@ -707,6 +719,9 @@ function gsPublicComparisonRate(value) {
       if (t.dataset.addInput) { var inp = document.getElementById(t.dataset.addInput); inp.value = r.label; var dl = document.getElementById(inp.getAttribute('list')); if (dl) dl.appendChild(new Option(r.label)) }
       if (t.dataset.addTarget) {
         var wrap = t.closest('.tiles-wrap'), tiles = $('.tiles', wrap)
+        // The server returns the existing item for a duplicate name: tick it rather than adding a second tile.
+        var had = $$('input', tiles).filter(function (x) { return x.value === r.key })[0]
+        if (had) { had.checked = true; had.closest('.tile').hidden = false; return }
         tiles.insertAdjacentHTML('beforeend', '<label class="tile"><input type="checkbox" name="' + esc(t.dataset.addTarget) + '" value="' + esc(r.key) + '" checked><span class="tile-ico">' + esc(r.icon) + '</span><span>' + esc(r.label) + '</span></label>')
       }
     })

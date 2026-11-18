@@ -762,6 +762,10 @@ code { overflow-wrap: anywhere; }
 .uploaded .thumb { position: relative; display: inline-block; width: auto; height: auto; }
 .thumb-x { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: rgba(15, 30, 51, .75); color: #fff; cursor: pointer; line-height: 1; font-size: 1rem; }
 .tiles-wrap { display: flex; flex-direction: column; gap: 10px; }
+.tiles-search { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.tiles-search[hidden] { display: none; }
+.tiles-search input { width: min(320px, 100%); padding: 8px 12px; border: 1px solid #dbe2ec; border-radius: 10px; }
+.tile[hidden] { display: none; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
 .tile { display: flex; align-items: center; gap: 8px; border: 1px solid #dbe2ec; border-radius: 12px; padding: 10px 12px; cursor: pointer; background: #fff; font-size: .88rem; position: relative; min-width: 0; }
 .tile input[type=checkbox] { position: absolute; opacity: 0; width: 1px; height: 1px; }

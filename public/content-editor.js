@@ -103,3 +103,54 @@
     })
   })
 })();
+
+// Amenities / facilities tick-boxes: a search box that filters the tiles as you type (ignoring case, spaces and
+// punctuation), so staff find an existing item instead of adding a duplicate. Works for room blocks added later.
+;(function () {
+  'use strict'
+  function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '') }
+  function labelOf(tile) { var spans = tile.querySelectorAll('span'); return spans.length ? spans[spans.length - 1].textContent : tile.textContent }
+  function filter(wrap) {
+    var input = wrap.querySelector('[data-tiles-search]'), count = wrap.querySelector('[data-tiles-count]'), empty = wrap.querySelector('[data-tiles-empty]')
+    if (!input) return
+    var words = input.value.toLowerCase().split(/\s+/).map(norm).filter(Boolean)
+    var tiles = wrap.querySelectorAll('.tiles > .tile'), shown = 0
+    tiles.forEach(function (tile) {
+      var label = norm(labelOf(tile))
+      var match = !words.length || words.every(function (w) { return label.indexOf(w) !== -1 })
+      tile.hidden = !match
+      if (match) shown++
+    })
+    if (count) count.textContent = words.length ? shown + ' of ' + tiles.length : tiles.length + ' items'
+    if (empty) empty.hidden = !(words.length && !shown)
+  }
+  function setup(root) {
+    (root.querySelectorAll ? root : document).querySelectorAll('[data-tiles-search-row]').forEach(function (row) {
+      if (row.dataset.ready) return
+      row.dataset.ready = '1'
+      row.hidden = false
+      var wrap = row.closest('[data-tiles-wrap]')
+      if (wrap) filter(wrap)
+    })
+  }
+  document.addEventListener('input', function (e) {
+    var input = e.target.closest && e.target.closest('[data-tiles-search]')
+    if (input) filter(input.closest('[data-tiles-wrap]'))
+  })
+  // Enter in the search box must not submit the whole property form.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.closest && e.target.closest('[data-tiles-search]')) e.preventDefault()
+  })
+  setup(document)
+  // Room blocks added with "Add Next Room Category", and tiles added with "Add New …".
+  new MutationObserver(function (records) {
+    records.forEach(function (r) {
+      r.addedNodes.forEach(function (n) {
+        if (n.nodeType !== 1) return
+        setup(n)
+        var wrap = n.closest && n.closest('[data-tiles-wrap]')
+        if (wrap) filter(wrap)
+      })
+    })
+  }).observe(document.body, { childList: true, subtree: true })
+})();

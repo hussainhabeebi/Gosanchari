@@ -82,7 +82,9 @@ async function bust(env: Env) {
 export async function addItem(env: Env, kind: Kind, label: string, icon?: string | null): Promise<string> {
   const clean = label.trim().slice(0, 60)
   const map = KINDS[kind].map as Record<string, string>
-  const existing = Object.entries(map).find(([, l]) => l.toLowerCase() === clean.toLowerCase())
+  // Same name ignoring case, spaces and punctuation ("WiFi" = "Wi-Fi" = "wi fi") reuses the existing item.
+  const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+  const existing = Object.entries(map).find(([k, l]) => norm(l) === norm(clean) || k === clean)
   if (existing) {
     if (BUILT_IN[kind].has(existing[0])) await run(env, 'UPDATE taxonomy SET hidden = 0 WHERE kind = ? AND key = ?', kind, existing[0])
     else await run(env, 'INSERT INTO taxonomy (kind, key, label, icon) VALUES (?, ?, ?, ?) ON CONFLICT(kind, key) DO UPDATE SET hidden = 0', kind, existing[0], existing[1], icon?.slice(0, 8) || null)
