@@ -649,6 +649,11 @@ code { overflow-wrap: anywhere; }
 .area-public .destination-hero { background:linear-gradient(90deg,transparent 25%,#fff2d196 60%,#fff2d1c9),var(--journey-image) center 48%/cover;min-height:300px; }
 .area-public .destination-hero h1 { font-size:clamp(42px,6vw,82px);overflow-wrap:anywhere; }
 .journey-curiosity .destination-hero p { font-size:0; }.journey-curiosity .destination-hero p:after { content:'FOLLOW YOUR CURIOSITY';font-size:12px;letter-spacing:3px; }
+/* Search page banner: "Experience the Real Kerala" (2000x667). The artwork carries its own text, so the overlay
+   heading stays in the page for search engines and screen readers but is hidden visually, and no fade is drawn. */
+.area-public.journey-curiosity .destination-hero { background:#0b2a26 url('/design/search-hero-real-kerala.webp') center/cover no-repeat;aspect-ratio:3/1;min-height:260px;padding:0; }
+.area-public.journey-curiosity .destination-hero .wrap { position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; }
+@media(max-width:650px) { .area-public.journey-curiosity .destination-hero { aspect-ratio:auto;min-height:260px;background-position:right center; } }
 .journey-anticipation .journey-banner:before { filter:saturate(1.12); }.journey-reflection .journey-banner:before { filter:saturate(.75); }.journey-connection .journey-banner:before { filter:brightness(1.12); }.journey-memories .journey-banner:before { filter:sepia(.16); }.journey-clarity .journey-banner:before,.journey-focus .journey-banner:before { filter:saturate(.55); }
 .embedded-stay .booking-box { background:linear-gradient(#fff8efed,#fff8efec),url('/design/traveller-twilight.webp') center/cover; }
 .dash-main .journey-banner { min-height:145px;border-radius:16px;margin-bottom:24px; }.dash-main .journey-copy { padding-top:20px;padding-bottom:20px; }.dash-main .journey-copy h2 { font-size:26px; }.dash-main .journey-copy .eyebrow { letter-spacing:2px; }
