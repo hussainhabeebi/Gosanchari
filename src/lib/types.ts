@@ -315,6 +315,7 @@ export interface PropertyCard {
   rating_count: number
   facilities: string
   meal_plans: string
+  rate_meal_plan?: string | null
   from_price: number
   max_guests: number
   /** Rooms across all active room categories (sum of units). */

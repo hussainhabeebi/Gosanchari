@@ -1277,3 +1277,4 @@ code { overflow-wrap: anywhere; }
 .area-public .amenity-icon { flex:0 0 18px;text-align:center;color:var(--green); }
 .area-public .amenity-label { min-width:0;overflow-wrap:anywhere; }
 @media(max-width:650px) { .area-public .amenity-list { column-gap:12px; }.area-public .amenity-list li { font-size:12px;gap:4px; }.area-public .amenity-icon { flex-basis:16px; } }
+.rate-plan { font-weight: 600; color: var(--green); }
