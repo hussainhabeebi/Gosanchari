@@ -10,7 +10,7 @@ import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
-import { AiInsights, type StayInsight, AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PropertyCard, Select, Stars, Turnstile } from '../views/components'
+import { AiInsights, type StayInsight, AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PlanNote, PropertyCard, Select, Stars, Turnstile } from '../views/components'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
 import { closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
@@ -437,6 +437,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                     </div>
                     <div class="room-price" data-preview-room={preview ? r.id : undefined}>
                       {!preview && isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small" data-preview-room-price={preview ? '' : undefined}>For a personalised offer, fill in your details below and enquire.</p>}
+                      <PlanNote plan={p.rate_meal_plan} />
                       <button type="button" class="btn btn-sm" data-pick-room={r.id}>{preview ? 'Get Quote' : 'Book'}</button>
                     </div>
                   </div>
@@ -1043,6 +1044,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         </div>
         <div class="room-price">
           {isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
+          <PlanNote plan={p.rate_meal_plan} />
         </div>
       </div>
       {photos.length > 0

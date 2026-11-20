@@ -1128,3 +1128,4 @@ code { overflow-wrap: anywhere; }
 .destination-options [role=option]{box-sizing:border-box;padding:10px 12px;min-height:44px;cursor:pointer;border-radius:7px;line-height:1.4;overflow-wrap:anywhere}
 .destination-options [role=option]:hover,.destination-options [aria-selected=true]{background:#edf5f1;color:#143a2d;outline:2px solid #557d68;outline-offset:-2px}
 .destination-options .destination-empty{padding:12px;font-size:13px;line-height:1.5}
+.rate-plan { font-weight: 600; color: var(--green); }

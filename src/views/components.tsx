@@ -39,6 +39,10 @@ export const Pill: FC<{ s: string }> = ({ s }) => <span class={`pill pill-${s.re
 
 export const PinIcon = () => raw('<svg class="ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>')
 
+/** Shown beneath a room rate when the property's rates are on the CP (breakfast included) plan. */
+export const PlanNote: FC<{ plan?: string | null }> = ({ plan }) =>
+  (plan ?? '').toUpperCase() === 'CP' ? <div class="small rate-plan">Room + Breakfast</div> : <></>
+
 export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean; reasons?: string[] }> = ({ p, saved, qs, transform, reasons }) => {
   const fac = parseJson<string[]>(p.facilities, []).slice(0, 3)
   const price = p.stay_price ?? p.from_price
@@ -64,6 +68,7 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
           <div>
             {price > 0 ? <><span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>
             <div class="price">{money(price)}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
+            <PlanNote plan={p.rate_meal_plan} />
             {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
           </div>
           <a class="btn btn-sm btn-outline" data-stay-preview href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View Details →</a>
