@@ -79,6 +79,27 @@ describe('Step 3 scoped persistence',()=>{
       expect(response.status).toBe(200); const result=await response.json() as any; expect(result.roomCharges).toBe(54300); const json=JSON.stringify(result);expect(json).not.toMatch(/staff_rate|net_rate|net_supplement|5432|4321/)
     }finally{f.db.close()}
   })
+  it('renders managed category overrides only in their editable inputs while preserving genuine legacy charges',async()=>{
+    const f=fixture();try{
+      const body=commonForm();body.set('common_managed_amt','0')
+      for(const [i,rid] of f.rooms.entries())for(const [k,v] of Object.entries({id:'',key,amt:String(i===0?3000:1000),desc:'Christmas override',remove:'0'}))body.append(`r${rid}_managed_${k}`,v)
+      await f.save(body)
+      f.db.prepare("INSERT INTO season_rates(property_id,room_id,name,start_date,end_date,supplement,kind,source) VALUES(?,?,'Legacy independent peak','2026-12-20','2027-01-05',650,'special','wizard')").run(f.id,f.rooms[1])
+      const before=f.rows()
+      const html=await(await f.app.request(`http://localhost/admin/properties/${f.id}/setup/3`,{},f.env)).text()
+      for(const [i,rid] of f.rooms.entries()){
+        expect(html).toContain(`name="r${rid}_managed_amt" value="${i===0?3000:1000}"`)
+        const marker=`data-legacy-peak-room="${rid}"`
+        const start=html.indexOf(marker),end=html.indexOf('data-legacy-peak-room=',start+marker.length)
+        const legacy=html.slice(start,end<0?html.indexOf('<div class="wiz-nav">',start):end)
+        expect(legacy).not.toContain('Christmas override')
+        expect(legacy).not.toMatch(/value="(?:3000|1000)"/)
+        if(i===1)expect(legacy).toContain('Legacy independent peak')
+      }
+      expect(f.rows()).toEqual(before)
+      await f.save(body);expect(f.rows()).toEqual(before)
+    }finally{f.db.close()}
+  })
   it('preserves unrelated/common/other-room/legacy rows and valid matrices during a partial save',async()=>{
     const f=fixture();try{
       await f.save(commonForm())

@@ -39,6 +39,10 @@ export interface PropertyRow {
   last_minute_note: string
   seo_title: string | null
   seo_description: string | null
+  /** Staff-written description shown on the stay page (migration 0028). The older `description` is never public. */
+  public_description?: string
+  /** JSON array of {"q","a"} shown on the stay page (migration 0028). */
+  faqs?: string
   status: 'draft' | 'live' | 'hidden'
   featured: number
   rating_avg: number
@@ -109,6 +113,14 @@ export interface PhotoRow {
   room_id: number | null
   media_type: 'image' | 'video'
   video_url: string | null
+  /** Optional SEO alt text (migration 0028); falls back to caption, then the property name. */
+  alt_text?: string | null
+  /** AI (Gemini) suggestions — see migration 0021. */
+  ai_category?: string | null
+  ai_caption?: string | null
+  ai_score?: number | null
+  auto_sort?: number
+  source_url?: string | null
 }
 
 export interface NearbyPlace {
@@ -167,6 +179,12 @@ export interface MessageRow {
 }
 
 export interface QuotationRow {
+  archived_at?: string | null
+  archived_by?: number | null
+  archive_reason?: string
+  archive_revision?: number
+  restored_at?: string | null
+  restored_by?: number | null
   /** Derived from persisted quotation-review audit events; not a booking status. */
   review_status?: 'none' | 'pending' | 'approved' | 'rejected'
   apply_gst: number
@@ -198,6 +216,8 @@ export interface QuotationRow {
 export interface QuoteOptionRow {
   /** Staff-reported funds only; never a verified payment receipt. */
   reported_advance: number
+  /** Optional reported date/method/reference; never payment verification. */
+  advance_details?: string
   id: number
   quotation_id: number
   property_id: number
@@ -298,6 +318,10 @@ export interface PropertyCard {
   rate_meal_plan?: string | null
   from_price: number
   max_guests: number
+  /** Rooms across all active room categories (sum of units). */
+  total_rooms?: number
+  /** Guests included in the smallest room's rate (base guests, else its capacity). */
+  min_guests?: number | null
   photo: string | null
   lat: number | null
   lng: number | null

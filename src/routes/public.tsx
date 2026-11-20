@@ -1,5 +1,10 @@
 import { setCookie } from 'hono/cookie'
 import { propertyMetaDescription, travelAgencySchema } from '../lib/seo'
+import { faqSchema, photoAlt, readFaqs } from '../lib/property-seo'
+import { PolicyContent } from '../views/policy-content'
+import { AboutContent } from '../views/about-content'
+import { DEFAULT_ABOUT } from '../lib/settings'
+import { recommendedIds } from '../lib/recommended'
 import { matchingDestinations, publicDestinations } from '../lib/public-destinations'
 import { QuotationPayment } from '../lib/quotation-payment'
 import { gstLabel, quotationInclusions } from '../lib/quotation-pricing'
@@ -10,9 +15,9 @@ import { Hono, type Context } from 'hono'
 import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_CATEGORIES, POLICY_FIELDS, policies as readPolicies, ROOM_AMENITIES, STAY_TYPES, stayTypeLabel, THEMES, videoEmbedUrl } from '../lib/catalog'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
-import { AiInsights, type StayInsight, AiNote, Empty, FACILITY_ICONS, Field, jsonScript, LeafletHead, PlanNote, PropertyCard, Select, Stars, Turnstile } from '../views/components'
+import { AiNote, AmenityList, CapacityFacts, Empty, Field, jsonScript, LeafletHead, PlanNote, PropertyCard, Select, Stars, Turnstile } from '../views/components'
 import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
-import { closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
+import { cardsByIds, closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
 import { getContent, getSettings } from '../lib/settings'
 import { propertyQA } from '../lib/assist'
@@ -36,8 +41,14 @@ async function savedIds(c: { env: AppEnv['Bindings']; get: (k: 'user') => AppEnv
 
 
 // ---------- 1. Home ----------
+// Homepage banners (1774 x 887 WebP in public/design). New file names for new banners, so cached copies are not reused.
+const HOME_SLIDES = [
+  { image: 'home-hero-premium-stay.webp', text: 'Escape, relax, rejuvenate — experience a premium stay at our exclusive properties' },
+  { image: 'home-hero-blissful-moments.webp', text: 'Make your favourite moments more blissful' },
+]
+
 publicRoutes.get('/', async (c) => {
-  const [content, settings, featured, offers, saved, insights] = await Promise.all([
+  const [content, settings, featured, offers, saved] = await Promise.all([
     getContent(c.env),
     getSettings(c.env),
     featuredCards(c.env, 6),
@@ -47,8 +58,8 @@ publicRoutes.get('/', async (c) => {
       todayIST(), todayIST(),
     ),
     savedIds(c),
-    all<StayInsight>(c.env, "SELECT name, slug, destination, review_summary, rating_count FROM properties WHERE status = 'live' AND rating_count > 0 AND length(trim(review_summary)) > 0 ORDER BY featured DESC, rating_count DESC, id DESC LIMIT 3"),
   ])
+  const recommended = await cardsByIds(c.env, recommendedIds(content.recommended_property_ids))
   const reviewIds = content.featured_review_ids
   const reviews = reviewIds.length
     ? await all<ReviewRow & { property_name: string; slug: string }>(c.env, `SELECT r.*, p.name AS property_name, p.slug FROM reviews r JOIN properties p ON p.id = r.property_id WHERE r.status = 'approved' AND r.id IN (${reviewIds.map(() => '?').join(',')})`, ...reviewIds)
@@ -58,6 +69,18 @@ publicRoutes.get('/', async (c) => {
   return page(c, { title: 'Kerala Stays, Resorts & Holiday Enquiries', description: 'Find stays in Munnar, Vagamon and across Kerala with Go Sanchari. Compare properties, explore rooms and send an enquiry for a personalised offer.', canonical: c.env.SITE_URL + '/', head: jsonScript('business-schema', travelAgencySchema(c.env.SITE_URL, settings.business), 'application/ld+json') }, (
     <>
       <section class="hero reference-hero home-search-hero">
+        <div class="home-hero-slider" data-home-hero-slider role="region" aria-roledescription="carousel" aria-label="Go Sanchari highlights">
+          <div class="home-hero-slides">
+            {HOME_SLIDES.map((slide, index) => <div class={`home-hero-slide${index === 0 ? ' is-active' : ''}`} data-hero-slide aria-hidden={index !== 0} role="group" aria-roledescription="slide" aria-label={`${index + 1} of ${HOME_SLIDES.length}`}>
+              <img src={`/design/${slide.image}`} alt={slide.text} width="1774" height="887" loading={index === 0 ? 'eager' : 'lazy'} fetchpriority={index === 0 ? 'high' : 'low'} decoding="async" />
+            </div>)}
+          </div>
+          <div class="home-hero-controls">
+            <button type="button" data-hero-prev aria-label="Previous banner">←</button>
+            <button type="button" data-hero-next aria-label="Next banner">→</button>
+          </div>
+          <button type="button" class="home-hero-pause" data-hero-pause aria-pressed="false">Pause slideshow</button>
+        </div>
         <div class="wrap">
           <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
           <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
@@ -79,6 +102,14 @@ publicRoutes.get('/', async (c) => {
         <div class="row-between"><div><h2>Popular <span>Stays</span></h2><p class="muted">Handpicked stays for your perfect getaway</p></div><a class="btn btn-outline" href="/search">View All Stays →</a></div>
         <div class="stay-carousel"><button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous stays">←</button><div class="grid grid-4" data-stay-track>{featured.map((p) => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div><button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next stays">→</button></div>
       </section>
+      {recommended.length > 0 && <section class="wrap section popular-stays recommended-properties" aria-labelledby="recommended-heading">
+        <div class="row-between"><h2 id="recommended-heading">Recommended <span>Properties</span></h2></div>
+        <div class="stay-carousel">
+          {recommended.length > 1 && <button type="button" class="carousel-arrow" data-carousel="-1" aria-label="Previous recommended properties" aria-controls="recommended-track">←</button>}
+          <div class="grid grid-4" data-stay-track id="recommended-track" role="group" aria-label="Recommended properties" tabindex={0}>{recommended.map(p => <PropertyCard p={p} saved={saved.has(p.id)} transform={settings.images_transform} />)}</div>
+          {recommended.length > 1 && <button type="button" class="carousel-arrow" data-carousel="1" aria-label="Next recommended properties" aria-controls="recommended-track">→</button>}
+        </div>
+      </section>}
       <div class="wrap home-ai-insights">
           <div class="hero-ai-priority" id="ai-search">
             <div class="hero-ai-heading"><span class="ai-badge">AI</span><strong>AI Search</strong><span>Describe your perfect escape</span></div>
@@ -88,7 +119,6 @@ publicRoutes.get('/', async (c) => {
             </form>
             <div class="ai-example-chips" aria-label="Try a search">{['Munnar for 2 with a pool', 'Family stay in Wayanad under ₹6000', 'Alleppey houseboat for 4'].map((example) => <a href={`/search?ai=${encodeURIComponent(example)}`}>{example}</a>)}</div>
           </div>
-        <AiInsights entries={insights} />
       </div>
 
       {(offers.length > 0 || content.banners.length > 0) && (
@@ -155,8 +185,6 @@ publicRoutes.get('/search', async (c) => {
   const dests = catalog.map(d => d.label)
   if (f.destination && !dests.includes(f.destination)) dests.unshift(f.destination)
   const fewer = results.length < 3 ? await closeMatches(c.env, f, results.map((r) => r.id), 4) : []
-  const insightIds = results.slice(0, 12).map((p) => p.id)
-  const insights = insightIds.length ? await all<StayInsight>(c.env, `SELECT name, slug, destination, review_summary, rating_count FROM properties WHERE status = 'live' AND rating_count > 0 AND length(trim(review_summary)) > 0 AND id IN (${insightIds.map(() => '?').join(',')}) ORDER BY rating_count DESC LIMIT 3`, ...insightIds) : []
   const understood = c.req.query('understood')
   const qs = new URLSearchParams()
   if (f.checkIn) qs.set('checkIn', f.checkIn)
@@ -252,7 +280,6 @@ publicRoutes.get('/search', async (c) => {
           <input name="ai" maxlength={200} value={understood ?? ''} placeholder="Describe your stay — place, dates, guests, budget, must-haves" aria-label="Describe your stay" required />
           <button class="btn btn-sm">Search</button>
         </form>
-        <AiInsights entries={insights} search />
         {chips.length > 0 && (
           <div class="filter-chips" aria-label="Your search">
             {understood && <span class="muted small">We understood:</span>}
@@ -346,10 +373,12 @@ publicRoutes.get('/stay/:slug', async (c) => {
   const meals = parseJson<string[]>(p.meal_plans, [])
   const nearby = parseJson<NearbyPlace[]>(p.nearby, [])
   const highlights = parseJson<string[]>(p.highlights, [])
+  const faqs = readFaqs(p.faqs)
   const checkIn = isDate(c.req.query('checkIn')) ? c.req.query('checkIn')! : ''
   const checkOut = isDate(c.req.query('checkOut')) ? c.req.query('checkOut')! : ''
   const guests = int(c.req.query('guests'), 2)
   const gallery = photos.length ? photos : [{ id: 0, r2_key: '', caption: p.name } as PhotoRow]
+  const shareUrl = new URL(`/stay/${p.slug}`, c.env.SITE_URL).href
   const ld = {
     '@context': 'https://schema.org', '@type': 'LodgingBusiness', name: p.name, url: new URL(`/stay/${p.slug}`, c.env.SITE_URL).href, description: propertyMetaDescription(p),
     address: { '@type': 'PostalAddress', addressLocality: p.destination },
@@ -370,12 +399,12 @@ publicRoutes.get('/stay/:slug', async (c) => {
       {p.status !== 'live' && <div class="flash flash-err">Preview — this property is {p.status} and not visible to guests.</div>}
       {preview ? <div class="gallery stay-preview-gallery" data-gallery data-preview-gallery>
         <div class="preview-gallery-stage">
-          <button type="button" class="preview-gallery-open" data-gallery-open aria-label="Open property photo viewer"><img data-gallery-main src={mediaUrl(gallery[0].r2_key, 1200, settings.images_transform)} alt={gallery[0].caption ?? p.name} /></button>
+          <button type="button" class="preview-gallery-open" data-gallery-open aria-label="Open property photo viewer"><img data-gallery-main src={mediaUrl(gallery[0].r2_key, 1200, settings.images_transform)} alt={photoAlt(gallery[0], p.name)} /></button>
           {photos.length > 1 && <><button type="button" class="preview-gallery-arrow previous" data-gallery-step="-1" aria-label="Previous property photo">‹</button><button type="button" class="preview-gallery-arrow next" data-gallery-step="1" aria-label="Next property photo">›</button></>}
           <span class="preview-gallery-counter" data-gallery-counter aria-live="polite">1 / {gallery.length}</span>
         </div>
         <div class="preview-gallery-thumbnails" aria-label="Property photos">
-          {gallery.map((ph, i) => <button type="button" data-gallery-index={i} data-image={mediaUrl(ph.r2_key, 1200, settings.images_transform)} data-caption={ph.caption ?? p.name} aria-label={`Show photo ${i + 1}`} aria-pressed={i === 0 ? 'true' : 'false'}><img src={mediaUrl(ph.r2_key, 200, settings.images_transform)} alt={ph.caption ?? p.name} loading="lazy" /></button>)}
+          {gallery.map((ph, i) => <button type="button" data-gallery-index={i} data-image={mediaUrl(ph.r2_key, 1200, settings.images_transform)} data-caption={ph.caption ?? p.name} aria-label={`Show photo ${i + 1}`} aria-pressed={i === 0 ? 'true' : 'false'}><img src={mediaUrl(ph.r2_key, 200, settings.images_transform)} alt={photoAlt(ph, p.name)} loading="lazy" /></button>)}
         </div>
         {gallery.map(ph => <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} data-full hidden></a>)}
         {photos.length > 1 && <a class="small" href="#photos">See all {photos.length} photos</a>}
@@ -383,7 +412,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
       <div class="gallery" data-gallery>
         {gallery.slice(0, 5).map((ph, i) => (
           <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} class={`g-item g-${i}`} data-full>
-            <img src={mediaUrl(ph.r2_key, i === 0 ? 1200 : 600, settings.images_transform)} alt={ph.caption ?? p.name} loading={i ? 'lazy' : 'eager'} />
+            <img src={mediaUrl(ph.r2_key, i === 0 ? 1200 : 600, settings.images_transform)} alt={photoAlt(ph, p.name)} loading={i ? 'lazy' : 'eager'} />
           </a>
         ))}
         {gallery.slice(5).map((ph) => <a href={mediaUrl(ph.r2_key, 1600, settings.images_transform)} data-full hidden></a>)}
@@ -396,13 +425,16 @@ publicRoutes.get('/stay/:slug', async (c) => {
         <div class="prop-main">
           <div class="property-summary">
             <div class="muted">📍 {p.destination}, Kerala · {stayTypeLabel(p)}{p.star_category ? ` · ${'★'.repeat(p.star_category)}` : ''} · <Stars value={p.rating_avg} count={p.rating_count} /></div>
+            <CapacityFacts class="mt-sm" rooms={rooms.reduce((n, r) => n + (r.units ?? 1), 0)} min={rooms.length ? Math.min(...rooms.map((r) => r.base_guests || r.capacity)) : null} max={rooms.reduce((n, r) => n + r.capacity * (r.units ?? 1), 0)} />
             {themes.length > 0 && <div class="chips mt-sm">{themes.map((t) => <span class="chip">{THEMES[t] ?? t}</span>)}</div>}
+            <ShareButtons url={shareUrl} title={`${p.name}, ${p.destination}`} />
           </div>
 
           <section class="section-sm">
             <h2>About this property</h2>
             {p.review_summary && <AiNote label="AI Insights · Guest review summary">{p.review_summary}</AiNote>}
             {highlights.length > 0 && <ul class="highlights">{highlights.map((h) => <li>{h}</li>)}</ul>}
+            {p.public_description?.trim() && <div class="property-description pre-line">{p.public_description.trim()}</div>}
             {p.built_year && (
               <dl class="info-list">
                 <dt>Built / renovated</dt><dd>{p.built_year}</dd>
@@ -421,7 +453,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                   <div class="room card">
                     <div class="grow">
                       <h3>{r.name}</h3>
-                      {rp.length > 0 && <div class="room-photos" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 300, settings.images_transform)} alt={m.caption ?? r.name} loading="lazy" /></a>)}</div>}
+                      {rp.length > 0 && <div class="room-photos" data-gallery>{rp.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 300, settings.images_transform)} alt={photoAlt(m, r.name)} loading="lazy" /></a>)}</div>}
                       {preview && meals.length > 0 && <p class="small">Meal plans: {meals.map(m => MEAL_PLANS[m] ?? m).join(' · ')}</p>}
                       <div class="room-meta">
                         <span>👥 {(r.base_guests ?? r.capacity) < r.capacity ? `Rate for ${r.base_guests} guests · up to ${r.capacity}` : `Up to ${r.capacity} guests`}{r.max_adults ? ` (max ${r.max_adults} adults` + (r.max_children != null ? `, ${r.max_children} children)` : ')') : ''}</span>
@@ -433,7 +465,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                       {r.description && <p class="small mt-sm">{r.description}</p>}
                       {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
                       {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
-                      <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>
+                      <AmenityList items={am} label="Room amenities" labels={{ ...FACILITIES, ...ROOM_AMENITIES }} />
                     </div>
                     <div class="room-price" data-preview-room={preview ? r.id : undefined}>
                       {!preview && isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small" data-preview-room-price={preview ? '' : undefined}>For a personalised offer, fill in your details below and enquire.</p>}
@@ -458,7 +490,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                 <div class="media-group" id={`ph-${k}`}>
                   <h3>{PHOTO_CATEGORIES[k]}</h3>
                   <div class="media-strip" data-gallery>
-                    {list.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 400, settings.images_transform)} alt={m.caption ?? PHOTO_CATEGORIES[k]} loading="lazy" /></a>)}
+                    {list.map((m) => <a href={mediaUrl(m.r2_key, 1600, settings.images_transform)} data-full><img src={mediaUrl(m.r2_key, 400, settings.images_transform)} alt={photoAlt(m, `${p.name} — ${PHOTO_CATEGORIES[k]}`)} loading="lazy" /></a>)}
                   </div>
                 </div>
               ))}
@@ -505,7 +537,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
 
           <section class="section-sm" id="facilities">
             <h2>Facilities</h2>
-            <div class="facility-grid">{facilities.map((f) => <div>{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</div>)}</div>
+            <AmenityList items={facilities} label="Property facilities" />
           </section>
 
           <section class="section-sm" id="policies">
@@ -535,8 +567,16 @@ publicRoutes.get('/stay/:slug', async (c) => {
             )}
           </section>
 
+          {faqs.length > 0 && (
+            <section class="section-sm" id="faqs">
+              <h2>Frequently asked questions</h2>
+              {faqs.map((f) => <details class="faq"><summary>{f.q}</summary><p class="pre-line">{f.a}</p></details>)}
+            </section>
+          )}
+
           <section class="section-sm" id="ask">
             <h2>Ask about this property</h2>
+            <p class="muted small">This is an AI-generated answer, please double-check it. External information may be outdated. Rates come only from Go Sanchari; confirm details with our team.</p>
             <div class="qa" data-qa={`/stay/${p.slug}/ask`}>
               <div class="qa-log" aria-live="polite">
                 <div class="msg msg-ai">Hi! Ask me anything about {p.name} — breakfast, kids, parking, check-in…</div>
@@ -620,6 +660,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         <a class="btn" href="#book">Enquire</a>
       </div>
       {jsonScript('ld', ld, 'application/ld+json')}
+      {faqs.length > 0 && jsonScript('ld-faq', faqSchema(faqs), 'application/ld+json')}
     </div>
   ))
 })
@@ -794,11 +835,9 @@ publicRoutes.get('/offers', async (c) => {
 publicRoutes.get('/about', async (c) => {
   const [content, s] = await Promise.all([getContent(c.env), getSettings(c.env)])
   return page(c, { title: 'About Our Kerala Travel Team', description: `Learn about ${s.business.name}, our Kerala-based travel team, and how to contact us for help choosing a stay and requesting a personalised offer.` }, (
-    <div class="wrap narrow section prose">
-      <img src="/brand/logo-wide.webp" alt={s.business.name} width="302" height="80" style="display:block;margin:0 auto 16px;height:auto;max-width:100%" />
-      <h1>About {s.business.name}</h1>
-      {(content.about || 'We are a Kerala-based team that personally checks every stay we list.').split(/\n{2,}/).map((p) => <p>{p}</p>)}
-      <p><a class="btn" href="/contact">Contact us</a></p>
+    <div class="wrap section about-page">
+      <header class="about-heading"><h1>About {s.business.name}</h1><img src="/brand/logo-wide.webp" alt={s.business.name} width="302" height="80" /></header>
+      <article class="about-story"><AboutContent text={content.about || DEFAULT_ABOUT} /><div class="about-contact"><a class="btn" href="/contact">Contact us</a></div></article>
     </div>
   ))
 })
@@ -812,6 +851,8 @@ publicRoutes.get('/contact', async (c) => {
       <div class="grid grid-2">
         <div class="card">
           <h3>Talk to us</h3>
+          <p><strong>Manish C Vijayan</strong></p>
+          <p>📞 <a href="tel:+918714082100">+91 87140 82100</a></p>
           <p>📞 <a href={`tel:${s.business.phone.replace(/\s/g, '')}`}>{s.business.phone}</a></p>
           <p>💬 <a href={`https://wa.me/${s.business.whatsapp.replace(/\D/g, '')}`}>WhatsApp us</a></p>
           <p>✉️ <a href={`mailto:${s.business.email}`}>{s.business.email}</a></p>
@@ -841,9 +882,9 @@ publicRoutes.get('/policies/:kind', async (c) => {
   const content = await getContent(c.env)
   const text = content.policies[kind] || 'This policy is being updated. Please contact us for details.'
   return page(c, { title: titles[kind] }, (
-    <div class="wrap narrow section prose">
+    <div class="wrap narrow section prose policy-page">
       <h1>{titles[kind]}</h1>
-      {text.split(/\n{2,}/).map((p) => (p.startsWith('## ') ? <h2>{p.slice(3)}</h2> : <p>{p}</p>))}
+      <PolicyContent text={text} />
     </div>
   ))
 })
@@ -864,8 +905,11 @@ publicRoutes.post('/saved/:id', async (c) => {
 })
 
 // ---------- 14. Quotation view (public link from WhatsApp) ----------
+// Customer quote links carry private guest/payment information and must be rechecked.
+publicRoutes.use('/q/*', async (c,next)=>{ c.header('Cache-Control','private, no-store'); await next() })
+
 async function loadQuote(env: AppEnv['Bindings'], token: string) {
-  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE token = ?', token)
+  const q = await first<QuotationRow>(env, 'SELECT * FROM quotations WHERE token = ? AND archived_at IS NULL', token)
   if (!q) return null
   const options = await all<QuoteOptionRow & { property_name: string; slug: string; destination: string; room_name: string; photo: string | null; description: string }>(
     env,
@@ -895,6 +939,7 @@ publicRoutes.get('/q/:token', async (c) => {
     <div class="wrap narrow section">
       <p class="muted small">Quote {q.code} for {q.guest_name}</p>
       <h1>Your stay quote</h1>
+      <p>This quotation is an offer, not a confirmed booking.</p>
       {q.explainer && <AiNote label="In short">{q.explainer}</AiNote>}
       {q.valid_till && <p class={expired ? 'error' : 'muted'}>{expired ? 'This quote has expired' : `Valid till ${fmtDate(q.valid_till)}`}</p>}
       {q.status === 'accepted' && <div class="flash flash-ok">Thank you — you accepted this quote. Our team will confirm your booking and share payment details on WhatsApp.</div>}
@@ -965,8 +1010,8 @@ publicRoutes.post('/q/:token/accept', async (c) => {
     await run(c.env, "UPDATE enquiries SET waiting_on = 'us', urgent = 1, last_guest_msg_at = ?, updated_at = ? WHERE id = ?", nowIso(), nowIso(), q.enquiry_id)
   }
   await run(c.env, "UPDATE tasks SET status = 'done' WHERE quotation_id = ? AND status = 'open'", q.id)
-  await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — confirm the booking and share payment details`, nowIso())
-  await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Convert it to a booking.`)
+  await run(c.env, 'INSERT INTO tasks (assigned_to, enquiry_id, quotation_id, guest_name, phone, reason, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)', q.staff_id, q.enquiry_id, q.id, q.guest_name, q.phone, `${q.guest_name} accepted ${q.code} — record the advance and request final Admin booking confirmation`, nowIso())
+  await notifyStaff(c.env, 'quote_accepted', `${q.guest_name} ${note}. Record the advance and request final Admin booking confirmation.`)
   await logActivity(c.env, null, 'quote.accepted', 'quotation', q.id, { option: o.id, total: o.total })
   setCookie(c, 'meta_conversion', 'BookNow', { path: `/q/${token}`, httpOnly: true, sameSite: 'Lax', secure: new URL(c.req.url).protocol === 'https:', maxAge: 120 })
   return redirectMsg(c, `/q/${token}`, { ok: 'Thank you! Our team will confirm your booking shortly.' })
@@ -974,7 +1019,7 @@ publicRoutes.post('/q/:token/accept', async (c) => {
 
 async function quoteFeedback(c: Context<AppEnv>, status: 'changes_requested' | 'declined') {
   const token = c.req.param('token')!
-  const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE token = ?', token)
+  const q = await first<QuotationRow>(c.env, 'SELECT * FROM quotations WHERE token = ? AND archived_at IS NULL', token)
   if (!q) return c.notFound()
   const f = await form(c)
   const msg = str(f.message, 1000)
@@ -1019,6 +1064,16 @@ publicRoutes.get('/media/*', async (c) => {
 })
 
 
+/** Guests share a stay with family: WhatsApp (they pick the chat) and the phone's share sheet / copy link. */
+function ShareButtons({ url, title }: { url: string; title: string }) {
+  return (
+    <div class="share-row">
+      <a class="btn btn-sm btn-wa" href={`https://wa.me/?text=${encodeURIComponent(`${title}\n${url}`)}`} target="_blank" rel="noopener">Share on WhatsApp</a>
+      <button type="button" class="btn btn-sm btn-outline" data-share={url} data-share-title={title}>Share / copy link</button>
+    </div>
+  )
+}
+
 // ---------- Room category page (shareable link: staff send it to guests on WhatsApp) ----------
 publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
@@ -1041,6 +1096,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         <div>
           <h1>{r.name}</h1>
           <div class="muted">{p.name} · 📍 {p.destination}</div>
+          <ShareButtons url={new URL(`/stay/${p.slug}/room/${r.id}`, c.env.SITE_URL).href} title={`${r.name} · ${p.name}, ${p.destination}`} />
         </div>
         <div class="room-price">
           {isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
@@ -1048,7 +1104,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         </div>
       </div>
       {photos.length > 0
-        ? <div class="room-gallery" data-gallery>{photos.map((m) => <a href={mediaUrl(m.r2_key, 1600, t)} data-full><img src={mediaUrl(m.r2_key, 800, t)} alt={m.caption ?? r.name} loading="lazy" />{m.caption && <span class="cap">{m.caption}</span>}</a>)}</div>
+        ? <div class="room-gallery" data-gallery>{photos.map((m) => <a href={mediaUrl(m.r2_key, 1600, t)} data-full><img src={mediaUrl(m.r2_key, 800, t)} alt={photoAlt(m, r.name)} loading="lazy" />{m.caption && <span class="cap">{m.caption}</span>}</a>)}</div>
         : <p class="muted">Photos of this room are coming soon.</p>}
       <div class="card stack">
         <div class="room-meta">
@@ -1060,7 +1116,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
         {r.description && <p>{r.description}</p>}
         {r.inclusions && <div class="small">Includes: {r.inclusions}</div>}
         {(r.base_guests ?? r.capacity) < r.capacity && r.extra_adult_rate ? <div class="small">Extra guest: {money(r.extra_adult_rate)}/adult{r.extra_child_rate != null && r.extra_child_rate !== r.extra_adult_rate ? `, ${r.extra_child_rate ? money(r.extra_child_rate) : 'free'}/child` : ''} per night (above {r.base_guests} guests)</div> : null}
-        {am.length > 0 && <div class="chips">{am.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {ROOM_AMENITIES[f] ?? FACILITIES[f] ?? f}</span>)}</div>}
+        {am.length > 0 && <AmenityList items={am} label="Room amenities" labels={{ ...FACILITIES, ...ROOM_AMENITIES }} />}
         <div class="row wrap-row">
           <a class="btn" href={`/stay/${p.slug}?room=${r.id}`}>Enquire about this room</a>
           <a class="btn btn-outline" href={`/stay/${p.slug}`}>See the whole property</a>

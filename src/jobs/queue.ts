@@ -2,7 +2,9 @@
 
 import type { Env, JobMessage } from '../env'
 import { buildQuoteExplainer, checkReview, enrichProperty, extractGuestPrefs, followupDraft, processEnquiryAI, refreshReviewSummary, reviewReplyDraft } from '../lib/assist'
-import { aiImageTags, aiTranscribe, detectLanguage } from '../lib/ai'
+import { aiImageTags, aiPhotoInsight, aiTranscribe, detectLanguage } from '../lib/ai'
+import { PHOTO_CATEGORIES } from '../lib/catalog'
+import { FACILITIES } from '../lib/search'
 import { first, notifyStaff, run } from '../lib/db'
 import { sendWhatsApp } from '../lib/integrations'
 import { embedProperty, syncContentKb, syncPropertyKb } from '../lib/properties'
@@ -23,7 +25,23 @@ export async function runJob(env: Env, job: JobMessage): Promise<void> {
       if (!ph || ph.r2_key.startsWith('http')) return
       const obj = await env.MEDIA.get(ph.r2_key)
       if (!obj) return
-      const tags = await aiImageTags(env, await obj.arrayBuffer(), PHOTO_TAGS)
+      const buf = await obj.arrayBuffer()
+      // Gemini (when set up): section, alt text, amenities and cover score in one look. Otherwise Workers AI tags.
+      const ins = await aiPhotoInsight(env, buf, obj.httpMetadata?.contentType ?? '', PHOTO_CATEGORIES, Object.keys(FACILITIES))
+      if (ins) {
+        // Photos nobody sorted (imported from a website) move to the AI's section; rooms need a room category, so stay put.
+        await run(
+          env,
+          `UPDATE property_photos SET ai_tags = ?, ai_category = ?, ai_caption = ?, ai_score = ?,
+             caption = COALESCE(NULLIF(caption, ''), ?),
+             category = CASE WHEN auto_sort = 1 AND ? IS NOT NULL AND ? != 'room' THEN ? ELSE category END,
+             auto_sort = 0
+           WHERE id = ?`,
+          JSON.stringify(ins.tags), ins.category, ins.caption, ins.score, ins.caption, ins.category, ins.category, ins.category, ph.id,
+        )
+        return
+      }
+      const tags = await aiImageTags(env, buf, PHOTO_TAGS)
       if (tags) await run(env, 'UPDATE property_photos SET ai_tags = ? WHERE id = ?', JSON.stringify(tags), ph.id)
       return
     }

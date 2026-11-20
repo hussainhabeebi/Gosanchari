@@ -1,5 +1,6 @@
 // Admin pages 41–47: staff & roles, reports, Ask AI, reviews, website content, settings, activity log.
 
+import { recommendedState, saveRecommended } from '../lib/recommended'
 import { Hono, type MiddlewareHandler } from 'hono'
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
@@ -9,7 +10,7 @@ import { all, enqueue, first, insertId, logActivity, run } from '../lib/db'
 import { askAi } from '../lib/assist'
 import { DEFAULT_PERMISSIONS, PERMISSION_LABELS, ROLE_LABELS, STAFF_ROLES, type PermissionKey, type Permissions, type Role } from '../lib/permissions'
 import { AI_FEATURES, DEFAULT_SETTINGS, getContent, getSettings, saveContent, saveSetting, type AiFeature, type Settings } from '../lib/settings'
-import { mediaUrl } from '../lib/integrations'
+import { mediaUrl, resendKey, setResendKey, testResendKey } from '../lib/integrations'
 import type { TaxSlab } from '../lib/pricing'
 import type { ReviewRow } from '../lib/types'
 import { addDays, fmtDate, fmtDateTime, int, isDate, money, normalizePhone, parseJson, randomToken, slugify, str, toCsv, todayIST } from '../lib/util'
@@ -65,11 +66,11 @@ admin2Routes.get('/admin/staff', requirePerm('manage_staff'), async (c) => {
         <div class="row">
           <Field label="Name"><input name="name" required /></Field>
           <Field label="Mobile (for login code & alerts)"><input name="phone" inputmode="tel" /></Field>
-          <Field label="Email"><input type="email" name="email" /></Field>
+          <Field label="Email (their login)"><input type="email" name="email" /></Field>
         </div>
         <div class="row">
           <Field label="Role"><Select name="role" value="sales" options={STAFF_ROLES.map((r) => [r, ROLE_LABELS[r]])} /></Field>
-          <Field label="Password (optional; they can log in with a phone code)"><input type="password" name="password" minlength={8} autocomplete="new-password" /></Field>
+          <Field label="Password (8+ characters; give each person their own — never share the admin login)"><input type="password" name="password" minlength={8} maxlength={128} autocomplete="new-password" /></Field>
         </div>
         <button class="btn">Add staff</button>
       </form>
@@ -79,7 +80,7 @@ admin2Routes.get('/admin/staff', requirePerm('manage_staff'), async (c) => {
         <Table head={['Permission', ...editable.map((r) => ROLE_LABELS[r])]}>
           {keys.map((k) => (
             <tr>
-              <td>{PERMISSION_LABELS[k]}</td>
+              <td>{PERMISSION_LABELS[k]}<input type="hidden" name="perm_shown" value={k} /></td>
               {editable.map((r) => (
                 <td>{k === 'max_discount_pct'
                   ? <input type="number" name={`${r}.${k}`} value={effective(r)[k]} min="0" max="100" class="w-sm" />
@@ -100,25 +101,37 @@ admin2Routes.post('/admin/staff', requirePerm('manage_staff'), async (c) => {
   const phone = normalizePhone(f.phone)
   const email = str(f.email, 120).toLowerCase() || null
   if (!str(f.name) || (!phone && !email)) return redirectMsg(c, '/admin/staff', { err: 'Name and a phone or email are required.' })
+  if ((str(f.phone) && (!phone || !/^\+[1-9]\d{7,14}$/.test(phone))) || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return redirectMsg(c, '/admin/staff', { err: 'Enter a valid phone number and email address.' })
+  if (f.password && (f.password.length < 8 || f.password.length > 128)) return redirectMsg(c, '/admin/staff', { err: 'Password must contain 8–128 characters.' })
   const role = (STAFF_ROLES as string[]).includes(f.role) ? (f.role as Role) : 'sales'
-  const existing = await first<{ id: number; role: string }>(c.env, 'SELECT id, role FROM users WHERE (phone = ? AND ? IS NOT NULL) OR (email = ? AND ? IS NOT NULL)', phone, phone, email, email)
+  // Only an admin can create another admin.
+  if (role === 'admin' && c.get('user')!.role !== 'admin') return redirectMsg(c, '/admin/staff', { err: 'Only an admin can add another admin.' })
+  const existing = await first<{ id: number; role: string }>(c.env, 'SELECT id, role FROM users WHERE (phone = ? AND ? IS NOT NULL) OR (lower(email) = ? AND ? IS NOT NULL)', phone, phone, email, email)
+  // Each staff member has their own login. Never re-use or re-role another staff member's account from here.
+  if (existing && existing.role !== 'guest') return redirectMsg(c, '/admin/staff', { err: 'That phone or email already belongs to a staff account. Use a different one, or edit that account.' })
+  const passwordHash = f.password ? await hashPassword(f.password) : null
   let id: number
   if (existing) {
-    await run(c.env, 'UPDATE users SET role = ?, name = ?, active = 1 WHERE id = ?', role, str(f.name, 80), existing.id)
+    await run(c.env, 'UPDATE users SET role = ?, name = ?, active = 1, password_hash = COALESCE(?, password_hash), session_version = session_version + 1 WHERE id = ?', role, str(f.name, 80), passwordHash, existing.id)
     id = existing.id
   } else {
-    id = await insertId(c.env, 'INSERT INTO users (role, name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)', role, str(f.name, 80), phone, email, f.password && f.password.length >= 8 ? await hashPassword(f.password) : null)
+    id = await insertId(c.env, 'INSERT INTO users (role, name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)', role, str(f.name, 80), phone, email, passwordHash)
   }
-  await logActivity(c.env, c.get('user')!.id, 'staff.added', 'user', id, { role })
-  return redirectMsg(c, '/admin/staff', { ok: existing ? 'Existing account promoted to staff.' : 'Staff member added.' })
+  await logActivity(c.env, c.get('user')!.id, 'staff.added', 'user', id, { role, promoted_guest: !!existing, password_set: !!passwordHash })
+  return redirectMsg(c, '/admin/staff', { ok: existing ? 'Existing guest account promoted to staff.' : 'Staff member added.' })
 })
 
 admin2Routes.post('/admin/staff/permissions', requirePerm('manage_staff'), async (c) => {
   const f = await form(c)
+  // Only the permissions that were on the submitted page are changed. A page opened before a new permission
+  // existed must not switch that permission off; everything not shown keeps its saved value or default.
+  const shown = new Set(f.__all.perm_shown ?? [])
+  if (!shown.size) return redirectMsg(c, '/admin/staff', { err: 'This page is out of date. Reload it and save the permissions again.' })
+  const saved = (await getSettings(c.env)).role_permissions
   const out: Partial<Record<Role, Partial<Permissions>>> = {}
   for (const r of ['manager', 'sales', 'accounts'] as Role[]) {
-    const p: Partial<Permissions> = {}
-    for (const k of Object.keys(PERMISSION_LABELS) as PermissionKey[]) {
+    const p: Partial<Permissions> = { ...(saved[r] ?? {}) }
+    for (const k of (Object.keys(PERMISSION_LABELS) as PermissionKey[]).filter((k) => shown.has(k))) {
       if (k === 'max_discount_pct') p.max_discount_pct = Math.max(0, Math.min(100, parseFloat(f[`${r}.${k}`]) || 0))
       else (p as Record<string, boolean>)[k] = f[`${r}.${k}`] === '1'
     }
@@ -369,7 +382,7 @@ admin2Routes.get('/admin/reviews', requirePerm('manage_reviews'), async (c) => {
   const problems = await all<{ body: string; period: string; property_id: number | null }>(c.env, "SELECT body, period, property_id FROM insights WHERE kind = 'review_problems' ORDER BY id DESC LIMIT 5")
   return page(c, { title: 'Reviews', area: 'admin', active: 'reviews' }, (
     <div class="stack-lg">
-      <h1>Reviews</h1>
+      <div class="row-between wrap-row"><h1>Reviews</h1><a class="btn btn-outline" href="/staff/review-links">Generate Review Link</a></div>
       {problems.map((p) => <AiNote label={`Problem alert (${p.period})`}>{p.body}</AiNote>)}
       <nav class="tabs">{[['pending', 'Waiting'], ['approved', 'Live'], ['hidden', 'Hidden'], ['all', 'All']].map(([k, l]) => <a href={`/admin/reviews?status=${k}`} class={status === k ? 'active' : ''}>{l}</a>)}</nav>
       {rows.length === 0 && <Empty>No reviews here.</Empty>}
@@ -412,6 +425,64 @@ admin2Routes.post('/admin/reviews/:id', requirePerm('manage_reviews'), async (c)
   )
   await logActivity(c.env, c.get('user')!.id, `review.${status}`, 'review', id)
   return c.redirect(c.req.header('referer') ?? '/admin/reviews', 303)
+})
+
+// Curated homepage recommendations use the existing content table; never property duplicates.
+admin2Routes.get('/admin/recommended-properties', staffAdminOnly, requirePerm('manage_content'), async c => {
+  const state = await recommendedState(c.env)
+  const q = str(c.req.query('q'), 100)
+  const selectedRows = state.ids.length ? await all<{ id: number; name: string; destination: string; status: string }>(c.env,
+    `SELECT id,name,destination,status FROM properties WHERE id IN (${state.ids.map(() => '?').join(',')})`, ...state.ids) : []
+  const selected = state.ids.map(id => selectedRows.find(p => p.id === id) ?? {id,name:'Unavailable property',destination:'',status:'missing'})
+  const search = '%' + q.replace(/[\\%_]/g, '\\$&') + '%'
+  const choices = await all<{ id: number; name: string; destination: string }>(c.env,
+    "SELECT id,name,destination FROM properties WHERE status = 'live' AND (name LIKE ? ESCAPE '\\' OR destination LIKE ? ESCAPE '\\') ORDER BY name,id LIMIT 30", search, search)
+  const fields = <><input type="hidden" name="revision" value={state.revision} /><input type="hidden" name="q" value={q} /></>
+  return page(c, {title:'Recommended Properties',area:'admin',active:'recommended'}, <div class="stack-lg recommended-manager">
+    <div><h1>Recommended Properties</h1><p class="muted">Choose up to 6 Live properties for the homepage. Changes save immediately. Hidden or inactive properties are never displayed publicly; removing a selection also clears other unavailable entries.</p></div>
+    <section class="card stack"><h2>Selected properties ({selected.length}/6)</h2>
+      {selected.length === 0 && <p class="muted">No properties selected. The homepage section is hidden.</p>}
+      <ol class="recommended-selected">{selected.map((p,index) => <li><div class="recommended-property-name"><strong>{p.name}</strong><span class="muted small">{p.destination}{p.status !== 'live' ? ' · Unavailable publicly — remove this selection' : ''}</span></div>
+        <form method="post" action="/admin/recommended-properties" class="recommended-actions">{fields}<input type="hidden" name="property_id" value={p.id} />
+          <button class="btn btn-sm btn-outline" name="action" value="up" disabled={index === 0} aria-label={`Move ${p.name} up`}>↑</button>
+          <button class="btn btn-sm btn-outline" name="action" value="down" disabled={index === selected.length-1} aria-label={`Move ${p.name} down`}>↓</button>
+          <button class="btn btn-sm btn-outline" name="action" value="remove" aria-label={`Remove ${p.name}`}>Remove</button>
+        </form></li>)}</ol>
+    </section>
+    <section class="card stack"><h2>Add a property</h2>
+      <form method="get" action="/admin/recommended-properties" class="recommended-search"><Field label="Search properties or destinations"><input name="q" value={q} maxlength={100} placeholder="Property name or destination" /></Field><button class="btn">Search</button></form>
+      <p class="muted small">Showing up to 30 Live properties. Refine your search to find another stay.</p>
+      {choices.length === 0 && <p class="muted">No matching Live properties.</p>}
+      <ul class="recommended-candidates">{choices.map(p => <li><div class="recommended-property-name"><strong>{p.name}</strong><span class="muted small">{p.destination}</span></div>
+        <form method="post" action="/admin/recommended-properties">{fields}<input type="hidden" name="property_id" value={p.id}/><button class="btn btn-sm" name="action" value="add" disabled={state.ids.includes(p.id) || state.ids.length >= 6} aria-label={`Add ${p.name}`}>{state.ids.includes(p.id) ? 'Selected' : 'Add'}</button></form>
+      </li>)}</ul>
+    </section>
+  </div>)
+})
+admin2Routes.post('/admin/recommended-properties', staffAdminOnly, requirePerm('manage_content'), async c => {
+  const f = await form(c), state = await recommendedState(c.env)
+  const target = '/admin/recommended-properties' + (f.q ? '?q=' + encodeURIComponent(str(f.q,100)) : '')
+  const fail = (err: string) => redirectMsg(c,target,{err})
+  if (f.revision !== state.revision) return fail('Selections changed in another session. Review the latest list and try again.')
+  if (!/^[1-9]\d*$/.test(String(f.property_id ?? '')) || !Number.isSafeInteger(Number(f.property_id))) return fail('Choose a valid property.')
+  const id = Number(f.property_id), next = [...state.ids], index = next.indexOf(id)
+  if (f.action === 'add') {
+    if (index >= 0) return fail('This property is already selected.')
+    if (next.length >= 6) return fail('Select no more than 6 recommended properties.')
+    next.push(id)
+  } else if (f.action === 'remove' && index >= 0) next.splice(index,1)
+  else if ((f.action === 'up' || f.action === 'down') && index >= 0) {
+    const other = index + (f.action === 'up' ? -1 : 1)
+    if (other < 0 || other >= next.length) return fail('This property cannot move any further.')
+    ;[next[index],next[other]] = [next[other],next[index]]
+  } else return fail('Invalid recommendation action.')
+  if (f.action === 'remove' && next.length) {
+    const live = await all<{id:number}>(c.env, `SELECT id FROM properties WHERE status = 'live' AND id IN (${next.map(() => '?').join(',')})`, ...next)
+    const keep = new Set(live.map(p => p.id)); next.splice(0,next.length,...next.filter(id => keep.has(id)))
+  }
+  if (!await saveRecommended(c.env,next,state.revision)) return fail('The list or property visibility changed. Remove unavailable properties and try again.')
+  await logActivity(c.env,c.get('user')!.id,'recommendations.updated','content','recommended_property_ids',{ids:next,action:f.action})
+  return redirectMsg(c,target,{ok:'Recommended properties saved.'})
 })
 
 // ---------- 45. Website content ----------
@@ -548,6 +619,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
   const usage = await all<{ feature: string; n: number; failed: number; avg_ms: number }>(c.env, 'SELECT feature, COUNT(*) AS n, SUM(ok = 0) AS failed, AVG(ms) AS avg_ms FROM ai_usage WHERE created_at >= ? GROUP BY feature ORDER BY n DESC', since)
   const today = parseInt((await c.env.KV.get(`ai:count:${todayIST()}`)) ?? '0', 10)
   const gkey = await geminiKey(c.env)
+  const rkey = await resendKey(c.env)
   const events = Object.keys(s.notifications) as (keyof Settings['notifications'])[]
   const eventLabel: Record<string, string> = { new_enquiry: 'New enquiry', booking: 'New booking', quote_accepted: 'Quote accepted by guest', refund_request: 'Refund request', low_review: 'Low-rated review', daily_summary: 'Daily summary', rate_expiry: 'Season rates ending (renew rates)', voucher_request: 'Booking voucher waiting for approval' }
   return page(c, { title: 'Settings', area: 'admin', active: 'settings' }, (
@@ -599,13 +671,18 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
         ))}
       </section>
 
-      <section class="card stack">
-        <h2>Email</h2>
+      <section class="card stack" id="email">
+        <h2>Email (Resend)</h2>
         <div class="row">
-          <Field label="From"><input name="email_from" value={s.email.from} /></Field>
+          <Field label="From" hint="Must use a domain verified in Resend, e.g. Go Sanchari <hello@gosanchari.com>"><input name="email_from" value={s.email.from} /></Field>
           <Field label="Reply-to"><input name="email_reply_to" value={s.email.reply_to} /></Field>
         </div>
-        <p class="small">Status: {c.env.RESEND_API_KEY ? <span class="ok">Connected</span> : <span class="error">Not connected — emails are logged only</span>}</p>
+        <p class="small">Status: {rkey ? <span class="ok">Connected ({maskKey(rkey)})</span> : <span class="error">Not connected — emails are logged only</span>}</p>
+        <p class="small muted">Create a key at <a href="https://resend.com/api-keys" target="_blank" rel="noopener">resend.com/api-keys</a> and paste it here. It is used for guest emails and for emailing resorts from Resort contacts. The key is stored privately and never shown again in full.</p>
+        <div class="row wrap-row">
+          <Field label={rkey ? 'Replace Resend API key' : 'Resend API key'}><input type="password" name="resend_key" autocomplete="off" placeholder={rkey ? 'Leave blank to keep the saved key' : 're_…'} /></Field>
+        </div>
+        {rkey && <label class="check small"><input type="checkbox" name="resend_remove" value="1" /> Remove the saved key</label>}
       </section>
 
       <section class="card stack">
@@ -625,10 +702,12 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
         <div class="upload-box stack" id="gemini">
           <h3>Google Gemini (recommended for the staff assistant and reading PDF / Word rate sheets)</h3>
           <p class="small muted">Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and paste it here. The key is stored privately and never shown again in full.</p>
+          <p class="small muted">Privacy: files, website text and notes used for AI features (e.g. property quick fill) are sent to Google for reading. Bank details are never copied into the form by AI, but they are still sent if they appear in an uploaded file — remove them from documents first if that matters.</p>
           {gkey ? <p class="small ok">✓ Gemini key saved ({maskKey(gkey)}).</p> : <p class="small">No Gemini key yet — Workers AI is used.</p>}
           <div class="row wrap-row">
             <Field label={gkey ? 'Replace Gemini API key' : 'Gemini API key'}><input type="password" name="gemini_key" autocomplete="off" placeholder={gkey ? 'Leave blank to keep the saved key' : 'AIza…'} /></Field>
             <Field label="Gemini model"><input name="model_gemini" value={s.ai.models.gemini} placeholder={DEFAULT_SETTINGS.ai.models.gemini} /></Field>
+            <Field label="Gemini model for “Read carefully”"><input name="model_gemini_pro" value={s.ai.models.gemini_pro} placeholder={DEFAULT_SETTINGS.ai.models.gemini_pro} /></Field>
             <Field label="Use for AI text"><Select name="ai_provider" value={s.ai.provider} options={[['auto', 'Gemini when a key is saved (fallback: Workers AI)'], ['workers', 'Always Workers AI']]} /></Field>
           </div>
           {gkey && <label class="check small"><input type="checkbox" name="gemini_remove" value="1" /> Remove the saved key</label>}
@@ -641,7 +720,7 @@ admin2Routes.get('/admin/settings', requirePerm('manage_settings'), async (c) =>
         <Field label="Daily AI call limit"><input type="number" name="ai_limit" value={s.ai.daily_limit} min="0" /></Field>
         <details>
           <summary>Models</summary>
-          {(Object.keys(s.ai.models) as (keyof Settings['ai']['models'])[]).filter((k) => k !== 'gemini').map((k) => <Field label={k}><input name={`model_${k}`} value={s.ai.models[k]} placeholder={DEFAULT_SETTINGS.ai.models[k]} /></Field>)}
+          {(Object.keys(s.ai.models) as (keyof Settings['ai']['models'])[]).filter((k) => k !== 'gemini' && k !== 'gemini_pro').map((k) => <Field label={k}><input name={`model_${k}`} value={s.ai.models[k]} placeholder={DEFAULT_SETTINGS.ai.models[k]} /></Field>)}
         </details>
         <h3>Usage by feature (30 days)</h3>
         <Table head={['Feature', 'Calls', 'Failed', 'Avg time']}>{usage.map((u) => <tr><td>{AI_FEATURES[u.feature as AiFeature] ?? u.feature}</td><td>{u.n}</td><td>{u.failed}</td><td>{Math.round(u.avg_ms ?? 0)} ms</td></tr>)}</Table>
@@ -696,6 +775,18 @@ admin2Routes.post('/admin/settings', requirePerm('manage_settings'), async (c) =
     await setGeminiKey(c.env, newKey)
     keyMsg = ' Gemini key saved and tested ✓.'
     await logActivity(c.env, c.get('user')!.id, 'settings.gemini_key_set', 'settings', null, { key: maskKey(newKey) })
+  }
+  const newResend = str(f.resend_key, 200).trim()
+  if (f.resend_remove) {
+    await setResendKey(c.env, null)
+    keyMsg += ' Resend key removed.'
+    await logActivity(c.env, c.get('user')!.id, 'settings.resend_key_removed', 'settings', null)
+  } else if (newResend) {
+    const problem = await testResendKey(newResend)
+    if (problem) return redirectMsg(c, '/admin/settings#email', { err: `Other settings saved, but the Resend key did not work: ${problem.slice(0, 160)}` })
+    await setResendKey(c.env, newResend)
+    keyMsg += ' Resend key saved and tested ✓.'
+    await logActivity(c.env, c.get('user')!.id, 'settings.resend_key_set', 'settings', null, { key: maskKey(newResend) })
   }
   const off = (Object.keys(features) as AiFeature[]).filter((k) => !features[k])
   await logActivity(c.env, c.get('user')!.id, 'settings.updated', 'settings', null, { aiOff: off, taxSlabs: slabs })

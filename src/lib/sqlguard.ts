@@ -13,7 +13,7 @@ export const ASK_AI_TABLES: Record<string, string> = {
   quotation_options: 'id, quotation_id, property_id, room_id, check_in, check_out, subtotal, discount, total',
   reviews: "id, booking_id, property_id, rating, body, status ('pending','approved','hidden'), flagged, created_at",
   coupons: 'id, code, discount_type, discount_value, used_count, valid_from, valid_to',
-  people: "id, role ('guest','admin','manager','sales','accounts'), name, created_at",
+  people: "id, role ('guest','admin','manager','sales','accounts' = Data Entry), name, created_at",
   destinations: 'id, name',
   payouts: 'id, property_id, booking_id, amount, status, created_at',
   tasks: "id, assigned_to, enquiry_id, reason, due_at, status ('open','done'), created_at",
