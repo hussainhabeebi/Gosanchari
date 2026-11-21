@@ -622,6 +622,9 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
   let saved = 0
   let defaultPlan: string | null = null
   const configuredPlans = new Set<string>(old.filter(x => x.meal_plan && x.supplement == null).map(x => x.meal_plan!))
+  const cleared = new Set<string>()
+  const filled = new Set<string>()
+  const deleted = new Set<number>()
   for (const r of rooms) {
     let roomChanged = false
     let regular: { plan: string; wk: number | null; we: number | null; staff: number | null; net: number | null } | null = null
@@ -638,8 +641,14 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
         const netWe = perms.view_net_rates ? n(`${key}_we_${plan}_b2b`, keep?.net_weekend_rate) : keep?.net_weekend_rate ?? null
         const wk = n(`${key}_wk_${plan}_direct`, keep?.rate), we = n(`${key}_we_${plan}_direct`, keep?.weekend_rate)
         const staff = n(`${key}_wk_${plan}_staff`, keep?.staff_rate), staffWe = n(`${key}_we_${plan}_staff`, keep?.staff_weekend_rate)
-        if ([wk, we, staff, staffWe, net, netWe].every((v) => v == null)) continue
+        if ([wk, we, staff, staffWe, net, netWe].every((v) => v == null)) {
+          // Every rate box of this plan was cleared: remove its saved rows instead of silently keeping them.
+          for (const x of olds) { deleted.add(x.id); stmts.push(c.env.DB.prepare("DELETE FROM season_rates WHERE id = ? AND property_id = ? AND source = 'wizard'").bind(x.id, p.id)); roomChanged = true }
+          if (olds.length) cleared.add(plan)
+          continue
+        }
         configuredPlans.add(plan)
+        filled.add(plan)
         defaultPlan ??= plan
         const same = (x: SeasonRate, g: DateRange) => x.start_date === g.from && x.end_date === g.to && daysValue(x.applicable_weekdays) === g.days
         const spare = olds.filter((x) => !ranges.some((g) => same(x, g)))
@@ -671,7 +680,10 @@ async function saveStep3(c: Context<AppEnv>, p: PropertyRow) {
       stmts.push(c.env.DB.prepare(`UPDATE rooms SET base_rate = ?, weekend_rate = ?, staff_rate = COALESCE(?, staff_rate)${perms.view_net_rates ? ', net_rate = COALESCE(?, net_rate)' : ''} WHERE id = ?`).bind(...[regular.wk, regular.we, regular.staff, ...(perms.view_net_rates ? [regular.net] : []), r.id]))
     }
   }
-  if (defaultPlan) stmts.push(c.env.DB.prepare("UPDATE properties SET rate_meal_plan = ?, weekend_nights = '5,6,0', meal_plans = ? WHERE id = ?").bind(p.rate_meal_plan && configuredPlans.has(p.rate_meal_plan) ? p.rate_meal_plan : defaultPlan, JSON.stringify([...configuredPlans]), p.id))
+  // A meal plan cleared everywhere is no longer offered for this property.
+  for (const plan of cleared) if (!filled.has(plan) && !old.some(x => x.meal_plan === plan && x.supplement == null && !deleted.has(x.id))) configuredPlans.delete(plan)
+  const fallbackPlan = defaultPlan ?? [...configuredPlans][0] ?? null
+  if (defaultPlan || cleared.size) stmts.push(c.env.DB.prepare("UPDATE properties SET rate_meal_plan = ?, weekend_nights = '5,6,0', meal_plans = ? WHERE id = ?").bind(p.rate_meal_plan && configuredPlans.has(p.rate_meal_plan) ? p.rate_meal_plan : fallbackPlan, JSON.stringify([...configuredPlans]), p.id))
   if (stmts.length) await c.env.DB.batch(stmts)
   await logActivity(c.env, uid, 'price.wizard_rates', 'property', p.id, { rows: saved })
   await afterPropertySave(c, p.id)
