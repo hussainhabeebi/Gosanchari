@@ -262,6 +262,7 @@ export function filtersFromQuery(q: Record<string, string | string[] | undefined
 export function filtersToParams(f: SearchFilters): URLSearchParams {
   const p = new URLSearchParams()
   if (f.q) p.set('q', f.q)
+  if (f.kw) p.set('kw', f.kw)
   if (f.destination) p.set('destination', f.destination)
   if (f.checkIn) p.set('checkIn', f.checkIn)
   if (f.checkOut) p.set('checkOut', f.checkOut)
