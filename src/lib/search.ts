@@ -67,6 +67,7 @@ export type Sort = (typeof SORTS)[number]
 
 export interface SearchFilters {
   q?: string // free text for semantic ranking ("peaceful", "good for kids")
+  kw?: string // keyword: property name or location (destination / address), matched in the database
   destination?: string
   checkIn?: string
   checkOut?: string
@@ -237,6 +238,7 @@ export function filtersFromQuery(q: Record<string, string | string[] | undefined
   }
   const f: SearchFilters = {
     q: one('q')?.slice(0, 200) || undefined,
+    kw: one('kw')?.replace(/\s+/g, ' ').trim().slice(0, 80) || undefined,
     destination: one('destination') || undefined,
     checkIn: isDate(one('checkIn')) ? one('checkIn') : undefined,
     checkOut: isDate(one('checkOut')) ? one('checkOut') : undefined,

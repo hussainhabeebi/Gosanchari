@@ -15,7 +15,7 @@ import type { TaxSlab } from '../lib/pricing'
 import type { ReviewRow } from '../lib/types'
 import { addDays, fmtDate, fmtDateTime, int, isDate, money, normalizePhone, parseJson, randomToken, slugify, str, toCsv, todayIST } from '../lib/util'
 import { form, pageNum, redirectMsg } from './helpers'
-import { destinations } from '../lib/properties'
+import { clearDestinationsCache, destinations } from '../lib/properties'
 import { MOODS, sceneSvg, type Mood } from '../views/moods'
 import { raw } from 'hono/html'
 import { geminiKey, maskKey, setGeminiKey, testGeminiKey } from '../lib/gemini'
@@ -597,6 +597,7 @@ admin2Routes.post('/admin/content', requirePerm('manage_content'), async (c) => 
 admin2Routes.post('/admin/destinations', requirePerm('manage_content'), async (c) => {
   const f = await form(c)
   if (str(f.name)) await run(c.env, 'INSERT OR IGNORE INTO destinations (name, slug) VALUES (?, ?)', str(f.name, 60), slugify(f.name))
+  await clearDestinationsCache(c.env)
   return c.redirect('/admin/content', 303)
 })
 
@@ -609,6 +610,7 @@ admin2Routes.post('/admin/destinations/:id', requirePerm('manage_content'), asyn
     await c.env.MEDIA.put(image, await up.arrayBuffer(), { httpMetadata: { contentType: up.type } })
   }
   await run(c.env, 'UPDATE destinations SET name = ?, blurb = ?, image = ?, sort = ?, popular = ? WHERE id = ?', str(body.name as string, 60), str(body.blurb as string, 200) || null, image, int(body.sort as string), body.popular ? 1 : 0, int(c.req.param('id')))
+  await clearDestinationsCache(c.env)
   return c.redirect('/admin/content', 303)
 })
 

@@ -19,7 +19,7 @@ import {
 import type { NearbyPlace, PhotoRow, PropertyRow, RoomRow } from '../lib/types'
 import { fmtDate, fmtDateTime, int, isDate, money, nowIso, parseJson, slugify, str } from '../lib/util'
 import { form, redirectMsg, type Form } from './helpers'
-import { destinations } from '../lib/properties'
+import { clearDestinationsCache, destinations } from '../lib/properties'
 import { SEASON_KINDS, seasonKindLabel, weekendLabel, weekendNights, type SeasonRate } from '../lib/pricing'
 import { extractProperty, type ExtractedRoom, type ExtractedSeason } from '../lib/propextract'
 import { fetchImage } from '../lib/webimport'
@@ -684,6 +684,7 @@ export async function afterPropertySave(c: Context<AppEnv>, id: number) {
   await enqueue(c.env, { type: 'embed_property', propertyId: id })
   await enqueue(c.env, { type: 'sync_kb', what: 'property', id })
   await c.env.KV.delete(`similar:${id}`)
+  await clearDestinationsCache(c.env)
 }
 
 propertyEditorRoutes.post('/admin/properties/new', requirePerm('manage_properties'), async (c) => {

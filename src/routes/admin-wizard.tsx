@@ -556,7 +556,7 @@ async function step3(c: Context<AppEnv>, p: PropertyRow) {
   const perms = await permissionsFor(c.env, c.get('user')!.role)
   return page(c, { title: `Rates · ${p.name}`, area: 'admin', active: 'prop_new' }, (
     <Shell p={p} step={3} done={done} icon={I.coins} title="Room Rates" sub="Set different rates for off season, season and peak times. Enter rates for weekdays and weekends with CP, MAP, AP and EP plans.">
-      <form method="post" action={`/admin/properties/${p.id}/setup/3`} class="stack wiz-form" data-rates data-rates-draft={c.get('user')!.id}>
+      <form method="post" action={`/admin/properties/${p.id}/setup/3`} class="stack wiz-form" autocomplete="off" data-rates data-rates-draft={c.get('user')!.id}>
         <div class="wiz-2 rate-pick">
           <label class="wf">
             <span class="wl">Select Room Category <b>*</b> <a class="linklike add-new" href={`/admin/properties/${p.id}/setup/2`}>{I.plus} Add New Room Category</a></span>
@@ -1081,6 +1081,9 @@ const SAVES: ((c: Context<AppEnv>, p: PropertyRow) => Promise<{ err?: string; st
     return {}
   },
 ]
+
+// Wizard pages hold live rates: never serve a stale copy from the browser cache or Back button.
+wizardRoutes.use('/admin/properties/:id/setup/*', async (c, next) => { await next(); c.header('Cache-Control', 'private, no-store') })
 
 wizardRoutes.get('/admin/properties/:id/setup/:step', requirePerm('manage_properties'), async (c) => {
   const p = await loadProperty(c)
