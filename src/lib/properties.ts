@@ -20,10 +20,23 @@ SELECT p.id, p.slug, p.name, COALESCE(p.stay_type, p.type) AS type, p.destinatio
        ${COVER_PHOTO_SQL} AS photo
 FROM properties p`
 
+const DESTINATIONS_CACHE = 'cache:destinations:v1'
+
+/** Destination names for filters. Cached in KV for 5 minutes; cleared when destinations or properties change. */
 export async function destinations(env: Env): Promise<string[]> {
-  const rows = await all<{ name: string }>(env, 'SELECT name FROM destinations ORDER BY sort, name')
-  const fromProps = await all<{ destination: string }>(env, "SELECT DISTINCT destination FROM properties WHERE status = 'live'")
-  return [...new Set([...rows.map((r) => r.name), ...fromProps.map((r) => r.destination)])]
+  const cached = await env.KV.get<string[]>(DESTINATIONS_CACHE, 'json').catch(() => null)
+  if (Array.isArray(cached)) return cached
+  const [rows, fromProps] = await Promise.all([
+    all<{ name: string }>(env, 'SELECT name FROM destinations ORDER BY sort, name'),
+    all<{ destination: string }>(env, "SELECT DISTINCT destination FROM properties WHERE status = 'live'"),
+  ])
+  const list = [...new Set([...rows.map((r) => r.name), ...fromProps.map((r) => r.destination)])]
+  await env.KV.put(DESTINATIONS_CACHE, JSON.stringify(list), { expirationTtl: 300 }).catch(() => {})
+  return list
+}
+
+export async function clearDestinationsCache(env: Env) {
+  await env.KV.delete?.(DESTINATIONS_CACHE)?.catch(() => {})
 }
 
 export async function cardsByIds(env: Env, ids: number[]): Promise<PropertyCard[]> {
@@ -78,6 +91,12 @@ export async function searchProperties(env: Env, f: SearchFilters, limit = 60, s
   if (f.destination) {
     if (destinationAliases?.length) { where.push(`p.destination IN (${placeholders(destinationAliases.length)})`); binds.push(...destinationAliases) }
     else { where.push('p.destination = ?'); binds.push(f.destination) }
+  }
+  // Keyword: every word must appear in the name, destination or address (case-insensitive).
+  for (const word of (f.kw ?? '').split(' ').filter(Boolean).slice(0, 5)) {
+    const like = `%${word.replace(/[\\%_]/g, (m) => '\\' + m)}%`
+    where.push("(p.name LIKE ? ESCAPE '\\' OR p.destination LIKE ? ESCAPE '\\' OR COALESCE(p.address, '') LIKE ? ESCAPE '\\')")
+    binds.push(like, like, like)
   }
   if (f.types?.length) { where.push(`COALESCE(p.stay_type, p.type) IN (${placeholders(f.types.length)})`); binds.push(...f.types) }
   if (f.rating) { where.push('p.rating_avg >= ?'); binds.push(f.rating) }

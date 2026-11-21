@@ -39,11 +39,45 @@ describe('Staff Property Finder speed', () => {
     const small = await f.count(url)
     f.addProperties(25)
     const big = await f.count(url)
-    expect(big.html.match(/Speed \d+/g)!.length).toBeGreaterThanOrEqual(30)
+    const shown = (html: string) => (html.match(/<strong>Speed \d+<\/strong>/g) ?? []).length
+    expect(shown(big.html)).toBe(20) // first page only
+    expect(big.html).toContain('30 properties with free rooms')
     expect(big.html).toContain('₹4,200') // seasonal staff rate still resolved
     expect(big.html).toContain('₹5,000') // seasonal guest rate still resolved
     expect(big.queries).toBe(small.queries)
     expect(big.queries).toBeLessThan(25)
     expect(big.html).toContain('loading="lazy"')
+    // "Load next 20" fetches only the result rows (no page layout), then stops.
+    const more = big.html.match(/href="([^"]+)" data-finder-more/)![1].replace(/&amp;/g, '&')
+    expect(more).toContain('page=2')
+    const next = await f.count(more + '&partial=1')
+    expect(next.html.startsWith('<div data-finder-chunk')).toBe(true)
+    expect(shown(next.html)).toBe(10)
+    expect(next.html).not.toContain('data-finder-more')
+    expect(next.queries).toBeLessThan(big.queries)
+  })
+
+  it('runs no property queries until the user searches', async () => {
+    const f = fixture()
+    f.addProperties(3)
+    const empty = await f.count('/staff/finder')
+    expect(empty.html).toContain('Type a property name or location above to start.')
+    expect(empty.html).not.toContain('<strong>Speed ')
+    expect(empty.queries).toBeLessThan(10)
+    const all = await f.count('/staff/finder?all=1')
+    expect(all.html).toContain('<strong>Speed 0</strong>')
+  })
+
+  it('matches the keyword against property name and location, every word required', async () => {
+    const f = fixture()
+    f.addProperties(3)
+    const byName = await f.count('/staff/finder?kw=speed+1&partial=1')
+    expect(byName.html).toContain('<strong>Speed 1</strong>')
+    expect(byName.html).not.toContain('<strong>Speed 2</strong>')
+    const byPlace = await f.count('/staff/finder?kw=speedtown')
+    expect((byPlace.html.match(/<strong>Speed \d<\/strong>/g) ?? []).length).toBe(3)
+    expect((await f.count('/staff/finder?kw=speedtown+nowhere')).html).toContain('No matches')
+    // LIKE wildcards typed by the user are literal characters.
+    expect((await f.count('/staff/finder?kw=%25')).html).toContain('No matches')
   })
 })

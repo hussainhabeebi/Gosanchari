@@ -5,6 +5,76 @@ function gsPublicComparisonRate(value) {
   return '<span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price."><s aria-label="Calculated comparison rate (+5%): ' + amount + '">' + amount + '</s></span>'
 }
 
+// Staff Property Finder: 20 results at a time (infinite scroll + "Load next 20") and a debounced live keyword search.
+(function () {
+  'use strict'
+  if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return
+  var results = document.querySelector('[data-finder-results]')
+  if (!results) return
+  var summary = document.querySelector('[data-finder-summary]')
+  var filters = document.querySelector('[data-finder-form]')
+  var keyword = document.querySelector('[data-finder-keyword]')
+  var loading = null, observer = null
+  function partialUrl(href) { var u = new URL(href, location.href); u.searchParams.set('partial', '1'); return u.toString() }
+  function parse(html) { var box = document.createElement('div'); box.innerHTML = html; return box.querySelector('[data-finder-chunk]') }
+  function watchMore() {
+    if (observer) observer.disconnect()
+    var more = results.querySelector('[data-finder-more]')
+    if (!more || !('IntersectionObserver' in window)) return
+    // Start fetching a little before the button scrolls into view.
+    observer = new IntersectionObserver(function (entries) { if (entries[0].isIntersecting) loadMore(more) }, { rootMargin: '600px 0px' })
+    observer.observe(more)
+  }
+  function loadMore(more) {
+    if (loading || !more.isConnected) return
+    more.textContent = 'Loading…'; more.setAttribute('aria-busy', 'true')
+    var controller = new AbortController(); loading = controller
+    fetch(partialUrl(more.href), { credentials: 'same-origin', signal: controller.signal })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text() })
+      .then(function (html) {
+        var chunk = parse(html); if (!chunk) throw new Error('Unexpected response')
+        more.replaceWith.apply(more, Array.prototype.slice.call(chunk.childNodes))
+        loading = null; watchMore()
+      })
+      .catch(function (e) { loading = null; if (e.name === 'AbortError') return; more.textContent = 'Could not load. Tap to retry'; more.removeAttribute('aria-busy') })
+  }
+  results.addEventListener('click', function (event) {
+    var more = event.target.closest('[data-finder-more]')
+    if (!more) return
+    event.preventDefault(); loadMore(more)
+  })
+  watchMore()
+
+  // Live keyword search: wait 400 ms after the last keystroke, cancel any request still in flight.
+  if (!keyword || !filters) return
+  var timer = null, lastQuery = null
+  function search() {
+    var params = new URLSearchParams(new FormData(filters))
+    params.delete('page')
+    var query = params.toString()
+    if (query === lastQuery) return
+    lastQuery = query
+    if (loading) loading.abort()
+    var controller = new AbortController(); loading = controller
+    results.setAttribute('aria-busy', 'true')
+    if (summary) summary.textContent = 'Searching…'
+    fetch('/staff/finder?' + query + '&partial=1', { credentials: 'same-origin', signal: controller.signal })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text() })
+      .then(function (html) {
+        var chunk = parse(html); if (!chunk) throw new Error('Unexpected response')
+        results.replaceChildren(chunk)
+        if (summary) summary.textContent = chunk.dataset.summary || ''
+        history.replaceState(null, '', '/staff/finder?' + query)
+        loading = null; results.removeAttribute('aria-busy'); watchMore()
+      })
+      .catch(function (e) { if (e.name === 'AbortError') return; loading = null; lastQuery = null; results.removeAttribute('aria-busy'); if (summary) summary.textContent = 'Search failed. Press Search to try again.' })
+  }
+  lastQuery = (function () { var p = new URLSearchParams(new FormData(filters)); p.delete('page'); return p.toString() })()
+  keyword.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(search, 400) })
+  // Enter still works instantly (normal form submit); clear any pending debounce first.
+  filters.addEventListener('submit', function () { clearTimeout(timer) })
+})();
+
 // Go Sanchari client script: small progressive enhancements, no framework.
 // Staff quotation: combine room categories in one option ("+ Add another room category" / ×).
 (function () {
@@ -980,6 +1050,13 @@ function gsPublicComparisonRate(value) {
       try { sessionStorage.setItem(draftKey, JSON.stringify({ base: savedValues, rooms: roomDrafts, selected: roomSel.value })) } catch (e) {}
     }
     // Drafts stay in this tab, scoped to the operator/property. Discard only rooms whose saved server values changed.
+    // After a successful save the server is the source of truth: drop the draft so cleared rates (e.g. MAP) are never refilled.
+    try {
+      if (sessionStorage.getItem(draftKey + ':submitted')) {
+        sessionStorage.removeItem(draftKey + ':submitted')
+        if (!document.querySelector('.flash-err')) sessionStorage.removeItem(draftKey)
+      }
+    } catch (e) {}
     try {
       var draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null')
       if (draft) {
@@ -1003,7 +1080,7 @@ function gsPublicComparisonRate(value) {
     }
     rateForm.addEventListener('input', retainRates)
     window.addEventListener('pagehide', retainRates)
-    rateForm.addEventListener('submit', function () { retainRates(); roomDrafts.forEach(hydrateRoom) })
+    rateForm.addEventListener('submit', function () { retainRates(); roomDrafts.forEach(hydrateRoom); try { sessionStorage.setItem(draftKey + ':submitted', '1') } catch (e) {} })
     $$('[data-view-rate-room]', rateForm).forEach(function (button) {
       button.addEventListener('click', function () {
         selectRateRoom(button.dataset.viewRateRoom)
@@ -1211,11 +1288,12 @@ function gsPublicComparisonRate(value) {
       $('#seo-title').value = r.title; $('#seo-desc').value = r.description
     })
   })
-  $$('input[data-max]').forEach(function (cb) {
-    cb.addEventListener('change', function () {
-      var group = $$('input[name="' + cb.name + '"]:checked')
-      if (group.length > +cb.dataset.max) { cb.checked = false; alert('Compare up to ' + cb.dataset.max + ' properties') }
-    })
+  // Delegated so rows added later (Property finder "Load more") are limited too.
+  document.addEventListener('change', function (event) {
+    var cb = event.target
+    if (!cb.matches || !cb.matches('input[data-max]')) return
+    var group = $$('input[name="' + cb.name + '"]:checked')
+    if (group.length > +cb.dataset.max) { cb.checked = false; alert('Compare up to ' + cb.dataset.max + ' properties') }
   })
 
   // ---------- Charts ----------

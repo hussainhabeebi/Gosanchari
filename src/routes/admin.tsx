@@ -16,7 +16,7 @@ import { addDays, eachNight, fmtDate, fmtDateTime, int, isDate, money, moneyShor
 import { form, pageNum, redirectMsg } from './helpers'
 import { bookingFilters, renderBookings, renderQuotes } from './staff-ops'
 import { renderGuests, renderInbox } from './staff'
-import { destinations, reindexKb } from '../lib/properties'
+import { clearDestinationsCache, destinations, reindexKb } from '../lib/properties'
 import { daysLeft, EXPIRY_WINDOW_DAYS, expiryText, rateExpiryAlerts } from '../lib/rate-expiry'
 
 export const adminRoutes = new Hono<AppEnv>()
@@ -161,6 +161,7 @@ adminRoutes.post('/admin/properties/:id/status', requirePerm('manage_properties'
   await run(c.env, 'UPDATE properties SET status = ?, updated_at = ? WHERE id = ?', s, nowIso(), id)
   await enqueue(c.env, { type: 'embed_property', propertyId: id })
   await enqueue(c.env, { type: 'sync_kb', what: 'property', id })
+  await clearDestinationsCache(c.env)
   await logActivity(c.env, c.get('user')!.id, 'property.status', 'property', id, { status: s })
   return c.redirect(c.req.header('referer') ?? '/admin/properties', 303)
 })

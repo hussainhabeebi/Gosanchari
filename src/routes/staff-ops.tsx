@@ -32,6 +32,10 @@ export const opsRoutes = new Hono<AppEnv>()
 opsRoutes.use('/staff/*', requireStaff)
 
 // ---------- 22. Property finder ----------
+const FINDER_PAGE = 20
+// Filters that count as a search. With none of them the finder runs no property queries at all.
+const FINDER_SEARCH_KEYS = ['kw', 'destination', 'checkIn', 'checkOut', 'guests', 'type', 'q', 'all'] as const
+
 opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
   const u = c.get('user')!
   const perms = await permissionsFor(c.env, u.role)
@@ -44,19 +48,25 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
   f.sort ??= 'price_asc'
   const enquiryId = int(c.req.query('enquiry')) || null
   const quoteId = int(c.req.query('quote')) || null
+  const partial = c.req.query('partial') === '1'
+  const pageNo = Math.max(1, int(c.req.query('page'), 1))
+  const searched = FINDER_SEARCH_KEYS.some((k) => (c.req.query(k) ?? '').trim() !== '')
   const invalidDates = !!(c.req.query('checkIn') && c.req.query('checkOut') && (!f.checkIn || !f.checkOut))
-  const results = invalidDates ? [] : await searchProperties(c.env, f, 100, true)
+  // Search returns the ordered list (cheap, batched); rooms, pricing and availability load only for the 20 shown.
+  const all_ = !searched || invalidDates ? [] : await searchProperties(c.env, f, 300, true)
+  const results = all_.slice((pageNo - 1) * FINDER_PAGE, pageNo * FINDER_PAGE)
+  const hasMore = all_.length > pageNo * FINDER_PAGE
   const ids = results.map((r) => r.id)
   const [internal, rooms, dests] = await Promise.all([
     ids.length ? all<Pick<PropertyRow, 'id' | 'owner_name' | 'owner_phone' | 'commission_pct' | 'internal_notes' | 'last_minute_note' | 'is_partner' | 'contact'>>(c.env, `SELECT id, owner_name, owner_phone, commission_pct, internal_notes, last_minute_note, is_partner, contact FROM properties WHERE id IN (${placeholders(ids.length)})`, ...ids) : Promise.resolve([]),
     ids.length ? all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(ids.length)}) ORDER BY base_rate`, ...ids) : Promise.resolve([]),
-    destinations(c.env),
+    partial ? Promise.resolve([] as string[]) : destinations(c.env),
   ])
   // Dated searches need season pricing and availability: load both for every room at once (a handful of queries, not two per room).
   const dated = !!(f.checkIn && f.checkOut)
-  const [pricingByRoom, avail] = dated
+  const [pricingByRoom, avail] = dated && ids.length
     ? await Promise.all([loadPricingMany(c.env, ids), roomAvailability(c.env, ids, f.checkIn!, f.checkOut!)])
-    : [new Map(), null]
+    : [new Map(), dated ? new Map() : null]
   const resolved = new Map<number, { staff: number | null; direct: number | null; net: number | null }>()
   for (const room of rooms) {
     const pricing = pricingByRoom.get(room.id)
@@ -74,27 +84,18 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
     if (f.guests) p.set('guests', String(f.guests))
     return quoteId ? `/staff/quotes/${quoteId}/options?${p}` : `/staff/quotes/new?${p}`
   }
-  return page(c, { title: 'Property finder', area: 'staff', active: 'finder' }, (
-    <div class="stack-lg">
-      <h1>Property finder</h1>
-      {(enquiryId || quoteId) && <p class="flash">Adding to {quoteId ? `quotation #${quoteId}` : `a new quotation for enquiry #${enquiryId}`}.</p>}
-      {invalidDates && <p class="flash flash-err" role="alert">Check-out must be after check-in, with valid dates.</p>}
-      <form method="get" action="/staff/finder" class="card staff-finder-filters">
-        {enquiryId && <input type="hidden" name="enquiry" value={enquiryId} />}
-        {quoteId && <input type="hidden" name="quote" value={quoteId} />}
-        <Field label="Destination"><Select name="destination" value={f.destination} options={[['', 'Any destination'], ...dests.map((d) => [d, d] as [string, string])]} /></Field>
-        <Field label="Check-in"><input type="date" name="checkIn" value={f.checkIn ?? ''} /></Field>
-        <Field label="Check-out"><input type="date" name="checkOut" value={f.checkOut ?? ''} /></Field>
-        <Field label="Guests"><input type="number" name="guests" value={f.guests ?? ''} placeholder="Guests" min="1" /></Field>
-        <Field label="Property Type"><Select name="type" value={f.types?.[0]} options={[['', 'Any type'], ...PROPERTY_TYPES.map((t) => [t, STAY_TYPES[t]] as [string, string])]} /></Field>
-        <Field label="Feel / Preferences"><input name="q" value={f.q ?? ''} placeholder="quiet, lake view, kids…" /></Field>
-        <Field label="Sort By"><Select name="sort" value={f.sort} options={[['price_asc', 'Price ↑'], ['price_desc', 'Price ↓'], ['rating', 'Rating'], ['recommended', 'Best match']]} /></Field>
-        <button class="btn btn-sm">Search</button>
-      </form>
-      <form method="get" action="/staff/finder/compare" id="compare-form">
-        <div class="row-between"><span class="muted">{results.length} properties{avail ? ' with free rooms' : ''}</span><button class="btn btn-sm btn-outline">Compare selected (max 3)</button></div>
-        {results.length === 0 && <Empty>No matches. Loosen the filters or check other dates.</Empty>}
-        {results.map((p) => {
+  const pageHref = (n: number) => {
+    const p = new URL(c.req.url).searchParams
+    p.delete('partial'); p.set('page', String(n))
+    return `/staff/finder?${p}`
+  }
+  const summary = !searched ? 'Search by property name or location, or choose filters.' : `${all_.length}${all_.length >= 300 ? '+' : ''} properties${avail ? ' with free rooms' : ''}`
+  // One chunk of results: used for the first page, "Load more" / infinite scroll, and live keyword search.
+  const chunk = (
+    <div data-finder-chunk data-summary={summary}>
+      {searched && all_.length === 0 && pageNo === 1 && <Empty>No matches. Loosen the filters or check other dates.</Empty>}
+      {!searched && <Empty>Type a property name or location above to start. <a href="/staff/finder?all=1">Show all properties</a></Empty>}
+      {results.map((p) => {
           const i = info.get(p.id)
           const prs = rooms.filter((r) => r.property_id === p.id)
           return (
@@ -129,6 +130,31 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
             </div>
           )
         })}
+      {hasMore && <a class="btn btn-outline finder-more" href={pageHref(pageNo + 1)} data-finder-more>Load next {FINDER_PAGE}</a>}
+    </div>
+  )
+  if (partial) return c.html(chunk)
+  return page(c, { title: 'Property finder', area: 'staff', active: 'finder' }, (
+    <div class="stack-lg">
+      <h1>Property finder</h1>
+      {(enquiryId || quoteId) && <p class="flash">Adding to {quoteId ? `quotation #${quoteId}` : `a new quotation for enquiry #${enquiryId}`}.</p>}
+      {invalidDates && <p class="flash flash-err" role="alert">Check-out must be after check-in, with valid dates.</p>}
+      <form method="get" action="/staff/finder" class="card staff-finder-filters" data-finder-form>
+        {enquiryId && <input type="hidden" name="enquiry" value={enquiryId} />}
+        {quoteId && <input type="hidden" name="quote" value={quoteId} />}
+        <Field label="Property name / location"><input type="search" name="kw" value={f.kw ?? ''} placeholder="e.g. Kacholam, Munnar, Vagamon" autocomplete="off" data-finder-keyword /></Field>
+        <Field label="Destination"><Select name="destination" value={f.destination} options={[['', 'Any destination'], ...dests.map((d) => [d, d] as [string, string])]} /></Field>
+        <Field label="Check-in"><input type="date" name="checkIn" value={f.checkIn ?? ''} /></Field>
+        <Field label="Check-out"><input type="date" name="checkOut" value={f.checkOut ?? ''} /></Field>
+        <Field label="Guests"><input type="number" name="guests" value={f.guests ?? ''} placeholder="Guests" min="1" /></Field>
+        <Field label="Property Type"><Select name="type" value={f.types?.[0]} options={[['', 'Any type'], ...PROPERTY_TYPES.map((t) => [t, STAY_TYPES[t]] as [string, string])]} /></Field>
+        <Field label="Feel / Preferences"><input name="q" value={f.q ?? ''} placeholder="quiet, lake view, kids…" /></Field>
+        <Field label="Sort By"><Select name="sort" value={f.sort} options={[['price_asc', 'Price ↑'], ['price_desc', 'Price ↓'], ['rating', 'Rating'], ['recommended', 'Best match']]} /></Field>
+        <button class="btn btn-sm">Search</button>
+      </form>
+      <form method="get" action="/staff/finder/compare" id="compare-form">
+        <div class="row-between"><span class="muted" data-finder-summary aria-live="polite">{summary}</span><button class="btn btn-sm btn-outline">Compare selected (max 3)</button></div>
+        <div data-finder-results>{chunk}</div>
       </form>
     </div>
   ))
