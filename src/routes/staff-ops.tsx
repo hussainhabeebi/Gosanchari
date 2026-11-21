@@ -12,7 +12,7 @@ import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, Empty, Field, Pager, Pill, Select, Stat, Table, Tabs } from '../views/components'
 import { permissionsFor, requirePerm, requireStaff } from '../lib/auth'
-import { all, enqueue, first, insertId, loadPricing, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
+import { all, enqueue, first, insertId, loadPricing, loadPricingMany, logActivity, monthOccupancy, placeholders, roomAvailability, run } from '../lib/db'
 import { searchProperties, destinations } from '../lib/properties'
 import { filtersFromQuery } from '../lib/search'
 import { combinedQuotationPrice, gstLabel, quotationInclusions, splitGuests } from '../lib/quotation-pricing'
@@ -52,15 +52,19 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
     ids.length ? all<RoomRow>(c.env, `SELECT * FROM rooms WHERE active = 1 AND property_id IN (${placeholders(ids.length)}) ORDER BY base_rate`, ...ids) : Promise.resolve([]),
     destinations(c.env),
   ])
+  // Dated searches need season pricing and availability: load both for every room at once (a handful of queries, not two per room).
+  const dated = !!(f.checkIn && f.checkOut)
+  const [pricingByRoom, avail] = dated
+    ? await Promise.all([loadPricingMany(c.env, ids), roomAvailability(c.env, ids, f.checkIn!, f.checkOut!)])
+    : [new Map(), null]
   const resolved = new Map<number, { staff: number | null; direct: number | null; net: number | null }>()
   for (const room of rooms) {
-    const pricing = await loadPricing(c.env, room.id)
+    const pricing = pricingByRoom.get(room.id)
     if (pricing && f.checkIn && f.checkOut) {
       const direct = calculatePrice({ room: pricing.room, seasons: pricing.seasons, checkIn: f.checkIn, checkOut: f.checkOut })
       resolved.set(room.id, { staff: staffRateForStay(pricing.room, pricing.seasons, f.checkIn, f.checkOut), direct: direct.errors.length ? null : Math.round(direct.subtotal / direct.nights), net: perms.view_net_rates ? netRateForStay(pricing.room, pricing.seasons, f.checkIn, f.checkOut) : null })
     } else resolved.set(room.id, { staff: room.staff_rate, direct: room.base_rate > 0 ? room.base_rate : null, net: perms.view_net_rates ? room.net_rate : null })
   }
-  const avail = f.checkIn && f.checkOut ? await roomAvailability(c.env, ids, f.checkIn, f.checkOut) : null
   const info = new Map(internal.map((i) => [i.id, i]))
   const addHref = (pid: number, rid: number) => {
     const p = new URLSearchParams({ property: String(pid), room: String(rid) })
@@ -96,7 +100,7 @@ opsRoutes.get('/staff/finder', requirePerm('manage_quotes'), async (c) => {
           return (
             <div class="card finder-row">
               <label class="check compare-check"><input type="checkbox" name="ids" value={p.id} data-max="3" /> Compare</label>
-              <img src={mediaUrl(p.photo, 240)} alt="" />
+              <img src={mediaUrl(p.photo, 240)} alt="" loading="lazy" decoding="async" width="240" height="160" />
               <div class="grow">
                 <div class="row-between"><a href={`/stay/${p.slug}`} target="_blank"><strong>{p.name}</strong></a><span>★ {p.rating_avg.toFixed(1)} · {p.type} · {p.destination}</span></div>
                 {i?.last_minute_note && <div class="small ok">⚡ {i.last_minute_note}</div>}

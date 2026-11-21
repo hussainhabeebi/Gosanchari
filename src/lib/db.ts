@@ -124,6 +124,21 @@ export async function loadPricing(env: Env, roomId: number): Promise<{ room: Roo
   return { room, seasons }
 }
 
+/** loadPricing for every active room of many properties in two queries (instead of two per room). */
+export async function loadPricingMany(env: Env, propertyIds: number[]): Promise<Map<number, { room: RoomRates & { name: string; capacity: number }; seasons: SeasonRate[] }>> {
+  const out = new Map<number, { room: RoomRates & { name: string; capacity: number }; seasons: SeasonRate[] }>()
+  if (!propertyIds.length) return out
+  const ph = placeholders(propertyIds.length)
+  const [rooms, seasons] = await Promise.all([
+    all<RoomRates & { name: string; capacity: number }>(env, `SELECT r.id, r.property_id, r.name, r.base_rate, r.weekend_rate, r.min_nights, r.capacity, r.units, r.staff_rate, r.net_rate, r.base_guests, r.extra_adult_rate, r.extra_child_rate, p.weekend_nights, p.rate_meal_plan FROM rooms r JOIN properties p ON p.id = r.property_id WHERE r.property_id IN (${ph}) AND r.active = 1`, ...propertyIds),
+    all<SeasonRate>(env, `SELECT id, property_id, room_id, name, start_date, end_date, rate, pct_adjust, min_nights, kind, staff_rate, net_rate, weekend_rate, staff_weekend_rate, net_weekend_rate, supplement, net_supplement, meal_plan, source, applicable_weekdays FROM season_rates WHERE property_id IN (${ph}) OR property_id IS NULL`, ...propertyIds),
+  ])
+  for (const room of rooms) {
+    out.set(room.id, { room, seasons: seasons.filter((s) => (s.property_id === room.property_id || s.property_id == null) && (s.room_id == null || s.room_id === room.id)) })
+  }
+  return out
+}
+
 // ---- Notifications to staff (WhatsApp, by role, per Settings) ----
 
 export async function notifyStaff(env: Env, event: 'new_enquiry' | 'booking' | 'quote_accepted' | 'refund_request' | 'low_review' | 'daily_summary' | 'rate_expiry' | 'voucher_request', text: string) {
