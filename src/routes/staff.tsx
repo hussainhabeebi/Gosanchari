@@ -27,7 +27,7 @@ export function canSeeEnquiry(u: SessionUser, p: Permissions, e: Pick<EnquiryRow
 }
 
 const LEAD_SQL = `SELECT e.*,
-  (SELECT MAX(view_count) FROM quotations q WHERE q.enquiry_id = e.id) AS quote_views,
+  (SELECT MAX(view_count) FROM quotations q WHERE q.enquiry_id = e.id AND q.archived_at IS NULL) AS quote_views,
   (SELECT COUNT(*) FROM bookings b WHERE b.user_id = e.user_id AND b.status IN ('confirmed','completed','checked_in') AND e.user_id IS NOT NULL) AS past_bookings
   FROM enquiries e`
 
@@ -50,7 +50,7 @@ staffRoutes.get('/staff', async (c) => {
       startUtc, startUtc, startUtc,
     ),
     all<{ id: number; reason: string; guest_name: string | null; phone: string | null; due_at: string; enquiry_id: number | null }>(
-      c.env, "SELECT * FROM tasks WHERE status = 'open' AND assigned_to = ? AND due_at < ? ORDER BY due_at LIMIT 10", u.id, new Date(Date.parse(today + 'T23:59:59+05:30')).toISOString(),
+      c.env, "SELECT * FROM tasks WHERE NOT EXISTS(SELECT 1 FROM quotations q WHERE q.id=tasks.quotation_id AND q.archived_at IS NOT NULL) AND status = 'open' AND assigned_to = ? AND due_at < ? ORDER BY due_at LIMIT 10", u.id, new Date(Date.parse(today + 'T23:59:59+05:30')).toISOString(),
     ),
     all<{ id: number; code: string; guest_name: string; guest_phone: string; check_in: string; property_name: string; status: string }>(
       c.env,
@@ -335,10 +335,10 @@ staffRoutes.get('/staff/enquiries/:id', requirePerm('manage_enquiries'), async (
     all<MessageRow & { staff_name: string | null }>(c.env, 'SELECT m.*, s.name AS staff_name FROM messages m LEFT JOIN users s ON s.id = m.user_id WHERE m.enquiry_id = ? ORDER BY m.id', e.id),
     all<{ id: number; code: string; property_name: string; check_in: string; total: number; status: string }>(c.env, "SELECT b.id, b.code, p.name AS property_name, b.check_in, b.total, b.status FROM bookings b JOIN properties p ON p.id = b.property_id WHERE (b.user_id = ? OR b.guest_phone = ?) ORDER BY b.check_in DESC LIMIT 10", e.user_id ?? -1, e.phone ?? '-'),
     all<{ id: number; note: string; kind: string; source: string; created_at: string }>(c.env, 'SELECT * FROM guest_notes WHERE (user_id = ? OR phone = ?) ORDER BY kind DESC, id DESC', e.user_id ?? -1, e.phone ?? '-'),
-    all<Pick<QuotationRow,'id'|'code'|'status'|'review_status'|'view_count'|'token'> & {total:number}>(c.env, `SELECT q.id, q.code, q.status, ${REVIEW_STATUS_SQL} AS review_status, q.view_count, q.token, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total FROM quotations q WHERE q.enquiry_id = ? ORDER BY q.id DESC`, e.id),
+    all<Pick<QuotationRow,'id'|'code'|'status'|'review_status'|'view_count'|'token'> & {total:number}>(c.env, `SELECT q.id, q.code, q.status, ${REVIEW_STATUS_SQL} AS review_status, q.view_count, q.token, (SELECT MIN(total) FROM quotation_options o WHERE o.quotation_id = q.id) AS total FROM quotations q WHERE q.enquiry_id = ? AND q.archived_at IS NULL ORDER BY q.id DESC`, e.id),
     all<{ id: number; code: string; status: string; created_at: string }>(c.env, 'SELECT id, code, status, created_at FROM enquiries WHERE phone = ? AND id != ? ORDER BY id DESC LIMIT 5', e.phone ?? '-', e.id),
     staffList(c),
-    all<{ id: number; reason: string; due_at: string }>(c.env, "SELECT id, reason, due_at FROM tasks WHERE enquiry_id = ? AND status = 'open' ORDER BY due_at", e.id),
+    all<{ id: number; reason: string; due_at: string }>(c.env, "SELECT id, reason, due_at FROM tasks WHERE enquiry_id = ? AND NOT EXISTS(SELECT 1 FROM quotations q WHERE q.id=tasks.quotation_id AND q.archived_at IS NOT NULL) AND status = 'open' ORDER BY due_at", e.id),
   ])
   const matches = await matchProperties(c.env, e, 3)
   const tags = parseJson<string[]>(e.tags, [])
@@ -702,7 +702,7 @@ staffRoutes.get('/staff/tasks', requirePerm('manage_enquiries'), async (c) => {
   const endToday = new Date(Date.parse(todayIST() + 'T23:59:59+05:30')).toISOString()
   const rows = await all<{ id: number; reason: string; guest_name: string | null; phone: string | null; due_at: string; draft_message: string | null; enquiry_id: number | null; booking_id: number | null; quotation_id: number | null; staff_name: string | null }>(
     c.env,
-    `SELECT t.*, s.name AS staff_name FROM tasks t LEFT JOIN users s ON s.id = t.assigned_to WHERE t.status = 'open' ${mine ? 'AND t.assigned_to = ?' : ''} ORDER BY t.due_at LIMIT 300`,
+    `SELECT t.*, s.name AS staff_name FROM tasks t LEFT JOIN users s ON s.id = t.assigned_to WHERE NOT EXISTS(SELECT 1 FROM quotations q WHERE q.id=t.quotation_id AND q.archived_at IS NOT NULL) AND t.status = 'open' ${mine ? 'AND t.assigned_to = ?' : ''} ORDER BY t.due_at LIMIT 300`,
     ...(mine ? [u.id] : []),
   )
   const groups: [string, typeof rows][] = [

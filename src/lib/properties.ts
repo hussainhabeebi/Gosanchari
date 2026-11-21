@@ -11,10 +11,12 @@ import type { NearbyPlace, PropertyCard, PropertyRow, RoomRow } from './types'
 import { addDays, eachNight, nightsBetween, nowIso, parseJson, sha256Hex, todayIST } from './util'
 
 const CARD_SQL = `
-SELECT p.id, p.slug, p.name, COALESCE(p.stay_type, p.type) AS type, p.destination, p.rating_avg, p.rating_count, p.facilities, p.meal_plans,
+SELECT p.id, p.slug, p.name, COALESCE(p.stay_type, p.type) AS type, p.destination, p.rating_avg, p.rating_count, p.facilities, p.meal_plans, p.rate_meal_plan,
        p.lat, p.lng, p.featured, p.pet_friendly, p.family_friendly, p.created_at,
        (SELECT MIN(base_rate) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS from_price,
        (SELECT COALESCE(SUM(capacity * units), 0) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS max_guests,
+       (SELECT COALESCE(SUM(units), 0) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS total_rooms,
+       (SELECT MIN(COALESCE(base_guests, capacity)) FROM rooms r WHERE r.property_id = p.id AND r.active = 1) AS min_guests,
        ${COVER_PHOTO_SQL} AS photo
 FROM properties p`
 

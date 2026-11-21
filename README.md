@@ -46,13 +46,19 @@ Phone-OTP login shows the code on screen when WhatsApp isn't configured (develop
 | Admin | admin@gosanchari.com |
 | Manager | manager@gosanchari.com |
 | Sales | priya@gosanchari.com, arjun@gosanchari.com |
-| Accounts | accounts@gosanchari.com |
+| Data Entry (stored role `accounts`) | accounts@gosanchari.com |
 
 Guests log in with any phone number (OTP). Demo quote link: `/q/demo-quote-token-1234567890`.
 
 **Booking confirmation voucher (after the advance payment):** a quotation is not a confirmation. Once the guest's advance is recorded on the booking, staff fill in the kids' ages and any remarks and click *Send voucher for admin approval*. Admins approve it in *Bookings → Voucher approvals*, adding their own remarks, or send it back with a reason. The approved voucher, headed **Booking Confirmed**, appears in the requesting staff member's *Bookings → My vouchers* (and on WhatsApp) with a PDF download. It shows the guest, kids' ages, resort name, contact number and location, dates, room categories, amenities, payments, total, advance paid, the balance payable at check-in, and all remarks. Approved vouchers are frozen snapshots; to change one, send an updated voucher for approval. Only admins can approve by default (*Approve booking confirmation vouchers* in Staff & roles).
 
 **Combining room categories in one quote option:** under *Rooms*, click *+ Add another room category* (e.g. 4 Standard Non-AC + 2 Standard AC = 6 rooms). Each category is priced by its own rates and GST slab and the option shows the combined total. Guests are shared across the rooms, and the discount is checked against the combined Staff Rate floor. Converting such a quote makes one booking for the combined price and also reserves the extra categories' rooms (released if the booking is cancelled). To change a combined booking's dates, cancel it and send a new quote.
+
+**Sharing properties with external services (e.g. LeadVyne):** *Admin → API & integrations* (needs *Manage settings*). Two ways to connect:
+- **Push:** enter the service's endpoint URL and API token. We POST `{ "source": "gosanchari", "event": "properties.sync", "properties": [...] }` (batches of 20) with `Authorization: Bearer <token>` or `X-API-Key: <token>`. Send all or one property on demand, and optionally every day at 07:00 IST.
+- **Pull:** create an API key and give the service `GET /api/v1/properties` (`?page`, `?limit` ≤ 50, `?destination`, `?updated_since`) and `GET /api/v1/properties/<id or slug>`, called with `Authorization: Bearer <key>`. Keys are stored hashed and can be revoked.
+
+Each property includes prices (from-price, per-room base/weekend/extra-guest rates, upcoming season rates), absolute photo URLs (cover, gallery, per room), videos, location (address, lat/lng, map link), rooms, facilities, meal plans, dining, policies, add-ons and the stay page link. Only live properties are shared, and never owner contacts, B2B net/staff rates, commission or internal notes.
 
 **Booking flow:** enquiry → staff quote (WhatsApp link) → guest clicks *Accept* → staff get an alert and a task →
 *Convert to booking* (confirms it, blocks the rooms and sends the guest a WhatsApp confirmation) → staff *Record payment* on the booking.
@@ -186,6 +192,6 @@ Ask AI safety:
 | Admin | Everything |
 | Manager | Everything except staff management and settings; 15% discount limit |
 | Sales | Enquiries, quotes and bookings; no net rates; 5% discount limit |
-| Accounts | Payments, refunds, reports |
+| Data Entry (stored role `accounts`, formerly Accounts) | B2B rates page (view, enter, edit), plus the former Accounts access: payments, refunds, reports |
 
-Admins can change these defaults in *Admin → Staff & roles*. Discounts above a staff member's limit wait for approval in *All quotations*. Cancellations and date changes by staff without the approval permission become requests. Price changes, discounts, cancellations, refunds, deletions, exports, logins and settings changes go to the activity log.
+Admins can change these defaults in *Admin → Staff & roles*, including the three B2B rate permissions (view, enter new, change existing) used by *Properties → B2B rates*. Give every staff member their own login there; never share the admin login. Discounts above a staff member's limit wait for approval in *All quotations*. Cancellations and date changes by staff without the approval permission become requests. Price changes, discounts, cancellations, refunds, deletions, exports, logins and settings changes go to the activity log.

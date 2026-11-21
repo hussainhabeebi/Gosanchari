@@ -97,7 +97,7 @@ describe('unsaved quotation recalculation', () => {
       const anonymous=new Hono<any>().use('*',async(c,next)=>{c.set('user',null);await next()}).route('/',opsRoutes);
       expect((await anonymous.request(f.url+'/recalculate',{method:'POST',body:f.form()},f.env)).status).not.toBe(200);
       const staff=await (await f.app.request(f.url+'/recalculate',{method:'POST',body:f.form()},f.env)).text();expect(staff).not.toContain('B2B');expect(staff).not.toContain('1,234');
-      f.db.prepare("UPDATE quotations SET status='sent' WHERE id=?").run(f.qid);
+      f.db.prepare("UPDATE quotations SET status='accepted' WHERE id=?").run(f.qid);
       expect((await f.app.request(f.url+'/recalculate',{method:'POST',body:f.form()},f.env)).status).toBe(409);
     }finally{f.db.close()}
     const management=fixture('admin');try{const result=await(await management.app.request(management.url+'/recalculate',{method:'POST',body:management.form()},management.env)).text();expect(result).toContain('B2B');expect(result).toContain('1,234')}finally{management.db.close()}

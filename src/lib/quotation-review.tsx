@@ -19,9 +19,8 @@ export const REVIEW_STATUS_SQL = `CASE WHEN q.status='pending_approval' THEN 'pe
  ELSE 'none' END FROM activity_log a WHERE a.entity='quotation' AND a.entity_id=CAST(q.id AS TEXT)
  AND a.action IN (${REVIEW_ACTIONS}) ORDER BY a.id DESC LIMIT 1), 'none') END`
 export function QuotationStatus({ q }: { q: Pick<QuotationRow,'status'|'review_status'> }) {
-  if (q.review_status === 'pending') return <span class="pill pill-pending_approval">Pending Approval</span>
-  if (q.review_status === 'approved') return <><span class="pill pill-live">Quotation Approved</span>{q.status !== 'draft' && <Pill s={q.status} />}</>
-  if (q.review_status === 'rejected') return <span class="pill pill-declined">Rejected</span>
+  // Legacy review decisions stay in history; they no longer gate issuing an offer.
+  if (q.status === 'pending_approval' || q.status === 'changes_requested') return <Pill s="draft" />
   return <Pill s={q.status} />
 }
 export async function quotationReviewHistory(env: AppEnv['Bindings'], id: number) {
@@ -32,8 +31,8 @@ export async function quotationReviewHistory(env: AppEnv['Bindings'], id: number
 export function ReviewHistory({ history }: { history: Awaited<ReturnType<typeof quotationReviewHistory>> }) {
   if (!history.length) return null
   const labels: Record<string,string> = {'quote.approval_requested':'Pending Approval','quote.discount_approved':'Quotation Approved','quote.review_rejected':'Rejected','quote.review_reset':'Reopened / saved to draft','quote.admin_edited':'Admin edits saved'}
-  return <section class="card stack" data-quotation-review-history><h2>Quotation approval history</h2>{history.map(row => {
+  return <section class="card stack" data-quotation-review-history><h2>Historical quotation approval history</h2>{history.map(row => {
     const details = parseJson<{reason?:string}>(row.details,{})
     return <p>{labels[row.action]} · {row.name ?? 'Recorded reviewer'} · {fmtDateTime(row.created_at)}{details.reason && <><br />Reason: {details.reason}</>}</p>
-  })}<p class="small muted">Quotation approval does not verify payment, confirm resort availability or issue a booking voucher.</p></section>
+  })}<p class="small muted">Historical decisions are retained. Only final booking approval verifies payment and availability and issues a booking voucher.</p></section>
 }

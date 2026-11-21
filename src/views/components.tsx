@@ -39,6 +39,35 @@ export const Pill: FC<{ s: string }> = ({ s }) => <span class={`pill pill-${s.re
 
 export const PinIcon = () => raw('<svg class="ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>')
 
+/** Shown beneath a room rate when the property's rates are on the CP (breakfast included) plan. */
+export const PlanNote: FC<{ plan?: string | null }> = ({ plan }) =>
+  (plan ?? '').toUpperCase() === 'CP' ? <div class="small rate-plan">Room + Breakfast</div> : <></>
+
+/** Display-only comparison; never used as a payable or historical/original price. */
+export const ComparisonRate: FC<{ value: number }> = ({ value }) => Number.isFinite(value) && value > 0
+  ? <span class="comparison-rate" title="Calculated comparison: 5% above the current selling rate, not a previous price."><s aria-label={`Calculated comparison rate (+5%): ${money(value * 1.05)}`}>{money(value * 1.05)}</s></span>
+  : null
+
+/** Compact public amenity list; preserve custom labels and configured icons. */
+export const AmenityList: FC<{ items: string[]; label: string; labels?: Record<string, string> }> = ({ items, label, labels = FACILITIES }) => items.length > 0 ? (
+  <ul class="amenity-list" aria-label={label} style={`--amenity-rows:${Math.ceil(items.length / 2)}`}>
+    {items.map(key => <li><span class="amenity-icon" aria-hidden="true">{iconFor(key)}</span><span class="amenity-label">{labels[key] ?? key}</span></li>)}
+  </ul>
+) : null
+
+/** "9 rooms · 2–30 guests": total rooms, the smallest booking (one room's included guests) and everyone the property can host. */
+export const CapacityFacts: FC<{ rooms: number; min?: number | null; max: number; class?: string }> = ({ rooms, min, max, class: cls }) => {
+  if (!(rooms > 0) || !(max > 0)) return null
+  const range = min && min > 0 && min < max ? `${min}–${max}` : `Up to ${max}`
+  const roomsText = `${rooms} room${rooms === 1 ? '' : 's'}`, guestsText = `${range} guest${max === 1 ? '' : 's'}`
+  return (
+    <div class={`capacity-facts ${cls ?? ''}`} aria-label={`${roomsText}, ${guestsText}`} title="Rooms across all categories · guests from one room up to the whole property">
+      <span><span aria-hidden="true">🛏️</span> <strong>{rooms}</strong> room{rooms === 1 ? '' : 's'}</span>
+      <span><span aria-hidden="true">👥</span> <strong>{range}</strong> guest{max === 1 ? '' : 's'}</span>
+    </div>
+  )
+}
+
 export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform?: boolean; reasons?: string[] }> = ({ p, saved, qs, transform, reasons }) => {
   const fac = parseJson<string[]>(p.facilities, []).slice(0, 3)
   const price = p.stay_price ?? p.from_price
@@ -57,13 +86,15 @@ export const PropertyCard: FC<{ p: Card; saved?: boolean; qs?: string; transform
           <Stars value={p.rating_avg} count={p.rating_count} />
         </div>
         <div class="muted small">📍 {p.destination}</div>
+        <CapacityFacts rooms={p.total_rooms ?? 0} min={p.min_guests} max={p.max_guests} />
         {reasons && reasons.length > 0
           ? <div class="match-why small">{reasons.map((r) => <span>✓ {r}</span>)}</div>
           : <div class="chips">{fac.map((f) => <span class="chip">{FACILITY_ICONS[f] ?? '•'} {FACILITIES[f] ?? f}</span>)}</div>}
         <div class="row-between pcard-foot">
           <div>
             {price > 0 ? <><span class="muted small">{p.stay_price ? 'avg / night' : 'from / night'}</span>
-            <div class="price">{money(price)}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
+            <ComparisonRate value={price} /><div class="price">{money(price)}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
+            <PlanNote plan={p.rate_meal_plan} />
             {p.stay_total != null && <div class="muted small">{money(p.stay_total)} total incl. GST</div>}
           </div>
           <a class="btn btn-sm btn-outline" data-stay-preview href={`/stay/${p.slug}${qs ? '?' + qs : ''}`}>View Details →</a>
