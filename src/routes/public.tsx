@@ -16,7 +16,8 @@ import { extrasLabel, COVER_ORDER, COVER_PHOTO_SQL, dining as readDining, PHOTO_
 import type { AppEnv } from '../env'
 import { page } from '../views/layout'
 import { AiNote, AmenityList, CapacityFacts, Empty, Field, jsonScript, LeafletHead, PlanNote, PropertyCard, Select, Stars, Turnstile } from '../views/components'
-import { all, enqueue, findOrCreateGuest, first, insertId, logActivity, notifyStaff, run } from '../lib/db'
+import { all, enqueue, findOrCreateGuest, first, insertId, loadPricingMany, logActivity, notifyStaff, run } from '../lib/db'
+import { displayRate, type DisplayRate } from '../lib/room-display-rates'
 import { cardsByIds, closeMatches, destinations, featuredCards, searchProperties, similarProperties, smartSearch } from '../lib/properties'
 import { FACILITIES, filtersFromQuery, filtersToParams, MEAL_PLANS, PROPERTY_TYPES, type SearchFilters } from '../lib/search'
 import { getContent, getSettings } from '../lib/settings'
@@ -85,9 +86,9 @@ publicRoutes.get('/', async (c) => {
           <div class="hero-copy"><span class="eyebrow">EXPLORE · STAY · UNWIND</span><h1>Discover Kerala,<em>Your Way</em></h1><p>Handpicked stays, scenic destinations and unforgettable<br /> experiences across Kerala.</p></div>
           <form class="searchbox reference-search" method="get" action="/search" data-stay-search>
             <div class="field destination-autocomplete" data-destination-autocomplete>
-              <label class="field-label" for="home-destination">⌖ Destination</label>
-              <input id="home-destination" name="destination" type="text" maxlength={100} placeholder="Where would you like to stay?" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="destination-options" aria-expanded="false" />
-              <div id="destination-options" class="destination-options" role="listbox" aria-label="Destinations" hidden></div>
+              <label class="field-label" for="home-destination">⌖ Resort, place or destination</label>
+              <input id="home-destination" name="destination" type="text" maxlength={100} placeholder="Search resort name, place or destination" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="destination-options" aria-expanded="false" />
+              <div id="destination-options" class="destination-options" role="listbox" aria-label="Destinations and stays" hidden></div>
               <span class="sr-only" role="status" data-destination-status></span>
             </div>
             <Field label="▣ Check-in"><input type="date" name="checkIn" min={today} /></Field>
@@ -161,6 +162,22 @@ publicRoutes.get('/api/public/destinations', async (c) => {
   return c.json(matchingDestinations(catalog, (c.req.query('q') || '').slice(0, 100)).slice(0, 8).map(d => d.label))
 })
 
+// Hero suggestions: destinations plus matching live stays (name, place and page link only; never rates or owner data).
+publicRoutes.get('/api/public/suggest', async (c) => {
+  const q = (c.req.query('q') || '').replace(/\s+/g, ' ').trim().slice(0, 80)
+  const catalog = await publicDestinations(c.env)
+  const destinationsFound = matchingDestinations(catalog, q).slice(0, q ? 5 : 8).map(d => d.label)
+  let stays: { name: string; destination: string; slug: string }[] = []
+  if (q.length >= 2) {
+    const words = q.split(' ').slice(0, 5)
+    const where = words.map(() => "(p.name LIKE ? ESCAPE '\\' OR p.destination LIKE ? ESCAPE '\\' OR COALESCE(p.address, '') LIKE ? ESCAPE '\\')").join(' AND ')
+    const binds = words.flatMap(w => { const like = `%${w.replace(/[\\%_]/g, m => '\\' + m)}%`; return [like, like, like] })
+    stays = await all<{ name: string; destination: string; slug: string }>(c.env, `SELECT p.name, p.destination, p.slug FROM properties p WHERE p.status = 'live' AND ${where} ORDER BY (p.name LIKE ? ESCAPE '\\') DESC, p.featured DESC, p.rating_avg DESC, p.name LIMIT 6`, ...binds, `${q.replace(/[\\%_]/g, m => '\\' + m)}%`)
+  }
+  c.header('Cache-Control', 'public, max-age=60')
+  return c.json({ destinations: destinationsFound, stays })
+})
+
 // ---------- 2. Search results ----------
 publicRoutes.get('/search', async (c) => {
   const aiText = c.req.query('ai')?.trim().slice(0, 200)
@@ -180,6 +197,8 @@ publicRoutes.get('/search', async (c) => {
   const catalog = await publicDestinations(c.env)
   const matches = f.destination ? matchingDestinations(catalog, f.destination) : []
   if (matches.length === 1) f.destination = matches[0].label
+  // Anything else typed in the hero box (a resort name, a place, an address) searches by keyword.
+  else if (f.destination && !matches.length) { f.kw = f.destination; f.destination = undefined }
   const aliases = matches.flatMap(d => d.aliases)
   const [results, saved] = await Promise.all([searchProperties(c.env, f, 60, false, aliases), savedIds(c)])
   const dests = catalog.map(d => d.label)
@@ -201,6 +220,7 @@ publicRoutes.get('/search', async (c) => {
     return `/search?${p}`
   }
   const chips: [string, string][] = [
+    ...(f.kw ? [[`🔎 ${f.kw}`, without((k) => k === 'kw')] as [string, string]] : []),
     ...(f.destination ? [[`📍 ${f.destination}`, without((k) => k === 'destination')] as [string, string]] : []),
     ...(f.checkIn && f.checkOut ? [[`📅 ${fmtShortDate(f.checkIn)} – ${fmtShortDate(f.checkOut)}`, without((k) => k === 'checkIn' || k === 'checkOut')] as [string, string]] : []),
     ...(f.guests ? [[`👥 ${f.guests} guest${f.guests === 1 ? '' : 's'}`, without((k) => k === 'guests')] as [string, string]] : []),
@@ -236,12 +256,13 @@ publicRoutes.get('/search', async (c) => {
   const canonicalSearch = new URL('/search', c.env.SITE_URL)
   if (f.destination) canonicalSearch.searchParams.set('destination', f.destination)
   return page(c, { title: f.destination ? `Stays in ${f.destination}` : 'Find a stay', description: `Homestays, villas, resorts and houseboats${f.destination ? ' in ' + f.destination : ' in Kerala'}.`, canonical: canonicalSearch.href, head: view === 'map' ? <LeafletHead /> : undefined }, (
-    <><section class="destination-hero"><div class="wrap"><span class="eyebrow">DESTINATION</span><h1>{f.destination || 'Kerala'}</h1><p>MISTY MOUNTAINS, ENDLESS MEMORIES</p></div></section><div class="wrap search-page">
+    <><section class="destination-hero"><div class="wrap"><span class="eyebrow">DESTINATION</span><h1>{f.destination || (f.kw ? `“${f.kw}”` : 'Kerala')}</h1><p>MISTY MOUNTAINS, ENDLESS MEMORIES</p></div></section><div class="wrap search-page">
       <input type="checkbox" id="filters-toggle" class="nav-toggle" />
       <aside class="filters">
         <label for="filters-toggle" class="filters-close">✕ Close</label>
         <form method="get" action="/search" class="stack">
           <h3>Filter by</h3>
+          <Field label="Search"><input type="search" name="kw" value={f.kw ?? ''} maxlength={80} placeholder="Resort name or place" /></Field>
           <Field label="Location">
             <Select name="destination" value={f.destination} options={[['', 'Anywhere in Kerala'], ...dests.map((d) => [d, d] as [string, string])]} />
           </Field>
@@ -357,6 +378,10 @@ publicRoutes.get('/stay/:slug', async (c) => {
     similarProperties(c.env, p.id, 4),
     savedIds(c),
   ])
+  const pricing = await loadPricingMany(c.env, [p.id])
+  const today = todayIST()
+  const rates = new Map(rooms.map((r) => { const x = pricing.get(r.id); return [r.id, x ? displayRate(x.room, x.seasons, today) : undefined] as const }))
+  const fromAll = [...rates.values()].map((x) => x?.direct ?? 0).filter((v) => v > 0)
   const photos = media.filter((m) => m.media_type !== 'video' && m.r2_key).sort((a, b) => COVER_ORDER.indexOf(a.category) - COVER_ORDER.indexOf(b.category) || a.sort - b.sort)
   // Promote the existing exterior cover once; retain all other photo ordering.
   const facadeIndex = photos.findIndex((photo) => photo.category === 'facade')
@@ -468,7 +493,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
                       <AmenityList items={am} label="Room amenities" labels={{ ...FACILITIES, ...ROOM_AMENITIES }} />
                     </div>
                     <div class="room-price" data-preview-room={preview ? r.id : undefined}>
-                      {!preview && isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small" data-preview-room-price={preview ? '' : undefined}>For a personalised offer, fill in your details below and enquire.</p>}
+                      {!preview ? <RoomRate rate={rates.get(r.id)} staffView={isStaffUser} /> : <p class="muted small" data-preview-room-price="">For a personalised offer, fill in your details below and enquire.</p>}
                       <PlanNote plan={p.rate_meal_plan} />
                       <button type="button" class="btn btn-sm" data-pick-room={r.id}>{preview ? 'Get Quote' : 'Book'}</button>
                     </div>
@@ -656,7 +681,7 @@ publicRoutes.get('/stay/:slug', async (c) => {
         </section>
       )}
       <div class="mobile-book-bar">
-        <div class="muted small">For a personalised offer, fill in your details below and enquire.</div>
+        <div class="muted small">{fromAll.length ? <>From <strong>{money(Math.min(...fromAll))}</strong> per night</> : 'For a personalised offer, fill in your details below and enquire.'}</div>
         <a class="btn" href="#book">Enquire</a>
       </div>
       {jsonScript('ld', ld, 'application/ld+json')}
@@ -1074,6 +1099,18 @@ function ShareButtons({ url, title }: { url: string; title: string }) {
   )
 }
 
+/** Room price shown on property and room pages: Direct (guest) rate for everyone, plus the Staff rate for logged-in staff. */
+function RoomRate({ rate, staffView }: { rate: DisplayRate | undefined; staffView: boolean }) {
+  return (
+    <>
+      {rate?.direct
+        ? <><div class="price">{rate.from ? <small class="muted">from </small> : null}{money(rate.direct)}</div><div class="muted small">per night{rate.from ? '' : ' tonight'} · final price depends on your dates</div></>
+        : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
+      {staffView && <div class="small internal">Staff rate: {rate?.staff ? money(rate.staff) : 'Not supplied'}</div>}
+    </>
+  )
+}
+
 // ---------- Room category page (shareable link: staff send it to guests on WhatsApp) ----------
 publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
   const p = await first<PropertyRow>(c.env, 'SELECT * FROM properties WHERE slug = ?', c.req.param('slug'))
@@ -1083,6 +1120,8 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
   if (!p || !r || ((p.status !== 'live' || !r.active) && !isStaffUser)) return page(c, { title: 'Not found' }, <div class="wrap section"><Empty><h2>This room is not available</h2><a href="/search">Browse stays</a></Empty></div>, 404)
   const settings = await getSettings(c.env)
   const photos = await all<PhotoRow>(c.env, "SELECT * FROM property_photos WHERE property_id = ? AND room_id = ? AND media_type = 'image' AND r2_key != '' ORDER BY sort, id", p.id, r.id)
+  const roomPricing = (await loadPricingMany(c.env, [p.id])).get(r.id)
+  const roomRate = roomPricing ? displayRate(roomPricing.room, roomPricing.seasons, todayIST()) : undefined
   const am = parseJson<string[]>(r.facilities, [])
   const t = settings.images_transform
   return page(c, {
@@ -1099,7 +1138,7 @@ publicRoutes.get('/stay/:slug/room/:roomId', async (c) => {
           <ShareButtons url={new URL(`/stay/${p.slug}/room/${r.id}`, c.env.SITE_URL).href} title={`${r.name} · ${p.name}, ${p.destination}`} />
         </div>
         <div class="room-price">
-          {isStaffUser && r.base_rate > 0 ? <><div class="price">{money(r.base_rate)}</div><div class="muted small">per night{r.weekend_rate && r.weekend_rate !== r.base_rate ? ` · weekends ${money(r.weekend_rate)}` : ''}</div></> : <p class="muted small">For a personalised offer, fill in your details below and enquire.</p>}
+          <RoomRate rate={roomRate} staffView={isStaffUser} />
           <PlanNote plan={p.rate_meal_plan} />
         </div>
       </div>

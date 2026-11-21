@@ -1320,7 +1320,7 @@ function gsPublicComparisonRate(value) {
   if (!root) return;
   var input = root.querySelector('input'), list = root.querySelector('[role="listbox"]');
   var status = root.querySelector('[data-destination-status]');
-  var active = -1, labels = [], generation = 0, timer, controller;
+  var active = -1, labels = [], stays = [], generation = 0, timer, controller;
   // Escape hero stacking/clipping while keeping the combobox association by ID.
   document.body.appendChild(list);
   function position() {
@@ -1350,6 +1350,14 @@ function gsPublicComparisonRate(value) {
   }
   function select(index) {
     if (!labels[index]) return;
+    var stay = stays[index];
+    if (stay) {
+      // A stay suggestion opens that property's page, carrying the dates and guests already entered.
+      var form = root.closest ? root.closest('form') : null, params = new URLSearchParams();
+      if (form) ['checkIn', 'checkOut', 'guests', 'children'].forEach(function (name) { var field = form.querySelector('[name="' + name + '"]'); if (field && field.value) params.set(name, field.value); });
+      close(); window.location.href = '/stay/' + encodeURIComponent(stay.slug) + (params.toString() ? '?' + params : '');
+      return;
+    }
     input.value = labels[index]; close(); input.focus();
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -1366,24 +1374,30 @@ function gsPublicComparisonRate(value) {
   async function suggest(version) {
     controller = new AbortController();
     try {
-      var response = await fetch('/api/public/destinations?q=' + encodeURIComponent(input.value), { signal: controller.signal });
+      var response = await fetch('/api/public/suggest?q=' + encodeURIComponent(input.value), { signal: controller.signal });
       if (!response.ok) throw new Error('Suggestions unavailable');
       var values = await response.json();
       if (version !== generation || document.activeElement !== input) return;
-      labels = values; active = -1; list.replaceChildren();
+      // Destinations first, then matching stays (a plain list means destinations only).
+      var places = Array.isArray(values) ? values : (values.destinations || []);
+      var found = Array.isArray(values) ? [] : (values.stays || []);
+      labels = places.concat(found.map(function (s) { return s.name + ' · ' + s.destination; }));
+      stays = places.map(function () { return null; }).concat(found);
+      active = -1; list.replaceChildren();
       input.removeAttribute('aria-activedescendant');
       labels.forEach(function (label, index) {
         var option = document.createElement('div');
         option.id = 'destination-option-' + index;
         option.setAttribute('role', 'option'); option.setAttribute('aria-selected', 'false');
         option.textContent = label;
+        if (stays[index]) option.className = 'suggest-stay';
         option.addEventListener('pointerdown', function (event) { event.preventDefault(); });
         option.addEventListener('click', function () { select(index); });
         list.appendChild(option);
       });
       if (!labels.length) {
         var empty = document.createElement('div');
-        empty.className = 'destination-empty'; empty.textContent = 'No matching destinations. Try another location.';
+        empty.className = 'destination-empty'; empty.textContent = 'No matching destinations or stays. Press Find My Stay to search all words.';
         list.appendChild(empty);
       }
       list.hidden = false; position(); input.setAttribute('aria-expanded', String(!list.hidden));
